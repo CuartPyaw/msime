@@ -100,9 +100,9 @@ import {
   ClipboardHistoryStore, ClipboardHistoryItem, ClipboardHistoryError, ClipboardFailure
 } from './clipboard/ClipboardHistoryStore';
 import { ClipboardHistoryPreferencePolicy } from './clipboard/ClipboardHistoryPreferencePolicy';
-import { CloudClipboardClient } from './clipboard/CloudClipboardClient';
+import { CloudClipboardBoundListing, CloudClipboardClient } from './clipboard/CloudClipboardClient';
 import {
-  CloudClipboardListing, CloudClipboardPolicy, CloudClipboardSendOutcome
+  CloudClipboardPolicy, CloudClipboardSendOutcome
 } from './clipboard/CloudClipboardPolicy';
 import {
   DEFAULT_VOICE_INPUT_CONFIGURATION, VoiceInputConfiguration, VoiceInputConfigurationPolicy
@@ -5120,14 +5120,20 @@ export class KeyboardSession implements HardwareKeyTarget {
    *
    * Null when the listing no longer belongs to the focused editor: the field changed while the request was out, or it is one that may not see cloud items. A late answer for another field is dropped rather than shown, since tapping one of its items would paste into a field it was never fetched for.
    */
-  async cloudClipboardItems(): Promise<CloudClipboardListing | null> {
+  async cloudClipboardItems(): Promise<CloudClipboardBoundListing | null> {
     const editor: number = this.attributeGeneration;
     if (!this.cloudClipboardVisible()) return null;
-    const listing: CloudClipboardListing = await this.cloudClipboard().list();
+    const client: CloudClipboardClient = this.cloudClipboard();
+    const listing: CloudClipboardBoundListing | null = await client.list();
+    if (listing === null || (listing.binding !== null && !(await client.matches(listing.binding)))) return null;
     if (!CloudClipboardPolicy.current(editor, this.attributeGeneration) || !this.cloudClipboardVisible()) {
       return null;
     }
     return listing;
+  }
+
+  async cloudClipboardBindingCurrent(binding: string): Promise<boolean> {
+    return await this.cloudClipboard().matches(binding);
   }
 
   /** Inserts a cloud item the way a local history entry is inserted, but only into the editor its listing was fetched for. */
@@ -5140,12 +5146,12 @@ export class KeyboardSession implements HardwareKeyTarget {
   }
 
   /** Uploads one local history entry the user chose; nothing reaches the cloud clipboard any other way. */
-  async sendToCloudClipboard(text: string): Promise<CloudClipboardSendOutcome> {
+  async sendToCloudClipboard(text: string, binding: string): Promise<CloudClipboardSendOutcome> {
     // 面板只在云端那一半可见时提供「发到云剪贴板」；如果隐私模式在提供之后才开启，这里守住这条线。
     if (!this.cloudClipboardVisible()) {
       return CloudClipboardSendOutcome.FAILED;
     }
-    return await this.cloudClipboard().add(text);
+    return await this.cloudClipboard().add(text, binding);
   }
 
   private cloudClipboard(): CloudClipboardClient {
