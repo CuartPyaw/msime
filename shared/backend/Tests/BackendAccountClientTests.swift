@@ -58,6 +58,53 @@ private final class AuthInputProtocol: URLProtocol {
   }
   override func stopLoading() {}
 }
+
+private final class ClipboardRetryStorage: BackendSessionStorage, @unchecked Sendable {
+  private let lock = NSLock()
+  private var value: BackendSavedSession?
+
+  init(_ value: BackendSavedSession?) { self.value = value }
+  func load() throws -> BackendSavedSession? { lock.lock(); defer { lock.unlock() }; return value }
+  func save(_ session: BackendSavedSession) throws { lock.lock(); defer { lock.unlock() }; value = session }
+  func clear() throws { lock.lock(); defer { lock.unlock() }; value = nil }
+}
+
+private final class ClipboardRetryProtocol: URLProtocol {
+  static let oldToken = String(repeating: "a", count: 64)
+  static let newToken = String(repeating: "b", count: 64)
+
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    let path = request.url!.path
+    let authorization = request.value(forHTTPHeaderField: "Authorization") ?? ""
+    let status: Int
+    let body: String
+    switch path {
+    case "/v1/users/me/clipboard":
+      if authorization == "Bearer \(Self.newToken)" {
+        status = 200
+        body = #"{"enabled":true,"items":[]}"#
+      } else {
+        status = 401
+        body = #"{"error":{"code":"invalid_credentials"}}"#
+      }
+    case "/v1/auth/refresh":
+      status = 200
+      let refresh = String(repeating: "c", count: 64)
+      body = "{\"access_token\":\"\(Self.newToken)\",\"refresh_token\":\"\(refresh)\",\"token_type\":\"Bearer\",\"expires_in\":900,\"user\":{\"id\":\"synthetic-user\",\"display_name\":\"示例\",\"created_at\":\"2026-09-08\"}}"
+    default:
+      status = 404
+      body = #"{"error":{"code":"not_found"}}"#
+    }
+    let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil,
+      headerFields: ["Content-Type": "application/json"])!
+    client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: Data(body.utf8))
+    client?.urlProtocolDidFinishLoading(self)
+  }
+  override func stopLoading() {}
+}
 private final class OversizedAccountProtocol: URLProtocol {
   override class func canInit(with request: URLRequest) -> Bool { request.url?.path == "/v1/auth/login" }
   override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -332,6 +379,22 @@ final class BackendAccountClientTests: XCTestCase {
     XCTAssertEqual(page.items.first?.text, search)
     try await client().setClipboardEnabled(false, token: "session")
     try await client().deleteClipboard(token: "session")
+  }
+
+  func testClipboardSessionRetriesRejectedAccessToken() async throws {
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [ClipboardRetryProtocol.self]
+    let client = BackendAccountClient(configuration: configuration)
+    let tokens = BackendAccountClient.Tokens(
+      access_token: ClipboardRetryProtocol.oldToken,
+      refresh_token: String(repeating: "d", count: 64), token_type: "Bearer", expires_in: 900,
+      user: .init(id: "synthetic-user", display_name: "示例", created_at: "2026-09-08"))
+    let storage = ClipboardRetryStorage(try BackendSavedSession.forTokens(tokens))
+    let session = BackendAccountSession(api: client, storage: storage,
+                                        refreshLock: BackendProcessRefreshLock())
+
+    let page = try await client.clipboard(session: session)
+    XCTAssertTrue(page.enabled)
   }
   func testClipboardSearchRejectsOversizedAndUnsafeValues() async throws {
     for search in [String(repeating: "a", count: 1025), "safe\u{0007}query"] {
