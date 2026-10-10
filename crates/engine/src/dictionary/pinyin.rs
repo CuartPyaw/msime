@@ -499,20 +499,21 @@ impl PinyinDatabase {
         if needs_mixed_jianpin_query(segments, source) {
             let scan_limit_value = build_mixed_jianpin_scan_limit(limit);
             let scan_limit = sql_limit(scan_limit_value);
-            // The scan has a minimum page of 128 rows; use it as a bounded
-            // initial buffer without turning an unbounded caller limit into
-            // an enormous allocation.
-            let mut rows = Vec::with_capacity(limit.min(128));
-            rows.extend(
-                self.rows(
-                    &jianpin_sql(&table, scan_limit),
-                    [jp.as_str()],
-                    query_capacity(scan_limit_value),
-                )
-                .into_iter()
-                .filter(|row| matches_mixed_segments(&row.key, segments, source))
-                .take(limit),
-            );
+            // 过滤扫描行时直接写入结果；首次命中才按原提示预留，避免整页临时缓冲。
+            let mut rows = Vec::new();
+            self.visit_rows_until(&jianpin_sql(&table, scan_limit), [jp.as_str()], |row| {
+                if rows.len() >= limit {
+                    return false;
+                }
+                if !matches_mixed_segments(&row.key, segments, source) {
+                    return true;
+                }
+                if rows.capacity() == 0 {
+                    rows.reserve_exact(limit.min(128));
+                }
+                rows.push(row);
+                rows.len() < limit
+            });
             if !rows.is_empty() {
                 return rows;
             }
@@ -560,6 +561,19 @@ impl PinyinDatabase {
 
     /// 按 SQLite 顺序交付成功转换的行，读取失败时结束本页。
     fn visit_rows(&self, sql: &str, params: impl rusqlite::Params, mut visit: impl FnMut(DictRow)) {
+        self.visit_rows_until(sql, params, |item| {
+            visit(item);
+            true
+        });
+    }
+
+    /// 按 SQLite 顺序交付成功转换的行，读取失败或回调要求停止时结束本页。
+    fn visit_rows_until(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+        mut visit: impl FnMut(DictRow) -> bool,
+    ) {
         let Some(connection) = &self.connection else {
             return;
         };
@@ -571,7 +585,11 @@ impl PinyinDatabase {
         };
         while let Ok(Some(row)) = rows.next() {
             match dict_row(row) {
-                Ok(item) => visit(item),
+                Ok(item) => {
+                    if !visit(item) {
+                        break;
+                    }
+                }
                 Err(_) => break,
             }
         }
@@ -1625,3 +1643,7 @@ mod word_key_plan_tests;
 #[cfg(test)]
 #[path = "pinyin/jianpin_inline_page_tests.rs"]
 mod jianpin_inline_page_tests;
+
+#[cfg(test)]
+#[path = "pinyin/mixed_jianpin_filter_tests.rs"]
+mod mixed_jianpin_filter_tests;
