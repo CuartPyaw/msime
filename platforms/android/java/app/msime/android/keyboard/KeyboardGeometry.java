@@ -169,7 +169,7 @@ public final class KeyboardGeometry {
     public static int layoutKeySpacing(int value, int touchLayout) {
         int spacing = keySpacing(value);
         return touchLayout == KeyboardLayout.ZHUYIN_LAYOUT
-            ? Math.min(spacing, ZHUYIN_MAX_KEY_SPACING_TENTHS) : spacing;
+            ? BoundsPolicy.atMost(spacing, ZHUYIN_MAX_KEY_SPACING_TENTHS) : spacing;
     }
 
     public static int rowSpacing(int value) {
