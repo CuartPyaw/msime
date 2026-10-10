@@ -2514,7 +2514,7 @@ public final class MSIMEInputService extends InputMethodService {
             return;
         }
         String candidate = englishSuggestions.get(slot);
-        boolean startedCapitalized = !typed.isEmpty() && Character.isUpperCase(typed.codePointAt(0));
+        boolean startedCapitalized = !typed.isEmpty() && TextPolicy.isUpperCase(typed.codePointAt(0));
         EnglishSuggestionPolicy.Replacement replacement = EnglishSuggestionPolicy.replacement(
             typed, candidate, startedCapitalized);
         if (replacement == null) {
@@ -3196,7 +3196,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (koreanSchemeActive() && TextPolicy.isAsciiLetter(key)) {
             // Shift picks the double consonant or ㅒ ㅖ; the other keys send their lowercase letter, which types the same jamo.
             char input = KoreanKeyboardLayout.input(key, letterCase.usesUppercase());
-            if (!character(input, Character.isUpperCase(input))) commitText(String.valueOf(input));
+            if (!character(input, TextPolicy.isUpperCase(input))) commitText(String.valueOf(input));
             if (letterCase.consumeLetter()) {
                 imeLetterRows.rebuildKeyRows();
                 render();
