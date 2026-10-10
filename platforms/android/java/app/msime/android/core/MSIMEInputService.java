@@ -1929,7 +1929,7 @@ public final class MSIMEInputService extends InputMethodService {
                 String prompt = ai.optString(
                     AiPolishConfiguration.promptSlotKey(
                         InputViewValuePolicy.textOr(ai, "prompt_id", "")), "");
-                if (TextPolicy.trimmed(prompt).isEmpty()) prompt = AiPolishConfiguration.DEFAULT_PROMPT;
+                if (!TextPolicy.hasText(prompt)) prompt = AiPolishConfiguration.DEFAULT_PROMPT;
                 next = new AiPolishConfiguration(endpoint,
                     InputViewValuePolicy.textOr(ai, "model", ""), prompt, token);
             } catch (IllegalArgumentException ignored) {
