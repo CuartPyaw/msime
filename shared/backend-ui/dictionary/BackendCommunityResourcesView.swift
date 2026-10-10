@@ -87,11 +87,11 @@ struct BackendCommunityResourcesView: View {
     .onDisappear { pending?.cancel(); items = []; selected = nil; search = "" }
     .sheet(item: $selected, onDismiss: { load() }) { item in
       CommunityResourceDetailView(initial: item, accountID: accountID,
-        session: BackendAccountSession.shared).communitySheetSize()
+        session: BackendAccountSession.shared, sessionID: sessionID).communitySheetSize()
     }
     .sheet(isPresented: $creating, onDismiss: { load() }) {
       BackendCommunityResourceEditor(kind: kind, existing: nil, accountID: accountID,
-        session: BackendAccountSession.shared).communitySheetSize()
+        session: BackendAccountSession.shared, sessionID: sessionID).communitySheetSize()
     }
   }
   private func load(append: Bool = false) {
@@ -124,6 +124,7 @@ private struct CommunityResourceDetailView: View {
   let initial: BackendAccountClient.CommunityResource
   let accountID: String
   let session: BackendAccountSession
+  let sessionID: UUID?
   @Environment(\.dismiss) private var dismiss
   @State private var current: BackendAccountClient.CommunityResource?
   @State private var busy = false
@@ -154,19 +155,19 @@ private struct CommunityResourceDetailView: View {
         }
         if value.kind == .dictionary {
           CommunityCloudImportButton(resourceID: value.id, resourceRevision: value.revision) {
-            try await session.credentials(matchingUserID: accountID)
+            try await session.credentials(matchingUserID: accountID, matchingSessionID: sessionID)
           }
         }
         Button(value.saved ? "取消收藏" : "收藏") {
           run { try await client.saveResource(value.id, saved: !value.saved, session: session,
-            matchingUserID: accountID) }
+            matchingUserID: accountID, matchingSessionID: sessionID) }
         }.disabled(busy)
         if value.saved && !value.owned {
           Section("评分") {
             ForEach(1...5, id: \.self) { stars in
               Button("\(stars) 星\(value.my_rating == stars ? " · 当前评分" : "")") {
                 run { try await client.rateResource(value.id, stars: stars, session: session,
-                  matchingUserID: accountID) }
+                  matchingUserID: accountID, matchingSessionID: sessionID) }
               }.disabled(busy)
             }
           }
@@ -185,7 +186,7 @@ private struct CommunityResourceDetailView: View {
               run(refresh: false) {
                 try await client.reportContent(kind: value.kind == .dictionary ? "dictionaries" : "replies", itemID: value.id,
                                                reason: reason, detail: detail, session: session,
-                                               matchingUserID: accountID)
+                                               matchingUserID: accountID, matchingSessionID: sessionID)
                 reportDetail = ""; message = "已收到举报，我们会尽快处理。"
               }
             }.disabled(busy || reportDetail.unicodeScalars.count > 1000).accessibilityIdentifier("reportCommunityResource")
@@ -199,13 +200,14 @@ private struct CommunityResourceDetailView: View {
     .onDisappear { pending?.cancel(); current = nil }
     .sheet(isPresented: $editing, onDismiss: { run { } }) {
       BackendCommunityResourceEditor(kind: value.kind, existing: value, accountID: accountID,
-        session: session).communitySheetSize()
+        session: session, sessionID: sessionID).communitySheetSize()
     }
     .alert("删除此资源？", isPresented: $deleting) {
       Button("取消", role: .cancel) { }
       Button("删除", role: .destructive) {
         run(refresh: false) {
-          try await client.deleteResource(value.id, session: session, matchingUserID: accountID)
+          try await client.deleteResource(value.id, session: session, matchingUserID: accountID,
+                                          matchingSessionID: sessionID)
           dismiss()
         }
       }
@@ -218,7 +220,8 @@ private struct CommunityResourceDetailView: View {
       do {
         try await action()
         if refresh {
-          current = try await client.communityResource(initial.id, session: session, matchingUserID: accountID)
+          current = try await client.communityResource(initial.id, session: session, matchingUserID: accountID,
+                                                       matchingSessionID: sessionID)
         }
       } catch is CancellationError { current = nil; dismiss() }
       catch { if !Task.isCancelled { message = error.localizedDescription } }
@@ -232,6 +235,7 @@ private struct BackendCommunityResourceEditor: View {
   let existing: BackendAccountClient.CommunityResource?
   let accountID: String
   let session: BackendAccountSession
+  let sessionID: UUID?
   @Environment(\.dismiss) private var dismiss
   @State private var id = UUID()
   @State private var name = ""
@@ -292,7 +296,7 @@ private struct BackendCommunityResourceEditor: View {
     let kind = sourceKind, search = sourceSearch
     run {
       let page = try await client.dictionary(kind, search: search, offset: offset, session: session,
-        matchingUserID: accountID)
+        matchingUserID: accountID, matchingSessionID: sessionID)
       if sourceKind == kind && sourceSearch == search { source = page }
     }
   }
@@ -300,7 +304,8 @@ private struct BackendCommunityResourceEditor: View {
     let content = BackendAccountClient.ResourceContent(entries: kind == .dictionary ? entries : nil, prompt: kind == .reply ? prompt : nil)
     run {
       _ = try await client.publishResource(id: id, kind: kind, name: name, description: description,
-        content: content, revision: existing?.revision ?? 0, session: session, matchingUserID: accountID)
+        content: content, revision: existing?.revision ?? 0, session: session, matchingUserID: accountID,
+        matchingSessionID: sessionID)
       dismiss()
     }
   }
