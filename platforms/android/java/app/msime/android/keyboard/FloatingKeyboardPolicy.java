@@ -59,6 +59,6 @@ public final class FloatingKeyboardPolicy {
     public static float dragged(float start, float delta, int free) {
         float limit = BoundsPolicy.nonNegative(free);
         float next = Float.isFinite(delta) ? start + delta : start;
-        return BoundsPolicy.nonNegative(Math.min(limit, next));
+        return BoundsPolicy.nonNegative(BoundsPolicy.atMost(limit, next));
     }
 }
