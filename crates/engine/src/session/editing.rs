@@ -291,6 +291,8 @@ impl InputSession {
 
     /// Clamped to the editing text; recomputes the prefix candidates. Korean has no caret inside its open syllable and Zhuyin none inside its conversion, so the caret stays at the end.
     pub(super) fn set_caret(&mut self, caret: Option<usize>) {
+        // 宿主直接放字母光标，就是回到拼音编辑。
+        self.leave_conversion();
         if self.engine.current_scheme_type().locks_caret()
             && !self.dedicated_english
             && self.local_mode == LocalInputMode::None

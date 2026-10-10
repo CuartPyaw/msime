@@ -7,6 +7,7 @@ mod chain;
 mod clock;
 mod commit;
 mod composition;
+mod conversion;
 mod editing;
 mod glide;
 mod input;
@@ -129,6 +130,12 @@ impl Session {
 
     pub fn command(&mut self, command: Command) -> KeyResult {
         if self.nine_key.active() {
+            // 九宫格没有整句改字，改字的光标键就是它的光标键。
+            let command = match command {
+                Command::ConversionLeft => Command::MoveLeft,
+                Command::ConversionRight => Command::MoveRight,
+                other => other,
+            };
             let result = self.nine_key.command(command);
             return self.after_nine_key(result);
         }
@@ -404,6 +411,15 @@ impl Session {
                 })
                 .collect(),
             candidate_list_open: input.candidate_list_open(),
+            conversion: input
+                .conversion
+                .as_ref()
+                .map(|edit| edit.text())
+                .unwrap_or_default(),
+            conversion_focus: input
+                .conversion
+                .as_ref()
+                .map_or((0, 0), |edit| edit.focus_span()),
             candidates,
         }
     }

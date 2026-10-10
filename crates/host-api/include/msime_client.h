@@ -525,6 +525,7 @@ char *msime_client_punctuation_ascii(uint64_t session, uint8_t ascii);
 /* View.scheme and commit_context.scheme, continued: 5 cantonese (Jyutping), 6 zhuyin (Dachen bopomofo), 7 vietnamese (Telex or VNI), 9 stroke (笔画: five-stroke order 横竖撇点折 typed as the letters h s p n z, with x matching any one stroke), each the preferences scheme of the same name. Every host offers them, and Cantonese, Zhuyin and Stroke only with their language dictionaries installed; where a scheme cannot run, a preferences document naming it runs the last Chinese scheme or quanpin instead and msime_client_update_preferences says so in its diagnostic.
  * Stroke: only h s p n z start a composition; x and other letters return handled=false while idle, so a host inserts them as usual. While composing x appends a wildcard, other letters are swallowed with handled=true, and digits 1-9 pick candidates. View.reading and View.preedit hold the stroke glyphs 一丨丿丶乛＊, one per typed letter, which a host draws inline; editing_text and caret_position count the ASCII letters. MSIME_COMMIT_RAW commits the typed letters, MSIME_COMMIT_CANDIDATE the highlighted character (the letters when there is none), and focus loss does not commit.
  * MSIME_OPEN_CANDIDATE_LIST is MSIME_CONVERT_HANJA under the name that says what it does in every scheme: open the active scheme's candidate list. Korean opens and closes its Hanja list as described above; Zhuyin opens the candidate list of its composition; every other scheme answers handled=false. */
+/* 整句改字（全拼、双拼）：桌面宿主把不带修饰键的左右方向键发成 MSIME_CONVERSION_LEFT / MSIME_CONVERSION_RIGHT，Ctrl+左右发成 MSIME_MOVE_LEFT / MSIME_MOVE_RIGHT 编辑拼音字母。首选是一个字对一个完整音节、覆盖整个组字、至少两个字的句子时，MSIME_CONVERSION_LEFT 进入改字：View.conversion 是整句，光标在 View.conversion_focus_start 个字（Unicode 标量）之前，conversion_focus_start..conversion_focus_end 是候选所替换的那一段，候选换成这一段（先是光标所在的词，再是更短、更长的）的字和词。之后左右键每次移一个字，最远到句末（focus_start 等于字数，没有候选）。选中候选（数字、MSIME_COMMIT_CANDIDATE、msime_client_select）把这段钉住，句子其余部分围绕它重新转换，光标移到这段后面，不上屏；光标在句末时 MSIME_COMMIT_CANDIDATE 上屏整句。MSIME_COMMIT_RAW、MSIME_FINISH_COMPOSITION、标点和失去焦点上屏改好的整句，不是拼音字母。MSIME_CANCEL 和 MSIME_BACKSPACE 只退出改字回到拼音（组字保留，钉住的段丢掉）；键入字母或撇号、Ctrl+左右、Home/End 先退出改字再照常处理。进不了改字时（读音不完整、单字、光标在拼音中间、其他方案、本地模式）这两条命令就是 MSIME_MOVE_LEFT / MSIME_MOVE_RIGHT。改字期间宿主把 View.phrase_prefix 加 View.conversion 画在行内代替拼音，不管预编辑样式选的是什么；改字的候选不能置顶、删除或固定位置。 */
 enum MsimeCommand {
     MSIME_BACKSPACE = 0, MSIME_COMMIT_CANDIDATE = 1, MSIME_COMMIT_RAW = 2,
     MSIME_CANCEL = 3, MSIME_MOVE_LEFT = 4, MSIME_MOVE_RIGHT = 5,
@@ -535,6 +536,7 @@ enum MsimeCommand {
     MSIME_COMMIT_RAW_WITHOUT_LEARNING = 15,
     MSIME_CONVERT_HANJA = 16,
     MSIME_OPEN_CANDIDATE_LIST = 16,
+    MSIME_CONVERSION_LEFT = 17, MSIME_CONVERSION_RIGHT = 18,
     MSIME_NEXT_PAGE = 100, MSIME_PREVIOUS_PAGE = 101,
     MSIME_NEXT_CANDIDATE = 102, MSIME_PREVIOUS_CANDIDATE = 103,
     MSIME_FIRST_CANDIDATE = 104, MSIME_LAST_CANDIDATE = 105

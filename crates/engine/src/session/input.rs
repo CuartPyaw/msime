@@ -7,6 +7,7 @@ use std::sync::Arc;
 use super::candidates::clone_candidate_rows;
 use super::chain::CommitChain;
 use super::clock::Clock;
+use super::conversion::ConversionEdit;
 use super::online::OnlineRequestGuard;
 use super::options::SessionOptions;
 use crate::assets;
@@ -99,6 +100,8 @@ pub(super) struct InputSession {
     pub single_character_only: bool,
     /// Writes phrases under complete quanpin keys whatever the active scheme is, so a shuangpin session never feeds a canonical key back through its profile; opened on first use.
     pub canonical_phrase_engine: Option<QuanpinEngine>,
+    /// 整句改字（`conversion`）进行中时的状态；改字期间候选是光标处那一段的字和词。
+    pub conversion: Option<ConversionEdit>,
 }
 
 impl InputSession {
@@ -165,6 +168,7 @@ impl InputSession {
             shuangpin_preedit_uses_raw: true,
             single_character_only: options.single_character_only,
             canonical_phrase_engine: None,
+            conversion: None,
             journal_path: journal,
             paths,
         };
@@ -223,6 +227,13 @@ impl InputSession {
 
     /// input_session.cpp:88-245: caret insertion, dedicated English, local modes and their Shift entries, the acceptance gate, then the scheme. Handled iff the preedit changed.
     pub fn handle_character(&mut self, value: u8, shift_only: bool) -> KeyResult {
+        // 改字时能写进组字的键先退出改字再照常键入；数字和空格等留给候选选择，宿主或 runtime 再按选择处理。
+        if self.conversion.is_some() {
+            if !(value.is_ascii_alphabetic() || value == b'\'' || value == b';') {
+                return KeyResult::unhandled();
+            }
+            self.leave_conversion();
+        }
         if self
             .caret
             .is_some_and(|caret| caret < self.editing_text_len())
@@ -698,7 +709,9 @@ impl InputSession {
             | Command::MoveRight
             | Command::MoveHome
             | Command::MoveEnd
-            | Command::DeleteForward => return Some(self.commit_zhuyin_composition()),
+            | Command::DeleteForward
+            | Command::ConversionLeft
+            | Command::ConversionRight => return Some(self.commit_zhuyin_composition()),
             Command::CommitReading | Command::CycleKanaVariant => return None,
         };
         let claimed = self.engine.handle_zhuyin_key(key);
@@ -728,6 +741,25 @@ impl InputSession {
             self.chain.reset();
             return KeyResult::unhandled();
         }
+        if self.conversion.is_some() {
+            if let Some(result) = self.handle_conversion_command(command) {
+                return result;
+            }
+        }
+        // 进不了整句改字时，改字的光标键就是字母光标键，各方案照常处理。
+        let command = match command {
+            Command::ConversionLeft | Command::ConversionRight => {
+                if let Some(result) = self.move_conversion(command) {
+                    return result;
+                }
+                if command == Command::ConversionLeft {
+                    Command::MoveLeft
+                } else {
+                    Command::MoveRight
+                }
+            }
+            other => other,
+        };
         if self.zhuyin_rules_apply() {
             if let Some(result) = self.handle_zhuyin_command(command) {
                 return result;
@@ -827,6 +859,8 @@ impl InputSession {
             }
             // Only a Korean syllable converts to Hanja and only a Zhuyin conversion opens its list; the host keeps the key.
             Command::ConvertHanja => KeyResult::unhandled(),
+            // 上面已经换成了字母光标命令。
+            Command::ConversionLeft | Command::ConversionRight => KeyResult::unhandled(),
         }
     }
 
@@ -1154,6 +1188,9 @@ impl InputSession {
 
     /// The displayed list of whichever view is active.
     pub fn candidates(&self) -> &[WordItem] {
+        if let Some(edit) = &self.conversion {
+            return edit.rows();
+        }
         if self.dedicated_english {
             return &self.dedicated_english_candidates;
         }
@@ -1227,6 +1264,7 @@ impl InputSession {
     /// Clears caret, phrase progress, pending sequence, local mode, dedicated preedit and caches; returns from temporary Japanese.
     pub fn reset_composition(&mut self) {
         self.caret = None;
+        self.conversion = None;
         self.prefix_candidates.clear();
         self.prefix_query_input.clear();
         self.prefix_active = false;
@@ -1279,6 +1317,9 @@ impl InputSession {
 
     /// input_session_composition.cpp:379-385. While a caret prefix is decoded the prefix list is the one on screen, so it is the one widened; the reference's caret-prefix overlay widened only the hidden whole-input list and reported growth the host could not see.
     pub(super) fn expand_initial_candidates(&mut self) -> bool {
+        if self.conversion.is_some() {
+            return false;
+        }
         self.refresh_prefix_candidates();
         let grew = if self.prefix_active {
             self.engine.expand_current_raw_prefix_initial_candidates(

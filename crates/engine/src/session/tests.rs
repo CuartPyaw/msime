@@ -3340,7 +3340,12 @@ fn convert_hanja_is_named_for_the_golden_scenarios() {
         Some(Command::ConvertHanja)
     );
     assert_eq!(Command::ConvertHanja.name(), "ConvertHanja");
-    assert_eq!(Command::from_u8(12), None);
+    assert_eq!(Command::from_u8(12), Some(Command::ConversionLeft));
+    assert_eq!(
+        Command::from_name("ConversionRight"),
+        Some(Command::ConversionRight)
+    );
+    assert_eq!(Command::from_u8(14), None);
 }
 
 // ---- expression, command and mention modes ----
@@ -6075,4 +6080,223 @@ INSERT INTO kaomoji_catalog VALUES('(•̀ᴗ•́)و','mei guo'),('(ﾟДﾟ≡
         item.source,
         CandidateSource::Emoji | CandidateSource::Kaomoji
     )));
+}
+
+// ---- 整句改字（session/conversion.rs） ----
+
+/// 「woqubeijing」的首选整句是「我去背景」，想要的「我去北京」不在候选里。
+const CONVERSION_FIXTURE: &str =
+    "CREATE TABLE tbl_1_w(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_w VALUES('wo','w','我',9000);\
+CREATE TABLE tbl_1_q(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_q VALUES('qu','q','去',9000);\
+CREATE TABLE tbl_1_b(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_b VALUES('bei','b','被',9000);\
+INSERT INTO tbl_1_b VALUES('bei','b','北',5000);\
+INSERT INTO tbl_1_b VALUES('bei','b','背',4000);\
+CREATE TABLE tbl_1_j(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_j VALUES('jing','j','经',9000);\
+INSERT INTO tbl_1_j VALUES('jing','j','京',3000);\
+INSERT INTO tbl_1_j VALUES('jing','j','景',2000);\
+CREATE TABLE tbl_2_b(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_2_b VALUES('bei''jing','bj','背景',30000);\
+INSERT INTO tbl_2_b VALUES('bei''jing','bj','北京',20000);\
+CREATE TABLE tbl_2_w(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+CREATE TABLE tbl_4_w(key TEXT,jp TEXT,value TEXT,weight INTEGER);";
+
+fn conversion_session(fixture: &Fixture) -> Session {
+    let mut session = fixture.session_with(|options| options.personal_context = false);
+    type_text(&mut session, "woqubeijing");
+    assert_eq!(words(&session)[0], "我去背景");
+    session
+}
+
+#[test]
+fn the_left_key_enters_the_sentence_and_moves_by_character() {
+    let fixture = Fixture::new(CONVERSION_FIXTURE);
+    let mut session = conversion_session(&fixture);
+    assert!(session.command(Command::ConversionLeft).handled);
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.conversion, "我去背景");
+    // 光标在最后一个字「景」前，候选替换的是从它到词尾这一段，先列当前的字。
+    assert_eq!(snapshot.conversion_focus, (3, 4));
+    assert_eq!(words(&session), ["景", "经", "京"]);
+    // 组字原文和字母光标不动。
+    assert_eq!(snapshot.editing_text, "woqubeijing");
+    assert_eq!(snapshot.caret_position, 11);
+
+    session.command(Command::ConversionLeft);
+    assert_eq!(session.snapshot().conversion_focus, (2, 4));
+    // 光标在词首：先是整个词，再是更短的单字。
+    assert_eq!(words(&session), ["背景", "北京", "被", "北", "背"]);
+
+    for _ in 0..5 {
+        session.command(Command::ConversionLeft);
+    }
+    assert_eq!(session.snapshot().conversion_focus, (0, 1));
+    for _ in 0..6 {
+        session.command(Command::ConversionRight);
+    }
+    // 句末没有候选，空格（选择或 CommitCandidate）上屏整句。
+    assert_eq!(session.snapshot().conversion_focus, (4, 4));
+    assert!(words(&session).is_empty());
+    assert_eq!(
+        session.command(Command::CommitCandidate).commit.as_deref(),
+        Some("我去背景")
+    );
+    assert!(session.snapshot().conversion.is_empty());
+    assert!(session.snapshot().preedit.is_empty());
+}
+
+#[test]
+fn choosing_a_word_pins_it_and_commits_the_sentence() {
+    let fixture = Fixture::new(CONVERSION_FIXTURE);
+    let mut session = conversion_session(&fixture);
+    session.command(Command::ConversionLeft);
+    session.command(Command::ConversionLeft);
+    let picked = session.select(index_of(&session, "北京"));
+    assert!(picked.handled && picked.commit.is_none(), "{picked:?}");
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.conversion, "我去北京");
+    // 选完光标移到这段后面，正好是句末。
+    assert_eq!(snapshot.conversion_focus, (4, 4));
+
+    // 回车上屏改好的汉字，不是拼音。
+    let committed = session.command(Command::CommitRaw);
+    assert_eq!(committed.commit.as_deref(), Some("我去北京"));
+    assert_eq!(committed.diagnostic, None);
+    assert!(session.snapshot().preedit.is_empty());
+    // 改好的整句与选中整句候选一样存成个人词条。
+    assert_eq!(
+        count(
+            &fixture.journal(),
+            "SELECT count(*) FROM user_dictionary_operations WHERE key='wo''qu''bei''jing' AND value='我去北京' AND user_inserted=1"
+        ),
+        1
+    );
+}
+
+#[test]
+fn a_pinned_character_inside_a_word_reconverts_its_neighbours() {
+    let fixture = Fixture::new(CONVERSION_FIXTURE);
+    let mut session = conversion_session(&fixture);
+    session.command(Command::ConversionLeft);
+    assert!(session.select(index_of(&session, "京")).handled);
+    // 「背景」被拆开，「bei」单独重新转换；光标到了句末。
+    assert_eq!(session.snapshot().conversion, "我去被京");
+    assert_eq!(session.snapshot().conversion_focus, (4, 4));
+    session.command(Command::ConversionLeft);
+    session.command(Command::ConversionLeft);
+    assert_eq!(session.snapshot().conversion_focus, (2, 3));
+    assert!(session.select(index_of(&session, "北")).handled);
+    assert_eq!(session.snapshot().conversion, "我去北京");
+    assert_eq!(session.snapshot().conversion_focus, (3, 4));
+    // 标点和失去焦点一样，上屏的是改好的整句。
+    let finished = session.punctuation(b',');
+    assert_eq!(finished.commit.as_deref(), Some("我去北京，"));
+}
+
+#[test]
+fn typing_or_escaping_leaves_the_sentence_and_keeps_the_letters() {
+    let fixture = Fixture::new(CONVERSION_FIXTURE);
+    let mut session = conversion_session(&fixture);
+    session.command(Command::ConversionLeft);
+    session.command(Command::ConversionLeft);
+    session.select(index_of(&session, "北京"));
+
+    // Esc 和退格回到拼音，组字和原来的候选都在，钉住的段丢掉。
+    assert!(session.command(Command::Cancel).handled);
+    let snapshot = session.snapshot();
+    assert!(snapshot.conversion.is_empty());
+    assert_eq!(snapshot.conversion_focus, (0, 0));
+    assert_eq!(snapshot.editing_text, "woqubeijing");
+    assert_eq!(words(&session)[0], "我去背景");
+    session.command(Command::ConversionLeft);
+    assert!(session.command(Command::Backspace).handled);
+    assert_eq!(session.snapshot().editing_text, "woqubeijing");
+    assert!(session.snapshot().conversion.is_empty());
+
+    // 数字和空格不是组字的键：交回去由选择处理，不退出改字。
+    session.command(Command::ConversionLeft);
+    assert!(!session.character(b'1', false).handled);
+    assert!(!session.character(b' ', false).handled);
+    assert_eq!(session.snapshot().conversion, "我去背景");
+    // 字母退出改字，接在拼音末尾。
+    assert!(session.character(b'a', false).handled);
+    assert!(session.snapshot().conversion.is_empty());
+    assert_eq!(session.snapshot().editing_text, "woqubeijinga");
+    session.command(Command::Backspace);
+
+    // 字母光标命令（Ctrl+左右）退出改字后照常移字母光标。
+    session.command(Command::ConversionLeft);
+    assert!(session.command(Command::MoveLeft).handled);
+    assert!(session.snapshot().conversion.is_empty());
+    assert_eq!(session.snapshot().caret_position, 10);
+}
+
+#[test]
+fn without_a_sentence_the_conversion_keys_move_the_letter_caret() {
+    let fixture = Fixture::new(CONVERSION_FIXTURE);
+    let mut session = fixture.session();
+    // 读音不完整，首选不是一个字对一个完整音节的整句。
+    type_text(&mut session, "woqub");
+    assert!(session.command(Command::ConversionLeft).handled);
+    let snapshot = session.snapshot();
+    assert!(snapshot.conversion.is_empty());
+    assert_eq!(snapshot.caret_position, 4);
+    assert!(session.command(Command::ConversionRight).handled);
+    assert_eq!(session.snapshot().caret_position, 5);
+    session.command(Command::Cancel);
+
+    // 右移不进入改字；单字也不进入。
+    type_text(&mut session, "woqubeijing");
+    session.command(Command::ConversionRight);
+    assert!(session.snapshot().conversion.is_empty());
+    session.command(Command::Cancel);
+    type_text(&mut session, "wo");
+    session.command(Command::ConversionLeft);
+    assert!(session.snapshot().conversion.is_empty());
+    assert_eq!(session.snapshot().caret_position, 1);
+    session.command(Command::Cancel);
+
+    // 光标在中间时首选是光标前那段的候选，不覆盖整个组字，也不进入改字。
+    type_text(&mut session, "woqubeijing");
+    session.command(Command::MoveLeft);
+    session.command(Command::MoveLeft);
+    session.command(Command::MoveLeft);
+    session.command(Command::MoveLeft);
+    session.command(Command::ConversionLeft);
+    assert!(session.snapshot().conversion.is_empty());
+}
+
+#[test]
+fn the_conversion_candidates_cannot_be_pinned_or_removed() {
+    let fixture = Fixture::new(CONVERSION_FIXTURE);
+    let mut session = conversion_session(&fixture);
+    session.command(Command::ConversionLeft);
+    assert!(!session.pin(1).handled);
+    assert!(!session.remove(1).handled);
+    assert!(!session.fix_position(1, 1).handled);
+    assert!(!session.select_edge(1, CandidateEdge::FirstHan).handled);
+    assert!(!session.expand_initial_candidates());
+    assert_eq!(words(&session), ["景", "经", "京"]);
+}
+
+#[test]
+fn shuangpin_enters_the_same_sentence() {
+    let fixture = Fixture::new(CONVERSION_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.personal_context = false;
+    });
+    // 小鹤双拼：wo qu bw(bei) jk(jing)
+    type_text(&mut session, "woqubwjk");
+    assert_eq!(words(&session)[0], "我去背景");
+    session.command(Command::ConversionLeft);
+    session.command(Command::ConversionLeft);
+    session.select(index_of(&session, "北京"));
+    assert_eq!(
+        session.command(Command::CommitCandidate).commit.as_deref(),
+        Some("我去北京")
+    );
 }

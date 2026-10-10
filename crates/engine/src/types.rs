@@ -841,6 +841,10 @@ pub enum Command {
     CommitReading = 10,
     /// Open the active scheme's candidate list, or close it when it is open: the composing syllable's Hanja in Korean, the conversion's alternatives in Zhuyin. Schemes without an openable list leave it unhandled. The name stays for the wire and the goldens.
     ConvertHanja = 11,
+    /// 整句改字的光标左移一个字：组字的首选是一个字对一个音节的全拼或双拼整句时，第一次进入改字、光标停在最后一个字前，之后每次左移一个字；进不了改字时与 `MoveLeft` 相同。
+    ConversionLeft = 12,
+    /// 整句改字的光标右移一个字，最远到句末；不在改字里时与 `MoveRight` 相同。
+    ConversionRight = 13,
 }
 
 impl Command {
@@ -858,6 +862,8 @@ impl Command {
             9 => Self::CycleKanaVariant,
             10 => Self::CommitReading,
             11 => Self::ConvertHanja,
+            12 => Self::ConversionLeft,
+            13 => Self::ConversionRight,
             _ => return None,
         })
     }
@@ -876,11 +882,13 @@ impl Command {
             Self::CycleKanaVariant => "CycleKanaVariant",
             Self::CommitReading => "CommitReading",
             Self::ConvertHanja => "ConvertHanja",
+            Self::ConversionLeft => "ConversionLeft",
+            Self::ConversionRight => "ConversionRight",
         }
     }
 
     pub fn from_name(name: &str) -> Option<Self> {
-        (0..=11)
+        (0..=13)
             .filter_map(Self::from_u8)
             .find(|command| command.name() == name)
     }

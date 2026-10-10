@@ -903,6 +903,7 @@ impl InputEngine for Fixture {
             } else {
                 self.words.clone()
             },
+            ..EngineSnapshot::default()
         })
     }
     fn character(&mut self, value: u8, _shift: bool) -> Result<EngineResult, RuntimeError> {
@@ -1719,6 +1720,7 @@ impl InputEngine for PhraseEngine {
             } else {
                 self.words.clone()
             },
+            ..EngineSnapshot::default()
         })
     }
     fn character(&mut self, value: u8, _shift: bool) -> Result<EngineResult, RuntimeError> {
@@ -3716,6 +3718,7 @@ impl InputEngine for DigitCommitsEngine {
             caret_position: self.reading.len(),
             segment_raw_boundaries: Vec::new(),
             candidates: words,
+            ..EngineSnapshot::default()
         })
     }
     fn character(&mut self, value: u8, _shift: bool) -> Result<EngineResult, RuntimeError> {
@@ -4555,6 +4558,7 @@ impl InputEngine for WubiMixedEngine {
             caret_position: self.reading.len(),
             segment_raw_boundaries: Vec::new(),
             candidates: words,
+            ..EngineSnapshot::default()
         })
     }
     fn character(&mut self, value: u8, _shift: bool) -> Result<EngineResult, RuntimeError> {
@@ -5417,6 +5421,7 @@ impl InputEngine for SpellingMarksEngine {
             caret_position: self.text.len(),
             segment_raw_boundaries: Vec::new(),
             candidates: Vec::new(),
+            ..EngineSnapshot::default()
         })
     }
     fn character(&mut self, value: u8, _shift: bool) -> Result<EngineResult, RuntimeError> {
@@ -6897,4 +6902,68 @@ fn url_space_commits_the_url_alone_and_escape_discards_it() {
     assert!(escape.commit.is_none(), "{escape:?}");
     assert_eq!(escape.view.local_mode, "none");
     assert!(escape.view.editing_text.is_empty());
+}
+
+/// 整句改字：左右键在整句的汉字之间移动，选中的候选替换光标处那一段，确认后上屏改好的整句。
+#[test]
+fn the_sentence_is_corrected_in_place_and_committed_whole() {
+    let directory = tempfile::tempdir().unwrap();
+    let dictionaries = directory.path().join("dictionaries");
+    std::fs::create_dir_all(&dictionaries).unwrap();
+    rusqlite::Connection::open(dictionaries.join(msime_engine::assets::MAIN_DICTIONARY))
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE tbl_1_w(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+             INSERT INTO tbl_1_w VALUES('wo','w','我',9000);\
+             CREATE TABLE tbl_1_q(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+             INSERT INTO tbl_1_q VALUES('qu','q','去',9000);\
+             CREATE TABLE tbl_1_b(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+             INSERT INTO tbl_1_b VALUES('bei','b','被',9000),('bei','b','北',5000);\
+             CREATE TABLE tbl_1_j(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+             INSERT INTO tbl_1_j VALUES('jing','j','经',9000),('jing','j','京',3000);\
+             CREATE TABLE tbl_2_b(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+             INSERT INTO tbl_2_b VALUES('bei''jing','bj','背景',30000),('bei''jing','bj','北京',20000);",
+        )
+        .unwrap();
+    let options = real_engine_options(directory.path());
+    let mut runtime = Runtime::new(msime_engine::host::Session::new(&options).unwrap(), 5).unwrap();
+    runtime.focus(true).unwrap();
+    type_characters(&mut runtime, "woqubeijing");
+    assert_eq!(texts(&runtime.view())[0], "我去背景");
+    assert!(runtime.view().conversion.is_empty());
+
+    let entered = runtime
+        .dispatch(Action::Command(Command::ConversionLeft))
+        .unwrap();
+    assert_eq!(entered.view.conversion, "我去背景");
+    assert_eq!(
+        (
+            entered.view.conversion_focus_start,
+            entered.view.conversion_focus_end
+        ),
+        (3, 4)
+    );
+    let json = serde_json::to_value(&entered.view).unwrap();
+    assert_eq!(json["conversion"], "我去背景");
+    assert_eq!(json["conversion_focus_start"], 3);
+
+    // 换了焦点，高亮回到第一个候选。
+    runtime.dispatch(Action::NextCandidate).unwrap();
+    let moved = runtime
+        .dispatch(Action::Command(Command::ConversionLeft))
+        .unwrap();
+    assert_eq!(texts(&moved.view)[..2], ["背景", "北京"]);
+    assert_eq!(moved.view.candidates[0].id.index, 0);
+    assert_eq!(runtime.highlighted, 0);
+
+    // 数字 2 选「北京」：替换这一段，不上屏。
+    let picked = character(&mut runtime, b'2');
+    assert!(picked.commit.is_none());
+    assert_eq!(picked.view.conversion, "我去北京");
+    assert_eq!(picked.view.conversion_focus_start, 4);
+    assert!(picked.view.candidates.is_empty());
+    let committed = runtime.dispatch(Action::SelectHighlighted).unwrap();
+    assert_eq!(committed.commit.as_deref(), Some("我去北京"));
+    assert!(committed.view.conversion.is_empty());
+    assert!(committed.view.editing_text.is_empty());
 }

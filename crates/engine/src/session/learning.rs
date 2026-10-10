@@ -262,7 +262,7 @@ impl InputSession {
         typo_diagnostic
     }
 
-    fn can_learn_sentence_candidate(&self, selected: &WordItem) -> bool {
+    pub(super) fn can_learn_sentence_candidate(&self, selected: &WordItem) -> bool {
         self.local_mode == LocalInputMode::None
             && !self.dedicated_english
             && self

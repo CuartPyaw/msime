@@ -746,6 +746,9 @@ impl<E: InputEngine> Runtime<E> {
             reading: self.cached.reading.clone(),
             editing_text: self.cached.editing_text.clone(),
             caret_position: self.cached.caret_position,
+            conversion: self.cached.conversion.clone(),
+            conversion_focus_start: self.cached.conversion_focus_start,
+            conversion_focus_end: self.cached.conversion_focus_end,
             page,
             page_size: self.page_size,
             page_count: self.cached.candidates.len().div_ceil(self.page_size),
@@ -1474,6 +1477,10 @@ impl<E: InputEngine> Runtime<E> {
     }
 
     fn rerank(&mut self) -> bool {
+        // 整句改字的候选是光标处一段的替换，按读音长短排好，不参与整句的重排。
+        if !self.cached.conversion.is_empty() {
+            return false;
+        }
         let Some(reranker) = self.reranker.as_mut() else {
             return false;
         };
@@ -1517,6 +1524,9 @@ impl<E: InputEngine> Runtime<E> {
     ///
     /// 规则本身（保留几条整句读法、哪些算整句、为什么挪而不删）见 `msime_engine::ordering::runner_up_order`；这里只把它给出的排列同步应用到八个并行数组上。
     pub(crate) fn demote_runner_up_readings(&mut self) -> bool {
+        if !self.cached.conversion.is_empty() {
+            return false;
+        }
         let snapshot = &self.cached;
         let count = snapshot.candidates.len();
         if count < 2
@@ -1582,6 +1592,9 @@ impl<E: InputEngine> Runtime<E> {
                     caret_position: 0,
                     segment_raw_boundaries: vec![],
                     candidates: Vec::new(),
+                    conversion: String::new(),
+                    conversion_focus_start: 0,
+                    conversion_focus_end: 0,
                 };
                 return Err(error);
             }
@@ -1603,6 +1616,8 @@ impl<E: InputEngine> Runtime<E> {
             && self.cached.candidate_positions == previous.candidate_positions
             && self.cached.candidate_corrected == previous.candidate_corrected
             && self.cached.candidate_answers_key == previous.candidate_answers_key
+            && self.cached.conversion == previous.conversion
+            && self.cached.conversion_focus_start == previous.conversion_focus_start
         {
             self.highlighted =
                 previous_highlight.min(self.cached.candidates.len().saturating_sub(1));

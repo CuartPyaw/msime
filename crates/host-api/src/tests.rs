@@ -1356,9 +1356,12 @@ fn korean_hanja_conversion_crosses_the_host_boundary() {
     assert!(refused["value"]["commit"].is_null());
     assert_eq!(refused["value"]["view"]["preedit"], "ㄱ");
 
-    // 16 is the last command before the navigation block; the next number is still unknown.
+    // 17 和 18 是整句改字的光标键，韩文里进不了改字，与字母光标键一样写出音节；18 是导航命令前的最后一个，下一个编号仍未定义。
+    let left = read(msime_client_command(handle, 17));
+    assert_eq!(left["value"]["handled"], false);
+    assert_eq!(left["value"]["commit"], "ㄱ");
     assert_eq!(
-        read(msime_client_command(handle, 17))["error"],
+        read(msime_client_command(handle, 19))["error"],
         "unknown input command"
     );
     read(msime_client_destroy(handle));

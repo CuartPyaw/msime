@@ -173,6 +173,8 @@ pub extern "C" fn msime_client_command(handle: u64, command: u32) -> *mut c_char
         14 => Action::SegmentMoveRight,
         15 => Action::Command(Command::CommitRawWithoutLearning),
         16 => Action::Command(Command::ConvertHanja),
+        17 => Action::Command(Command::ConversionLeft),
+        18 => Action::Command(Command::ConversionRight),
         100 => Action::NextPage,
         101 => Action::PreviousPage,
         102 => Action::NextCandidate,
