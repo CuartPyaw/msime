@@ -28,17 +28,25 @@ final class MacDictionaryModel: ObservableObject {
     sessionID = identity.sessionID
     return identity.token
   }
-  private func run(offset: Int = 0, _ operation: @escaping @MainActor (String, BackendAccountClient.DictionaryKind) async throws -> Void) {
+  private func run(offset: Int = 0, _ operation: @escaping @MainActor @Sendable (String, BackendAccountClient.DictionaryKind) async throws -> Void) {
     guard !busy, !closed else { return }
     let selected = kind, query = search
     busy = true; message = nil
     pending = Task {
       defer { busy = false }
       do {
-        let token = try await authorize()
-        try await operation(token, selected)
-        let result = try await client.dictionary(selected, search: query, offset: offset, token: token)
-        _ = try await authorize()
+        let identity = try await account.credentials(matchingUserID: accountID, matchingSessionID: sessionID)
+        try Task.checkCancellation()
+        guard !closed else { throw CancellationError() }
+        sessionID = identity.sessionID
+        _ = try await account.authenticated(matchingUserID: identity.userID,
+                                            matchingSessionID: identity.sessionID) { token in
+          try await operation(token, selected)
+        }.value
+        let result = try await account.authenticated(matchingUserID: identity.userID,
+                                                     matchingSessionID: identity.sessionID) { token in
+          try await client.dictionary(selected, search: query, offset: offset, token: token)
+        }.value
         guard kind == selected, search == query else { throw CancellationError() }
         page = result
       } catch is CancellationError { page = nil }
