@@ -37,7 +37,7 @@ public final class NineKeySymbolRail extends ScrollView {
         for (int index = 0; index < column.getChildCount(); index++) {
             View child = column.getChildAt(index);
             if (!(child.getLayoutParams() instanceof LinearLayout.LayoutParams params)) continue;
-            params.height = Math.max(0, row - params.topMargin - params.bottomMargin);
+            params.height = BoundsPolicy.nonNegative(row - params.topMargin - params.bottomMargin);
         }
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
     }
