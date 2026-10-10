@@ -68,7 +68,7 @@ public final class CompositionCaretPolicy {
     public static int tapTarget(int prefixLength, String display, String editing, int caretMark, int tapped) {
         int[] map = alignment(display, editing);
         if (map == null || tapped < 0) return -1;
-        int offset = tapped - Math.max(0, prefixLength);
+        int offset = tapped - BoundsPolicy.nonNegative(prefixLength);
         if (offset <= 0) return 0;
         if (caretMark >= 0 && offset > caretMark) offset--;
         return map[Math.min(offset, display.length())];
