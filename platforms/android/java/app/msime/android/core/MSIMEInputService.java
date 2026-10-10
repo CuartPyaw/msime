@@ -194,6 +194,8 @@ public final class MSIMEInputService extends InputMethodService {
     String cloudClipboardAccountId = "";
     /** Binding lineage that owns the currently displayed cloud rows. */
     long cloudClipboardBindingGeneration = -1L;
+    /** Backend session that supplied the current cloud page; uploads stay on this session. */
+    String cloudClipboardSessionId = "";
     // Bumped whenever the field or the open panel changes; a cloud answer started under an older value is dropped rather than drawn into a field it was not fetched for.
     long cloudClipboardGeneration;
     private boolean candidateEnglishGloss;
@@ -4436,6 +4438,7 @@ public final class MSIMEInputService extends InputMethodService {
         cloudClipboardGeneration++;
         cloudClipboardAccountId = "";
         cloudClipboardBindingGeneration = -1L;
+        cloudClipboardSessionId = "";
         cloudClipboardItems = java.util.List.of();
         cloudClipboardStatus = CloudClipboardPanelPolicy.Status.LOADING;
     }
