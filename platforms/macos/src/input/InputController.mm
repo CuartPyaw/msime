@@ -683,15 +683,14 @@ static BOOL MSIMECurrentCandidateIdentity(id identifier, NSDictionary *view) {
            [identifier[@"index"] compare:@(NSUIntegerMax)] != NSOrderedDescending;
 }
 
-// Background readers borrow the controller strongly. Its last release must not
-// land on their queue, where -dealloc would tear down AppKit objects off main.
-// Takes the caller's reference and clears it before main can drop the handoff.
+// 后台读取会强引用控制器。它的最后一次释放不能落在后台队列上，否则 -dealloc 会在主线程之外收起 AppKit 对象。这里接过调用方的引用并把它清空，再到主线程释放。
+// 主线程上用 CFRelease 当场释放，不用 CFBridgingRelease：后者的返回值在未优化的构建里会进主线程 run loop 的自动释放池，控制器要活到这一轮回调结束，排在后面、按弱引用取控制器的完成块就会取到一个 IMK 早已放掉的控制器。
 static void MSIMEReleaseControllerOnMain(__strong id *controller) {
     if (!*controller) return;
     CFTypeRef owner = CFBridgingRetain(*controller);
     *controller = nil;
     dispatch_async(dispatch_get_main_queue(), ^{
-        (void)CFBridgingRelease(owner);
+        CFRelease(owner);
     });
 }
 
@@ -4776,7 +4775,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     NSString *directory = [_preferencesDirectory copy];
     __weak MSIMEInputController *weakSelf = self;
     dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
-        MSIMEInputController *current = weakSelf;
+        id current = weakSelf; // 用 id：要交给 MSIMEReleaseControllerOnMain
         if (!current) return;
         NSError *error = nil;
         NSDictionary *snapshot = [current readPreferencesSnapshotInDirectory:directory error:&error];
@@ -4795,6 +4794,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
                 error = recoveryError;
             }
         }
+        // 读取期间 IMK 可能已放掉控制器，这里的强引用就成了最后一个；交回主线程释放，dealloc 收起浮动工具栏时才不会在本线程触碰 AppKit。释放先于下面的完成块入队，完成块仍按弱引用取到控制器，时机与此前相同。
+        MSIMEReleaseControllerOnMain(&current);
         dispatch_async(dispatch_get_main_queue(), ^{
             [weakSelf completePreferenceLoad:snapshot error:error generation:generation session:session client:client];
             // After the completion, which is what configures the diagnostic log from the repaired document.

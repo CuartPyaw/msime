@@ -3547,6 +3547,62 @@ static void TestPreferenceClientGeneration() {
     }
 }
 
+// 记录控制器释放时在哪个线程收起浮动工具栏。真实的工具栏是 NSPanel，在后台线程 orderOut: 会让 AppKit 直接终止进程。
+@interface ThreadRecordingToolbar : NSObject
+@property(atomic) NSUInteger deactivations;
+@property(atomic) BOOL deactivatedOffMain;
+@property(atomic) NSUInteger completions;
+@end
+@implementation ThreadRecordingToolbar
+- (void)deactivateForDelegate:(id)delegate {
+    (void)delegate;
+    if (!NSThread.isMainThread) self.deactivatedOffMain = YES;
+    self.deactivations = self.deactivations + 1;
+}
+@end
+
+// 偏好读取完成时把次数记到工具栏桩上：控制器释放后它自己的计数读不到。
+@interface DroppedPreferencesController : AsyncPreferencesController
+@end
+@implementation DroppedPreferencesController
+- (void)completePreferenceLoad:(NSDictionary *)snapshot error:(NSError *)error generation:(uint64_t)generation
+                       session:(MSIMEClientSession *)session client:(id)client {
+    (void)snapshot; (void)error; (void)generation; (void)session; (void)client;
+    ThreadRecordingToolbar *toolbar = [self valueForKey:@"toolbar"];
+    toolbar.completions = toolbar.completions + 1;
+}
+@end
+
+// IMK 放掉控制器时，后台的偏好读取可能还握着它。最后一个强引用若在读取线程上释放，dealloc 就在那条线程上收起浮动工具栏，AppKit 以「Must only be used from the main thread」终止输入法进程（0.52.0 的崩溃报告，#6667）。
+static void DrainMainQueue();
+static void TestPreferenceReadDoesNotDeallocControllerOffMain() {
+    ThreadRecordingToolbar *toolbar = [ThreadRecordingToolbar new];
+    ControlledPreferenceRead *read = [ControlledPreferenceRead new];
+    read.snapshot = @{@"preferences":@{}};
+    @autoreleasepool {
+        DroppedPreferencesController *controller = [DroppedPreferencesController alloc];
+        controller.reads = @[read];
+        controller.appliedPreferences = [NSMutableArray array];
+        [controller setValue:[ShortcutClient new] forKey:@"activeClient"];
+        [controller setValue:@"/synthetic-preferences" forKey:@"preferencesDirectory"];
+        [controller setValue:toolbar forKey:@"toolbar"];
+        [controller reloadPreferences];
+        assert(dispatch_semaphore_wait(read.started, dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC)) == 0);
+    }
+    // 主线程这一侧的引用已全部放掉，读取还在进行：此后控制器只由后台读取持有。这里不再碰控制器本身，免得主线程上多出一个自动释放的引用把它留到读取之后。
+    assert(toolbar.deactivations == 0);
+    dispatch_semaphore_signal(read.released);
+    SettleWindowLayout();
+    NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+    while (toolbar.deactivations == 0 && deadline.timeIntervalSinceNow > 0)
+        [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    assert(toolbar.deactivations == 1);
+    assert(!toolbar.deactivatedOffMain);
+    // 释放排在完成块之前：完成块按弱引用取控制器，取不到就不应用这份偏好，和读取开始前控制器就已释放时一样。
+    DrainMainQueue();
+    assert(toolbar.completions == 0);
+}
+
 @interface ReloadCountingController : ModeController
 @property(nonatomic) NSUInteger reloads;
 @end
@@ -9607,6 +9663,7 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestSoundsFollowKeysCommitsAndActivation(); }
         @autoreleasepool { TestMusicIsClaimedOnceTheSessionOpens(); }
         @autoreleasepool { TestPreferenceClientGeneration(); }
+        @autoreleasepool { TestPreferenceReadDoesNotDeallocControllerOffMain(); }
         @autoreleasepool { TestSavedPreferencesReachTheFocusedController(); }
         @autoreleasepool { TestModeSwitchReachesTheSessionBeforeTheNextKey(); }
         @autoreleasepool { TestFreshProcessActsOnTheSharedSchemeNotTheStaleLocalOne(); }
