@@ -810,7 +810,7 @@ final class ImeLayoutRows {
         StringBuilder result = new StringBuilder();
         result.append(kana.get(0)).append('\n');
         boolean first = true;
-        int end = Math.min(5, kana.size());
+        int end = BoundsPolicy.atMost(5, kana.size());
         for (int index = 1; index < end; index++) {
             String label = kana.get(index);
             if (label.isEmpty()) continue;
