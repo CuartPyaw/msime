@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.os.Bundle;
@@ -128,7 +129,7 @@ public final class PagedTileGrid extends ViewGroup {
         }
     }
 
-    private float px(float dp) { return KeyboardGeometry.floatPixels(getContext(), dp); }
+    private float px(float dp) { return DimensionPolicy.floatPixels(getContext(), dp); }
 
     @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         int width = MeasureSpec.getSize(widthMeasureSpec);

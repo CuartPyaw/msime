@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import android.os.SystemClock;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -171,7 +172,7 @@ final class ImeBottomRow {
                     // 组字中或关了长按语音时不武装长按：这次按压保持普通空格与拖动移光标，与 develop 一致；否则慢一点的空格会被吞掉、停顿后的拖动也移不了光标。
                     boolean voice = touchPreference(AndroidLocalSettings.SPACE_VOICE) && s.voiceInsertionReady();
                     press.gesture.down(SystemClock.uptimeMillis(),
-                        KeyboardGeometry.fromPixels(s, event.getX()), voice);
+                        DimensionPolicy.fromPixels(s, event.getX()), voice);
                     press.cancelLongPress();
                     if (voice) {
                         press.longPress = () -> {
@@ -190,7 +191,7 @@ final class ImeBottomRow {
                         float horizontal = event.getX() - origin[0];
                         float vertical = event.getY() - origin[1];
                         press.gesture.move(SystemClock.uptimeMillis(),
-                            KeyboardGeometry.fromPixels(s, event.getX()));
+                            DimensionPolicy.fromPixels(s, event.getX()));
                         SpaceGesturePolicy.State state = press.gesture.state();
                         if (state == SpaceGesturePolicy.State.VOICE) {
                             // VOICE is only reachable when long-press voice was on at ACTION_DOWN.
@@ -349,7 +350,7 @@ final class ImeBottomRow {
         if (s.actionRow instanceof KeyboardKeyArea area) {
             boolean yield = KeyboardActionRow.languageBesideReturn(entries);
             area.setYield(yield ? s.enterButton : null, yield ? s.languageButton : null,
-                KeyboardGeometry.floatPixels(s, KeyboardActionRow.RETURN_YIELD_DP));
+                DimensionPolicy.floatPixels(s, KeyboardActionRow.RETURN_YIELD_DP));
         }
         if (signature.equals(s.actionRowSignature)) {
             if (!ownBottom) s.updateQuickPunctuation();

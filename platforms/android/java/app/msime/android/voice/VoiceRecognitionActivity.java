@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import app.msime.android.policy.HostOptionsPolicy;
 import android.app.Activity;
 import android.content.ComponentName;
@@ -416,7 +417,7 @@ public final class VoiceRecognitionActivity extends Activity {
      */
     private void showRecordingControls() {
         LinearLayout root = KeyboardGeometry.column(this);
-        int pad = KeyboardGeometry.pixels(this, 20);
+        int pad = DimensionPolicy.pixels(this, 20);
         ViewPolicy.setPadding(root, pad, pad, pad, pad);
         TextView title = ViewPolicy.textLabel(this, "正在录音", 18);
         recordingTitle = title;

@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import app.msime.android.core.InputViewValuePolicy;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -687,7 +688,7 @@ final class ImeLayoutRows {
         keyButton.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN -> {
-                    downY[0] = KeyboardGeometry.fromPixels(s, event.getY());
+                    downY[0] = DimensionPolicy.fromPixels(s, event.getY());
                     gesture[0] = NineKeySwipePolicy.Gesture.NONE;
                     return false;
                 }
@@ -696,7 +697,7 @@ final class ImeLayoutRows {
                     if (s.nineKeyHoldPopup != null) return false;
                     NineKeySwipePolicy.Gesture next = NineKeySwipePolicy.gesture(
                         s.localSettings.choice(AndroidLocalSettings.NINE_KEY_SWIPE), downY[0],
-                        KeyboardGeometry.fromPixels(s, event.getY()), hasLetters,
+                        DimensionPolicy.fromPixels(s, event.getY()), hasLetters,
                         s.localSettings.integer(AndroidLocalSettings.NINE_KEY_SWIPE_DISTANCE));
                     if (next == NineKeySwipePolicy.Gesture.NONE) return false;
                     gesture[0] = next;
@@ -752,7 +753,7 @@ final class ImeLayoutRows {
         ViewPolicy.setSymmetricPadding(options, padding, padding);
         GradientDrawable surface = DrawablePolicy.outlined(
             Color.parseColor(s.skin.background()), s.pixels(10),
-            KeyboardGeometry.atLeastOnePixel(s, 1), Color.parseColor(s.skin.accent()));
+            DimensionPolicy.atLeastOnePixel(s, 1), Color.parseColor(s.skin.accent()));
         ViewPolicy.setBackground(options, surface);
 
         String letters = key.label().toLowerCase(java.util.Locale.ROOT);

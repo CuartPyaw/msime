@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -91,18 +92,18 @@ public final class KeyboardPagerDots extends View {
     }
 
     @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        int width = KeyboardGeometry.pixels(getContext(), totalWidthDp(count));
-        int height = KeyboardGeometry.pixels(getContext(), DOT_DP);
+        int width = DimensionPolicy.pixels(getContext(), totalWidthDp(count));
+        int height = DimensionPolicy.pixels(getContext(), DOT_DP);
         setMeasuredDimension(resolveSize(width, widthMeasureSpec),
             resolveSize(height, heightMeasureSpec));
     }
 
     @Override protected void onDraw(Canvas canvas) {
         if (count <= 0) return;
-        float dot = KeyboardGeometry.floatPixels(getContext(), DOT_DP);
-        float wide = KeyboardGeometry.floatPixels(getContext(), ACTIVE_DP);
-        float gap = KeyboardGeometry.floatPixels(getContext(), GAP_DP);
-        float total = KeyboardGeometry.floatPixels(getContext(), totalWidthDp(count));
+        float dot = DimensionPolicy.floatPixels(getContext(), DOT_DP);
+        float wide = DimensionPolicy.floatPixels(getContext(), ACTIVE_DP);
+        float gap = DimensionPolicy.floatPixels(getContext(), GAP_DP);
+        float total = DimensionPolicy.floatPixels(getContext(), totalWidthDp(count));
         float x = (getWidth() - total) / 2f;
         float top = (getHeight() - dot) / 2f;
         for (int index = 0; index < count; index++) {

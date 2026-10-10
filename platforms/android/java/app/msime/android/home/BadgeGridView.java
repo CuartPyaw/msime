@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.KeyboardGeometry;
 import android.animation.ValueAnimator;
 import android.content.Context;
@@ -214,7 +216,7 @@ public final class BadgeGridView extends View {
     }
 
     private boolean dark() {
-        return KeyboardGeometry.isNight(getContext());
+        return DimensionPolicy.isNight(getContext());
     }
 
     /** 分组的两种颜色：深色端和浅色端。 */

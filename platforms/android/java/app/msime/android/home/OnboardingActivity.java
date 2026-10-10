@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.MainThreadPolicy;
 import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
@@ -537,7 +539,7 @@ public final class OnboardingActivity extends AppCompatActivity {
 
         View radio = new View(this);
         GradientDrawable dot = DrawablePolicy.circleOutlined(selected ? Ui.page(this) : 0,
-            selected ? Ui.dp(this, 6) : KeyboardGeometry.atLeastOnePixel(this, 1.5f),
+            selected ? Ui.dp(this, 6) : DimensionPolicy.atLeastOnePixel(this, 1.5f),
             selected ? Ui.accent(this) : Ui.subText(this));
         ViewPolicy.setBackground(radio, dot);
         LinearLayout.LayoutParams radioParams = Ui.squareParams(this, 22);

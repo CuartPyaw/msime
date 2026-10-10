@@ -80,11 +80,11 @@ def main() -> int:
         if "import app.msime.android.keyboard.KeyboardGeometry;" in source:
             errors.append(f"{path}: KeyboardGeometry 的包名应为 app.msime.android")
         if "Ui.atLeastOnePx(" in source:
-            errors.append(f"{path}: 应直接调用 KeyboardGeometry.atLeastOnePixel")
+            errors.append(f"{path}: 应直接调用 DimensionPolicy.atLeastOnePixel")
         if "Ui.sp(" in source:
             errors.append(f"{path}: 不应调用已移除的 Ui.sp")
         if "Ui.hairlinePx(" in source:
-            errors.append(f"{path}: 应直接调用 KeyboardGeometry.atLeastOnePixel")
+            errors.append(f"{path}: 应直接调用 DimensionPolicy.atLeastOnePixel")
         if "Ui.bottomContentInset(" in source:
             errors.append(f"{path}: 应直接调用 WindowInsetsPolicy.bottomContentInset")
         if "Ui.matchWidthHeightPx(" in source:
@@ -104,8 +104,8 @@ def main() -> int:
 
     for name in EXPECTED_CALLERS:
         path = HOME / name
-        if "KeyboardGeometry.atLeastOnePixel(" not in path.read_text(encoding="utf-8"):
-            errors.append(f"{path}: 未直接复用 KeyboardGeometry.atLeastOnePixel")
+        if "DimensionPolicy.atLeastOnePixel(" not in path.read_text(encoding="utf-8"):
+            errors.append(f"{path}: 未直接复用 DimensionPolicy.atLeastOnePixel")
 
     for name in HEIGHT_PX_CALLERS:
         path = HOME / name

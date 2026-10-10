@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -103,9 +104,9 @@ public final class SpaceKeyFace extends KeyboardPressButton {
         label.setColor(faceColor);
         boolean overlay = !transientLabel.isEmpty();
         float mic = (showsMic && !overlay)
-            ? BoundsPolicy.atMost(KeyboardGeometry.floatPixels(getContext(), MIC_DP), getHeight()) : 0f;
-        float gap = KeyboardGeometry.floatPixels(getContext(), GAP_DP);
-        float available = getWidth() - mic - gap - KeyboardGeometry.floatPixels(getContext(), 8);
+            ? BoundsPolicy.atMost(DimensionPolicy.floatPixels(getContext(), MIC_DP), getHeight()) : 0f;
+        float gap = DimensionPolicy.floatPixels(getContext(), GAP_DP);
+        float available = getWidth() - mic - gap - DimensionPolicy.floatPixels(getContext(), 8);
         String text = overlay ? transientLabel : schemeLabel;
         while (!text.isEmpty() && label.measureText(text) > available && text.length() > 1) {
             text = text.substring(0, text.length() - 1);

@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import android.app.Dialog;
 import android.content.res.Configuration;
 import android.graphics.Color;
@@ -172,7 +173,7 @@ final class ImeBottomBar {
         if (bar == null) return false;
         return KeyboardBottomBarPolicy.shown(s.localSettings.bool(AndroidLocalSettings.BOTTOM_BAR),
             systemDrawsImeButtons(), navigationKnown, s.floatingDrawn(), s.hardwareKeysCollapsed(), phoneLandscape(),
-            KeyboardGeometry.fromPixels(s, navigationBottom));
+            DimensionPolicy.fromPixels(s, navigationBottom));
     }
 
     /** 「底部留白」此刻垫不垫（{@link KeyboardBottomBarPolicy#paddingShown}）；`barShown` 是这一次 {@link #shown} 的结果。 */

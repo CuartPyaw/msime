@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.TextPolicy;
 
 import android.app.Activity;
@@ -126,7 +128,7 @@ final class LoginSheet {
         root.addView(subtitle, Ui.matchWidth(activity, 2));
 
         options = Ui.column(activity);
-        boolean night = KeyboardGeometry.isNight(activity);
+        boolean night = DimensionPolicy.isNight(activity);
         if (providers.appleWeb()) {
             // Apple 的规范按钮：浅色下黑底白字，深色下白底黑字；这是 Apple 的品牌色，不随季节主题变。
             int fill = night ? Color.WHITE : Color.BLACK;
@@ -302,7 +304,7 @@ final class LoginSheet {
         Ui.setMinimumHeightDp(button, activity, 50);
         GradientDrawable face = stroke == 0
             ? DrawablePolicy.rounded(fill, Ui.dp(activity, 12))
-            : DrawablePolicy.outlined(fill, Ui.dp(activity, 12), KeyboardGeometry.atLeastOnePixel(activity, 1), stroke);
+            : DrawablePolicy.outlined(fill, Ui.dp(activity, 12), DimensionPolicy.atLeastOnePixel(activity, 1), stroke);
         GradientDrawable mask = DrawablePolicy.rounded(Color.WHITE, Ui.dp(activity, 12));
         int pressed = ColorPolicy.withAlpha(fill == Color.BLACK ? Color.WHITE : Ui.text(activity), 0.12f);
         ViewPolicy.setBackground(button, DrawablePolicy.ripple(pressed, face, mask));
@@ -328,7 +330,7 @@ final class LoginSheet {
         field.setFilters(new InputFilter[] {new InputFilter.LengthFilter(maxLength)});
         field.setHintTextColor(Ui.subText(activity));
         GradientDrawable face = DrawablePolicy.outlined(Ui.rowBackground(activity), Ui.dp(activity, 12),
-            KeyboardGeometry.atLeastOnePixel(activity, 1), Ui.hairline(activity));
+            DimensionPolicy.atLeastOnePixel(activity, 1), Ui.hairline(activity));
         ViewPolicy.setBackground(field, face);
         Ui.setHorizontalPaddingDp(field, activity, 14);
         Ui.setTextMinHeightDp(field, activity, 50);
@@ -380,7 +382,7 @@ final class LoginSheet {
 
         @Override public void draw(Canvas canvas) {
             RectF bounds = new RectF(getBounds());
-            float scale = KeyboardGeometry.shorterSide(bounds.width(), bounds.height()) / viewport;
+            float scale = DimensionPolicy.shorterSide(bounds.width(), bounds.height()) / viewport;
             matrix.setScale(scale, scale);
             matrix.postTranslate(bounds.left + (bounds.width() - viewport * scale) / 2f,
                 bounds.top + (bounds.height() - viewport * scale) / 2f);

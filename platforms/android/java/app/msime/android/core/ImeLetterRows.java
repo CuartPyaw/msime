@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import android.graphics.Color;
 import android.util.TypedValue;
 import android.view.MotionEvent;
@@ -145,7 +146,7 @@ final class ImeLetterRows {
         key.setOnTouchListener((view, event) -> {
             switch (event.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN -> {
-                    downY[0] = KeyboardGeometry.fromPixels(s, event.getY());
+                    downY[0] = DimensionPolicy.fromPixels(s, event.getY());
                     triggered[0] = false;
                     if (touchPreference(AndroidLocalSettings.KEY_POPUP)) showKeyPreview(key, face);
                     if (hint != null) {
@@ -158,7 +159,7 @@ final class ImeLetterRows {
                     if (hint != null && !triggered[0] && touchPreference(AndroidLocalSettings.SWIPE_DOWN_SYMBOLS)
                             && SwipeHintPolicy.swiped(
                                 s.localSettings.choice(AndroidLocalSettings.SWIPE_SYMBOLS_DIRECTION), downY[0],
-                                KeyboardGeometry.fromPixels(s, event.getY()))) {
+                                DimensionPolicy.fromPixels(s, event.getY()))) {
                         triggered[0] = true;
                         key.removeCallbacks(hold);
                         if (keyPreview != null && keyPreviewOwner == key) keyPreview.setLabel(hint);
@@ -380,7 +381,7 @@ final class ImeLetterRows {
         if (overlay == null || button.getWindowToken() == null) return false;
         float keyTop = overlay.keyTop(button);
         BackspaceSwipePolicy.Phase next = BackspaceSwipePolicy.next(backspaceSwipePhase,
-            keyTop + yInKey, keyTop, KeyboardGeometry.density(s));
+            keyTop + yInKey, keyTop, DimensionPolicy.density(s));
         if (next == BackspaceSwipePolicy.Phase.IDLE) return false;
         BackspaceSwipePolicy.Phase previous = backspaceSwipePhase;
         backspaceSwipePhase = next;

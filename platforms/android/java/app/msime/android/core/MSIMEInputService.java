@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import android.inputmethodservice.InputMethodService;
 import app.msime.android.core.Telemetry;
 import app.msime.android.core.InputViewValuePolicy;
@@ -4252,16 +4253,16 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     int pixels(int value) {
-        return KeyboardGeometry.pixels(this, value);
+        return DimensionPolicy.pixels(this, value);
     }
 
     int pixels(double value) {
         if (value <= 0) return 0;
-        return KeyboardGeometry.atLeastOnePixel(this, (float) value);
+        return DimensionPolicy.atLeastOnePixel(this, (float) value);
     }
 
     int halfSpacingPixels(int tenths) {
-        return KeyboardGeometry.halfGapPixels(tenths, KeyboardGeometry.density(this));
+        return KeyboardGeometry.halfGapPixels(tenths, DimensionPolicy.density(this));
     }
 
     /**
@@ -4282,7 +4283,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     boolean systemDark() {
-        return KeyboardGeometry.isNight(this);
+        return DimensionPolicy.isNight(this);
     }
 
     private KeyboardSkin keyboardSkin(JSONObject preferences) {
@@ -6685,13 +6686,13 @@ public final class MSIMEInputService extends InputMethodService {
         @Override protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
             if (anchorWidth <= 0 || anchorHeight <= 0) return;
-            float density = KeyboardGeometry.density(getContext());
+            float density = DimensionPolicy.density(getContext());
             // 位置在这里按这一帧的布局算，不在 `show` 时算：浮层原先隐藏时是 GONE、没有布局，`show` 那一刻读到的位置是 0，第一次按下时提示画到了左上角；现在隐藏是 INVISIBLE，但键区换布局、浮动键盘拖动之后仍以这一帧为准。坐标取相对浮层自己，它铺满键区，浮动键盘时键区在外框里有偏移。
             getLocationOnScreen(overlayLocation);
             JapaneseFlickGuideGeometry.Guide guide = JapaneseFlickGuideGeometry.layout(
                 anchorLocation[0] - overlayLocation[0], anchorLocation[1] - overlayLocation[1],
                 anchorWidth, anchorHeight, getWidth(), getHeight(),
-                KeyboardGeometry.floatPixels(4, density), KeyboardGeometry.floatPixels(18, density));
+                DimensionPolicy.floatPixels(4, density), DimensionPolicy.floatPixels(18, density));
             KeyboardSkin previewSkin = imeStyler.themed(skin);
             String nextPaletteKey = previewSkin.key();
             if (!nextPaletteKey.equals(paletteKey)) {
@@ -6703,12 +6704,12 @@ public final class MSIMEInputService extends InputMethodService {
                 foregroundColor = Color.parseColor(previewSkin.keyForeground());
                 previewTypeface = previewSkin.monospaced() ? Typeface.MONOSPACE : Typeface.DEFAULT;
             }
-            float radius = KeyboardGeometry.floatPixels(10, density);
+            float radius = DimensionPolicy.floatPixels(10, density);
             // 底板带投影，看得出是浮在键上的提示，而不是键面本身变了样。
             paint.setStyle(Paint.Style.FILL);
             paint.setColor(keyColor);
-            paint.setShadowLayer(KeyboardGeometry.floatPixels(8, density), 0,
-                KeyboardGeometry.floatPixels(2, density), 0x40000000);
+            paint.setShadowLayer(DimensionPolicy.floatPixels(8, density), 0,
+                DimensionPolicy.floatPixels(2, density), 0x40000000);
             canvas.drawRoundRect(guide.left(), guide.top(), guide.right(), guide.bottom(), radius, radius, paint);
             paint.clearShadowLayer();
             paint.setStyle(Paint.Style.STROKE);
@@ -6717,8 +6718,8 @@ public final class MSIMEInputService extends InputMethodService {
             canvas.drawRoundRect(guide.left(), guide.top(), guide.right(), guide.bottom(), radius, radius, paint);
             float cellWidth = guide.cellWidth();
             float cellHeight = guide.cellHeight();
-            float inset = KeyboardGeometry.floatPixels(1, density);
-            float cellRadius = KeyboardGeometry.floatPixels(6, density);
+            float inset = DimensionPolicy.floatPixels(1, density);
+            float cellRadius = DimensionPolicy.floatPixels(6, density);
             // 方向格的字比键面小，中间格接近键面字号；都不超过格高，免得相邻两格的字挤在一起。
             float directionSize = BoundsPolicy.atMost(KeyboardGeometry.keySp(getContext(), 15), cellHeight * 0.8f);
             float centerSize = BoundsPolicy.atMost(KeyboardGeometry.keySp(getContext(), 22), cellHeight * 1.1f);

@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
@@ -137,7 +139,7 @@ public final class SkinsPage extends ReloadingDetailPage {
         FrameLayout tile = new FrameLayout(context);
         int ring = Ui.dp(context, 2);
         GradientDrawable frame = DrawablePolicy.outlined(Color.TRANSPARENT, Ui.dp(context, 14),
-            card.selected() ? ring : KeyboardGeometry.atLeastOnePixel(context, 1),
+            card.selected() ? ring : DimensionPolicy.atLeastOnePixel(context, 1),
             card.selected() ? Ui.accent(context) : Ui.outline(context));
         ViewPolicy.setBackground(tile, frame);
         int inset = ring + Ui.dp(context, 1);
@@ -172,7 +174,7 @@ public final class SkinsPage extends ReloadingDetailPage {
         LinearLayout tile = Ui.column(context);
         ViewPolicy.setCentered(tile);
         GradientDrawable dashed = DrawablePolicy.outlinedDashed(Ui.accentSoft(context), Ui.dp(context, 14),
-            KeyboardGeometry.atLeastOnePixel(context, 1.5f), Ui.accent(context), Ui.dp(context, 6),
+            DimensionPolicy.atLeastOnePixel(context, 1.5f), Ui.accent(context), Ui.dp(context, 6),
             Ui.dp(context, 4));
         ViewPolicy.setBackground(tile, dashed);
         TextView spark = Ui.centeredLabel(context, "✦", 22, 400, Ui.accent(context));
