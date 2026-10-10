@@ -145,6 +145,24 @@ public final class TextPolicy {
         return value == null ? "" : value.strip();
     }
 
+    /** Strip Unicode whitespace and space characters at both ends, preserving null. */
+    public static String stripSpaceChars(String value) {
+        if (value == null || value.isEmpty()) return value;
+        int start = 0;
+        while (start < value.length()) {
+            int codePoint = value.codePointAt(start);
+            if (!Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint)) break;
+            start += Character.charCount(codePoint);
+        }
+        int end = value.length();
+        while (end > start) {
+            int codePoint = value.codePointBefore(end);
+            if (!Character.isWhitespace(codePoint) && !Character.isSpaceChar(codePoint)) break;
+            end -= Character.charCount(codePoint);
+        }
+        return value.substring(start, end);
+    }
+
     /** Return text unchanged, treating a missing value as empty text. */
     public static String emptyIfNull(String value) {
         return value == null ? "" : value;

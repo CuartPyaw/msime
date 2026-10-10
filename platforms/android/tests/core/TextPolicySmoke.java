@@ -40,6 +40,11 @@ public final class TextPolicySmoke {
             "ASCII letters must be recognized");
         check(!TextPolicy.isAsciiLetter('0') && !TextPolicy.isAsciiLetter(0xff21),
             "digits and full-width letters are not ASCII letters");
+        check(TextPolicy.stripSpaceChars("\u2003\u00a0text\u3000").equals("text"),
+            "space-character trimming must cover Unicode space separators");
+        check(TextPolicy.stripSpaceChars(null) == null
+                && TextPolicy.stripSpaceChars("\u2003").isEmpty(),
+            "space-character trimming preserves null and removes all-space text");
         System.out.println("Android shared text policy passed");
     }
 }
