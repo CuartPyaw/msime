@@ -6966,4 +6966,19 @@ fn the_sentence_is_corrected_in_place_and_committed_whole() {
     assert_eq!(committed.commit.as_deref(), Some("我去北京"));
     assert!(committed.view.conversion.is_empty());
     assert!(committed.view.editing_text.is_empty());
+
+    // 回车上屏改好的汉字；它不是拼出来的英文单词，不去学英文词库（这里没有英文词库，学了就会报诊断）。
+    type_characters(&mut runtime, "woqubeijing");
+    runtime
+        .dispatch(Action::Command(Command::ConversionLeft))
+        .unwrap();
+    runtime
+        .dispatch(Action::Command(Command::ConversionLeft))
+        .unwrap();
+    character(&mut runtime, b'2');
+    let entered = runtime
+        .dispatch(Action::Command(Command::CommitRaw))
+        .unwrap();
+    assert_eq!(entered.commit.as_deref(), Some("我去北京"));
+    assert_eq!(entered.diagnostic, None);
 }

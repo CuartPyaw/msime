@@ -506,6 +506,11 @@ impl Session {
         }
     }
 
+    /// 整句改字的左移，进入改字时从第 `index` 个候选开始（`crate::session::Session::conversion_left_from`）。
+    pub fn conversion_left_from(&mut self, index: usize) -> Result<EngineResult> {
+        Ok(result_for(self.inner.conversion_left_from(index)))
+    }
+
     pub fn select(&mut self, index: usize) -> Result<EngineResult> {
         Ok(result_for(self.inner.select(index)))
     }
@@ -605,7 +610,9 @@ impl Session {
             !segmentation.is_empty() && is_complete_pinyin_input(segmentation)
         };
         // 计算、指令和名单模式里是算式、触发词或键，网址也不是英文单词，都不是用户拼出的词，不进英文词库。
-        let should_learn = !before.local_mode.generates_text()
+        // 整句改字时回车上屏的是改好的汉字，不是拼出来的字母。
+        let should_learn = before.conversion.is_empty()
+            && !before.local_mode.generates_text()
             && before.local_mode != LocalInputMode::Url
             && (before.dedicated_english
                 || before.local_mode != LocalInputMode::None

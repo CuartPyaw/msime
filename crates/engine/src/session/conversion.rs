@@ -25,8 +25,10 @@ pub(super) struct ConversionEdit {
     /// 光标在第几个字之前；等于字数时在句末，没有候选。
     focus: usize,
     rows: Vec<WordItem>,
-    /// 进入改字时的首选。没有钉住任何段就上屏时原样上屏它；否则上屏的整句沿用它的 `pinyin` 和方案，组字推进因此消耗整个组字。
+    /// 进入改字时的那一行。没有钉住任何段就上屏时原样上屏它；否则上屏的整句沿用它的 `pinyin` 和方案，组字推进因此消耗整个组字。
     origin: WordItem,
+    /// `origin` 在拼音候选列表里的位置。
+    origin_index: usize,
 }
 
 impl ConversionEdit {
@@ -72,6 +74,7 @@ impl ConversionEdit {
             pins: Vec::new(),
             rows: Vec::new(),
             origin: row.clone(),
+            origin_index: 0,
         })
     }
 
@@ -153,8 +156,17 @@ impl InputSession {
             && self.temporary_original_scheme.is_none()
     }
 
-    /// `ConversionLeft` / `ConversionRight`。不在改字里时左移尝试进入改字；进不了（右移、首选不是可改的整句）时为 `None`，调用方按字母光标处理。
+    /// `ConversionLeft` / `ConversionRight`。不在改字里时左移从首选尝试进入改字；进不了（右移、首选不是可改的整句）时为 `None`，调用方按字母光标处理。
     pub(super) fn move_conversion(&mut self, command: Command) -> Option<KeyResult> {
+        self.move_conversion_from(command, 0)
+    }
+
+    /// 同 `move_conversion`，进入改字时从第 `row` 个候选开始：宿主高亮的那一行可能因为 runtime 的重排不在首位，改的应当是用户看着的那一句。
+    pub(super) fn move_conversion_from(
+        &mut self,
+        command: Command,
+        row_index: usize,
+    ) -> Option<KeyResult> {
         if let Some(edit) = self.conversion.as_mut() {
             let count = edit.syllables.len();
             edit.focus = if command == Command::ConversionLeft {
@@ -168,11 +180,13 @@ impl InputSession {
         if command != Command::ConversionLeft || !self.conversion_applies() {
             return None;
         }
-        let row = self.candidates().first()?;
+        let row = self.candidates().get(row_index)?;
         if !self.selection_completes_composition(&row.pinyin, &row.word, row.scheme) {
             return None;
         }
-        let edit = ConversionEdit::from_row(row)?;
+        let mut edit = ConversionEdit::from_row(row)?;
+        // 没钉住任何段就上屏时，上屏的是这一行。
+        edit.origin_index = row_index;
         self.caret = None;
         self.conversion = Some(edit);
         self.refresh_conversion_rows();
@@ -253,7 +267,7 @@ impl InputSession {
             return KeyResult::unhandled();
         };
         if edit.pins.is_empty() {
-            return self.commit(0);
+            return self.commit(edit.origin_index);
         }
         let text = edit.text();
         let mut item = edit.origin;

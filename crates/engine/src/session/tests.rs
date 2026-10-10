@@ -6300,3 +6300,38 @@ fn shuangpin_enters_the_same_sentence() {
         Some("我去北京")
     );
 }
+
+#[test]
+fn the_conversion_starts_from_the_highlighted_row() {
+    let fixture = Fixture::new(CONVERSION_FIXTURE);
+    let mut session = conversion_session(&fixture);
+    // 另一条整句排在第二位（宿主高亮着它，比如 runtime 把它重排到了前面）。
+    let mut second = session.input.mixed_candidates[0].clone();
+    second.word = "我去北京".to_owned();
+    second.sentence_words = vec!["我".into(), "去".into(), "北京".into()];
+    session.input.mixed_candidates.insert(1, second);
+    assert!(session.conversion_left_from(1).handled);
+    assert_eq!(session.snapshot().conversion, "我去北京");
+    assert_eq!(session.snapshot().conversion_focus, (3, 4));
+    // 已在改字里时与普通的左移相同，不再换行。
+    session.conversion_left_from(0);
+    assert_eq!(session.snapshot().conversion, "我去北京");
+    assert_eq!(session.snapshot().conversion_focus, (2, 4));
+    // 什么都没改就上屏时，上屏的是进入改字时的那一行。
+    session.command(Command::Cancel);
+    session.conversion_left_from(1);
+    for _ in 0..4 {
+        session.command(Command::ConversionRight);
+    }
+    assert_eq!(
+        session.command(Command::CommitCandidate).commit.as_deref(),
+        Some("我去北京")
+    );
+
+    // 高亮的不是覆盖整个组字的句子时进不了改字，按字母光标左移。
+    type_text(&mut session, "woqubeijing");
+    let prefix = index_of(&session, "我");
+    assert!(session.conversion_left_from(prefix).handled);
+    assert!(session.snapshot().conversion.is_empty());
+    assert_eq!(session.snapshot().caret_position, 10);
+}

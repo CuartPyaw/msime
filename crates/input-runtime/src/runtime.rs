@@ -1981,6 +1981,10 @@ impl<E: InputEngine> Runtime<E> {
                     self.engine.select(self.engine_index(page_start + slot))
                 })
             }
+            // 进入整句改字时改的是用户高亮着的那一句，它可能被重排过，不在引擎的首位。
+            Action::Command(Command::ConversionLeft) if self.cached.conversion.is_empty() => self
+                .engine
+                .conversion_left_from(self.engine_index(self.highlighted)),
             Action::Command(command) => self.engine.command(command),
             Action::SegmentBackspace => self.engine.segment_command(SegmentCommand::Backspace),
             Action::SegmentMoveLeft => self.engine.segment_command(SegmentCommand::MoveLeft),

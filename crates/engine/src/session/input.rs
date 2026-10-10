@@ -864,6 +864,16 @@ impl InputSession {
         }
     }
 
+    /// `Session::conversion_left_from`。
+    pub fn conversion_left_from(&mut self, index: usize) -> KeyResult {
+        if self.conversion.is_none() && self.has_composition() {
+            if let Some(result) = self.move_conversion_from(Command::ConversionLeft, index) {
+                return result;
+            }
+        }
+        self.handle_command(Command::ConversionLeft)
+    }
+
     /// The Hanja list of the composing Korean syllable. The trigger opens it, or closes it when it is open, and is unhandled when the syllable has no Hanja (a lone jamo), so the host keeps the key. With the list open, Cancel and Backspace only close it and leave the syllable composing, and CommitCandidate chooses the first Hanja. `None` leaves the command to the Korean rules.
     fn handle_korean_hanja_command(&mut self, command: Command) -> Option<KeyResult> {
         match command {

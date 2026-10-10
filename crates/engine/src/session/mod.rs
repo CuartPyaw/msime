@@ -142,6 +142,14 @@ impl Session {
         self.input.handle_command(command)
     }
 
+    /// 整句改字的左移，进入改字时从第 `index` 个候选（宿主高亮的那一行）开始；已在改字里时与 `command(ConversionLeft)` 相同。九宫格和进不了改字时按 `MoveLeft` 处理。
+    pub fn conversion_left_from(&mut self, index: usize) -> KeyResult {
+        if self.nine_key.active() {
+            return self.command(Command::MoveLeft);
+        }
+        self.input.conversion_left_from(index)
+    }
+
     /// `1`..`9` select the first nine candidates.
     pub fn candidate_key(&mut self, value: u8) -> KeyResult {
         if self.nine_key.active() {
