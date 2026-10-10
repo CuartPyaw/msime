@@ -2056,6 +2056,11 @@ public final class MSIMEInputService extends InputMethodService {
         }
     }
 
+    private static String candidateTranslationBindingKey(SyncSwitch.Binding binding) {
+        if (binding == null || binding.accountId() == null) return null;
+        return binding.generation() + ":" + binding.accountId();
+    }
+
     private void verifyCandidateTranslationBinding(long generation,
             java.util.function.Consumer<Boolean> onVerified) {
         long epoch = ++candidateTranslationBindingEpoch;
@@ -2070,17 +2075,18 @@ public final class MSIMEInputService extends InputMethodService {
                             || candidateTranslationStore == null) return;
                     // Signed-out users may use the anonymous translation endpoint, but an
                     // unavailable provider cannot prove which account owns cached rows.
-                    String key = binding == null ? null
-                        : binding.accountId() == null ? null
-                        : binding.generation() + ":" + binding.accountId();
-                    boolean hadEntries = candidateTranslationStore.hasEntries();
-                    boolean same = candidateTranslationStore.bindTo(key);
-                    if (!same) candidateTranslationAppliedGeneration = -1L;
-                    if (key == null) {
+                    String key = candidateTranslationBindingKey(binding);
+                    String currentKey = candidateTranslationBindingKey(SyncSignals.binding(this));
+                    if (!CandidateTranslationPolicy.acceptsBinding(key, currentKey)) {
+                        boolean hadEntries = candidateTranslationStore.hasEntries();
+                        candidateTranslationStore.bindTo(currentKey);
                         if (hadEntries) applyVerifiedCandidateTranslations(generation, true);
                         onVerified.accept(null);
                         return;
                     }
+                    boolean hadEntries = candidateTranslationStore.hasEntries();
+                    boolean same = candidateTranslationStore.bindTo(key);
+                    if (!same) candidateTranslationAppliedGeneration = -1L;
                     candidateTranslationVerifiedGeneration = generation;
                     if (!same && hadEntries) {
                         applyVerifiedCandidateTranslations(generation, true);
