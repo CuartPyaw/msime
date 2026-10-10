@@ -41,7 +41,12 @@ public final class TextPolicy {
 
     public static boolean hasControl(String value) {
         if (value == null) return false;
-        return value.codePoints().anyMatch(Character::isISOControl);
+        return value.codePoints().anyMatch(TextPolicy::isControl);
+    }
+
+    /** Return whether a code point is an ISO control character. */
+    public static boolean isControl(int codePoint) {
+        return Character.isISOControl(codePoint);
     }
 
     public static boolean hasControlExceptWhitespace(String value) {

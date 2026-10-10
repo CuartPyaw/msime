@@ -49,7 +49,7 @@ public final class NineKeySidebarPolicy {
                     token.setLength(0);
                 }
             } else {
-                if (Character.isISOControl(codePoint)) return null;
+                if (TextPolicy.isControl(codePoint)) return null;
                 token.appendCodePoint(codePoint);
                 if (token.codePointCount(0, token.length()) > MAX_SYMBOL_CODE_POINTS) return null;
             }
