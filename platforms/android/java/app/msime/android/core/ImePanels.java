@@ -2185,7 +2185,7 @@ final class ImePanels {
         if (document == null || document.length() > 16_384) return List.of();
         try {
             JSONArray values = new JSONArray(document);
-            int count = Math.min(values.length(), SymbolPanelModel.RECENTS_LIMIT * 2);
+            int count = BoundsPolicy.atMost(values.length(), SymbolPanelModel.RECENTS_LIMIT * 2);
             ArrayList<String> stored = new ArrayList<>(count);
             for (int index = 0; index < count; index++) {
                 Object value = values.opt(index);
