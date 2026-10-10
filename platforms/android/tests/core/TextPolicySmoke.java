@@ -22,6 +22,13 @@ public final class TextPolicySmoke {
         check(!TextPolicy.hasText(null) && !TextPolicy.hasText("  \n\t")
                 && TextPolicy.hasText(" synthetic "),
             "hasText must reject blank text and accept non-blank text");
+        check(TextPolicy.boundedNonBlank("token", 5),
+            "bounded non-blank text is accepted");
+        check(!TextPolicy.boundedNonBlank("", 5)
+                && !TextPolicy.boundedNonBlank("token", 4)
+                && !TextPolicy.boundedNonBlank("bad\u0000", 20)
+                && !TextPolicy.boundedNonBlank("bad\uD800", 20),
+            "bounded non-blank text enforces all shared boundaries");
         check(TextPolicy.initial("词库", "?").equals("词"),
             "initial must return the first basic-plane code point");
         check(TextPolicy.initial("\ud840\udc00字", "?").equals("\ud840\udc00"),

@@ -134,6 +134,12 @@ public final class TextPolicy {
         return !trimmed(value).isEmpty();
     }
 
+    /** Return whether text is non-blank, valid Unicode, control-free and within a UTF-8 byte bound. */
+    public static boolean boundedNonBlank(String value, int maxBytes) {
+        return hasText(value) && utf8Length(value) <= maxBytes
+            && !hasControl(value) && validUnicode(value);
+    }
+
     /** Return text with Unicode whitespace stripped, treating null as empty. */
     public static String stripped(String value) {
         return value == null ? "" : value.strip();
