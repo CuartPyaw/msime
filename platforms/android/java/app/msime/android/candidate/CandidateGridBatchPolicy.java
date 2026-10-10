@@ -25,7 +25,7 @@ public final class CandidateGridBatchPolicy {
     public static int nextCount(int built, int total) {
         if (built < 0 || total < 0 || built > total)
             throw new IllegalArgumentException("Invalid candidate grid counts");
-        return (int) Math.min((long) built + BATCH, total);
+        return (int) BoundsPolicy.atMost((long) built + BATCH, (long) total);
     }
 
     /**
