@@ -17,6 +17,11 @@ public final class TextPolicy {
             || (codePoint >= 'a' && codePoint <= 'z');
     }
 
+    /** Return whether a code point is an ASCII Latin letter or decimal digit. */
+    public static boolean isAsciiLetterOrDigit(int codePoint) {
+        return isAsciiLetter(codePoint) || (codePoint >= '0' && codePoint <= '9');
+    }
+
     public static boolean blank(String value) {
         if (value == null || value.isEmpty()) return true;
         return value.codePoints().allMatch(codePoint -> Character.isWhitespace(codePoint)

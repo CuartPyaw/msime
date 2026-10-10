@@ -58,8 +58,7 @@ public final class HttpAsrPolicy {
         String source = requestId == null ? "" : requestId;
         for (int index = 0; index < source.length() && safe.length() < 40; index++) {
             char value = source.charAt(index);
-            if (value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'
-                    || value >= '0' && value <= '9' || value == '-') {
+            if (TextPolicy.isAsciiLetterOrDigit(value) || value == '-') {
                 safe.append(value);
             }
         }
