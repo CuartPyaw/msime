@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ThemeColorPolicy;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -89,8 +90,8 @@ public final class PageDots extends View {
         super.onDraw(canvas);
         if (count == 0) return;
         Context context = getContext();
-        int accent = Ui.accent(context);
-        int rest = ColorPolicy.withAlpha(Ui.text(context), 0.12f);
+        int accent = ThemeColorPolicy.accent(context);
+        int rest = ColorPolicy.withAlpha(ThemeColorPolicy.text(context), 0.12f);
         float total = active + (count - 1) * (dot + gap);
         float x = getPaddingLeft() + (getWidth() - getPaddingLeft() - getPaddingRight() - total) / 2f;
         float top = getPaddingTop() + (getHeight() - getPaddingTop() - getPaddingBottom() - dot) / 2f;

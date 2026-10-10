@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ThemeColorPolicy;
 import app.msime.android.DimensionPolicy;
 
 import android.content.Context;
@@ -262,8 +263,8 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
         // 「已添加」是终态：没有底色、正文色、不响应；皮肤拿到之后的「使用」仍是可点的 tonal 按钮。
         boolean enabled = action == Action.AVAILABLE || (skin && action == Action.DONE);
         boolean filled = action != Action.DONE || skin;
-        ViewPolicy.setBackground(pill, filled ? Ui.pillRipple(context, Ui.accentSoft(context)) : null);
-        ViewPolicy.setTextColor(pill, filled ? Ui.accent(context) : Ui.text(context));
+        ViewPolicy.setBackground(pill, filled ? Ui.pillRipple(context, ThemeColorPolicy.accentSoft(context)) : null);
+        ViewPolicy.setTextColor(pill, filled ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.text(context));
         ViewPolicy.setEnabled(pill, enabled);
         ViewPolicy.setInteractive(pill, enabled);
         ViewPolicy.setActiveAlpha(pill, action != Action.BUSY, 0.6f);
@@ -307,7 +308,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
         float radius = DimensionPolicy.floatPixels(row.getContext(), GROUP_RADIUS_DP);
         float top = first ? radius : 0f;
         float bottom = last ? radius : 0f;
-        return DrawablePolicy.rounded(Ui.card(row.getContext()),
+        return DrawablePolicy.rounded(ThemeColorPolicy.card(row.getContext()),
             new float[] {top, top, top, top, bottom, bottom, bottom, bottom});
     }
 

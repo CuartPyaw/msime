@@ -98,10 +98,10 @@ def main() -> None:
     for path in HOME.glob("*.java"):
         if "Ui.hairlineView(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享着色视图工厂")
-    if "ViewPolicy.newColorView(context, hairline(context));" not in ui:
+    if "ViewPolicy.newColorView(context, ThemeColorPolicy.hairline(context));" not in ui:
         raise AssertionError("Ui 分隔线没有调用共享着色视图工厂")
     feedback = (HOME / "FeedbackPage.java").read_text(encoding="utf-8")
-    if "ViewPolicy.newColorView(context, Ui.hairline(context));" not in feedback:
+    if "ViewPolicy.newColorView(context, ThemeColorPolicy.hairline(context));" not in feedback:
         raise AssertionError("FeedbackPage 没有调用共享着色视图工厂")
     if "public static void setHorizontalPaddingPx(" in ui:
         raise AssertionError("Ui 仍保留水平像素内边距转发方法")

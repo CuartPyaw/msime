@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ThemeColorPolicy;
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.KeyboardGeometry;
@@ -105,7 +106,7 @@ public final class KeyboardPreview extends View {
 
     private void applyBackground() {
         int radius = Ui.dp(getContext(), cornerRadiusDp);
-        int base = skin == null ? Ui.card(getContext()) : ColorPolicy.parse(skin.background(), Ui.card(getContext()));
+        int base = skin == null ? ThemeColorPolicy.card(getContext()) : ColorPolicy.parse(skin.background(), ThemeColorPolicy.card(getContext()));
         android.graphics.drawable.GradientDrawable surface = DrawablePolicy.rounded(base, radius);
         // 设计皮肤的底是一道渐变，和键盘本身一样画出来；只画纯色时，深色设计上的功能键和回车显得格外跳。
         String end = skin != null && skin.designed() ? skin.gradientEnd() : null;
@@ -159,19 +160,19 @@ public final class KeyboardPreview extends View {
         if (colorsValid) return;
         Context context = getContext();
         if (skin == null) {
-            inkColor = Ui.text(context);
-            letterCapColor = Ui.page(context);
-            functionCapColor = Ui.accentSoft(context);
-            returnCapColor = Ui.accent(context);
-            returnLabelColor = Ui.onAccent(context);
-            secondaryColor = Ui.subText(context);
+            inkColor = ThemeColorPolicy.text(context);
+            letterCapColor = ThemeColorPolicy.page(context);
+            functionCapColor = ThemeColorPolicy.accentSoft(context);
+            returnCapColor = ThemeColorPolicy.accent(context);
+            returnLabelColor = ThemeColorPolicy.onAccent(context);
+            secondaryColor = ThemeColorPolicy.subText(context);
         } else {
             letterCapColor = ColorPolicy.parse(skin.keyBackground(), Color.WHITE);
-            inkColor = ColorPolicy.parse(skin.keyForeground(), Ui.text(context));
+            inkColor = ColorPolicy.parse(skin.keyForeground(), ThemeColorPolicy.text(context));
             functionCapColor = ColorPolicy.parse(skin.functionBackground(), letterCapColor);
-            returnCapColor = ColorPolicy.parse(skin.returnBackground(), Ui.accent(context));
+            returnCapColor = ColorPolicy.parse(skin.returnBackground(), ThemeColorPolicy.accent(context));
             returnLabelColor = ColorPolicy.parse(skin.returnForeground(), Color.WHITE);
-            secondaryColor = ColorPolicy.parse(skin.secondary(), Ui.subText(context));
+            secondaryColor = ColorPolicy.parse(skin.secondary(), ThemeColorPolicy.subText(context));
         }
         colorsValid = true;
     }

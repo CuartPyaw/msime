@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ThemeColorPolicy;
 import app.msime.android.LayoutPolicy;
 
 import app.msime.android.DimensionPolicy;
@@ -142,7 +143,7 @@ public final class SkinsPage extends ReloadingDetailPage {
         int ring = Ui.dp(context, 2);
         GradientDrawable frame = DrawablePolicy.outlined(Color.TRANSPARENT, Ui.dp(context, 14),
             card.selected() ? ring : DimensionPolicy.atLeastOnePixel(context, 1),
-            card.selected() ? Ui.accent(context) : Ui.outline(context));
+            card.selected() ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.outline(context));
         ViewPolicy.setBackground(tile, frame);
         int inset = ring + Ui.dp(context, 1);
         ViewPolicy.setPadding(tile, inset, inset, inset, inset);
@@ -155,7 +156,7 @@ public final class SkinsPage extends ReloadingDetailPage {
 
         TextView name = Ui.centeredLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
             Ui.TEXT_ROW_SUBTITLE + 1, card.selected() ? 600 : 400,
-            card.selected() ? Ui.accent(context) : Ui.text(context));
+            card.selected() ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.text(context));
         ViewPolicy.setSingleLineEllipsized(name);
         LinearLayout.LayoutParams nameParams = Ui.matchWidth();
         nameParams.topMargin = Ui.dp(context, 8);
@@ -175,17 +176,17 @@ public final class SkinsPage extends ReloadingDetailPage {
         ViewPolicy.setCenteredHorizontally(cell);
         LinearLayout tile = Ui.column(context);
         ViewPolicy.setCentered(tile);
-        GradientDrawable dashed = DrawablePolicy.outlinedDashed(Ui.accentSoft(context), Ui.dp(context, 14),
-            DimensionPolicy.atLeastOnePixel(context, 1.5f), Ui.accent(context), Ui.dp(context, 6),
+        GradientDrawable dashed = DrawablePolicy.outlinedDashed(ThemeColorPolicy.accentSoft(context), Ui.dp(context, 14),
+            DimensionPolicy.atLeastOnePixel(context, 1.5f), ThemeColorPolicy.accent(context), Ui.dp(context, 6),
             Ui.dp(context, 4));
         ViewPolicy.setBackground(tile, dashed);
-        TextView spark = Ui.centeredLabel(context, "✦", 22, 400, Ui.accent(context));
+        TextView spark = Ui.centeredLabel(context, "✦", 22, 400, ThemeColorPolicy.accent(context));
         tile.addView(spark);
-        TextView hint = Ui.centeredLabel(context, "描述一句话生成", 12, 400, Ui.accent(context));
+        TextView hint = Ui.centeredLabel(context, "描述一句话生成", 12, 400, ThemeColorPolicy.accent(context));
         tile.addView(hint);
         cell.addView(tile, LayoutPolicy.matchWidthHeightPx(Ui.dp(context, 76) + Ui.dp(context, 6)));
         TextView name = Ui.centeredLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
-            Ui.accent(context));
+            ThemeColorPolicy.accent(context));
         LinearLayout.LayoutParams nameParams = Ui.matchWidth();
         nameParams.topMargin = Ui.dp(context, 8);
         cell.addView(name, nameParams);

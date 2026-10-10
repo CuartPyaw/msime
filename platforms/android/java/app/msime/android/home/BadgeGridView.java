@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ThemeColorPolicy;
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.KeyboardGeometry;
@@ -230,7 +231,7 @@ public final class BadgeGridView extends View {
     }
 
     private void refreshColours(Context context) {
-        int accent = Ui.accent(context);
+        int accent = ThemeColorPolicy.accent(context);
         if (coloursCached && cachedAccent == accent) return;
         cachedAccent = accent;
         coloursCached = true;
@@ -259,9 +260,9 @@ public final class BadgeGridView extends View {
 
     @Override protected void onDraw(Canvas canvas) {
         Context context = getContext();
-        int card = Ui.card(context);
-        int text = Ui.text(context);
-        int sub = Ui.subText(context);
+        int card = ThemeColorPolicy.card(context);
+        int text = ThemeColorPolicy.text(context);
+        int sub = ThemeColorPolicy.subText(context);
         int track = dark() ? ColorPolicy.withAlpha(Color.WHITE, .1f) : ColorPolicy.withAlpha(Color.BLACK, .07f);
         float radius = Ui.dp(context, 20);
         refreshColours(context);
