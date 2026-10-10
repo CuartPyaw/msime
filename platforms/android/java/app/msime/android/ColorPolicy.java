@@ -41,6 +41,15 @@ public final class ColorPolicy {
         return Math.round((from & 0xFF) + ((to & 0xFF) - (from & 0xFF)) * amount);
     }
 
+    /** Blend opaque RGB channels after clamping the mix amount to 0–1. */
+    public static int blendOpaque(int from, int to, float amount) {
+        float bounded = BoundsPolicy.bounded(amount, 0f, 1f);
+        return Color.rgb(
+            blendChannel(from, to, bounded),
+            blendChannel(from >> 8, to >> 8, bounded),
+            blendChannel(from >> 16, to >> 16, bounded));
+    }
+
     /** Build a color state list while validating that each state has a matching color. */
     public static ColorStateList stateList(int[][] states, int[] colors) {
         if (states == null || colors == null || states.length != colors.length) {
