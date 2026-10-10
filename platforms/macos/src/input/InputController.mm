@@ -45,6 +45,7 @@
 #include "../candidate/CandidateSkin.h"
 #include "../settings/ShuangpinProfileNames.h"
 #include "../candidate/CandidateWheelRouting.h"
+#include "../candidate/CandidatePageSize.h"
 #import "../core/ChineseTextConversion.h"
 #include "../core/FullWidthInput.h"
 #include "InputControllerPhysicalKeys.h"
@@ -1756,7 +1757,7 @@ static NSImage *MSIMECandidateLogoImage() {
     const NSUInteger pageSize = MAX((NSUInteger)1, (NSUInteger)_appearance.pageSize);
     const NSUInteger count = _glossSenses.count;
     if (modifiers == 0) {
-        const int slot = msime::mac::PhysicalCandidateDigitSlot(event.keyCode);
+        const int slot = msime::mac::CandidateDigitSlotOnPage(msime::mac::PhysicalCandidateDigitSlot(event.keyCode), pageSize);
         if (slot >= 0) {
             const NSUInteger index = (_glossSenseCursor / pageSize) * pageSize + (NSUInteger)slot;
             if (index < count && (NSUInteger)slot < pageSize) return [self commitGlossSenseAtIndex:index client:sender];
@@ -4876,7 +4877,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     }
     id pageSize = preferences[@"candidate_page_size"];
     NSUInteger strictPageSize = 0;
-    if (MSIMEStrictUnsignedIntegerValue(pageSize, &strictPageSize) && strictPageSize >= 1 && strictPageSize <= 9 && strictPageSize != _requestedPageSize) _requestedPageSize = 0;
+    if (MSIMEStrictUnsignedIntegerValue(pageSize, &strictPageSize) && strictPageSize >= msime::mac::kMinimumCandidatePageSize && strictPageSize <= msime::mac::kMaximumCandidatePageSize && strictPageSize != _requestedPageSize) _requestedPageSize = 0;
     [_appearance applySharedInputPreferences:preferences];
     [_appearance applySharedCandidatePreferences:preferences];
     if (!_appearance.inputModeHUD) [[MSIMEInputModeHUDPanel sharedPanel] orderOut:nil];
@@ -5561,7 +5562,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     // characters.  Let nine-key mode and modified chords reach the Engine.
     const NSEventModifierFlags candidateDigitModifiers = NSEventModifierFlagShift | NSEventModifierFlagControl |
                                                           NSEventModifierFlagOption | NSEventModifierFlagCommand;
-    const int physicalDigit = msime::mac::PhysicalCandidateDigitSlot(event.keyCode);
+    const int physicalDigit = msime::mac::CandidateDigitSlotOnPage(msime::mac::PhysicalCandidateDigitSlot(event.keyCode), _appearance.pageSize);
     NSArray *visibleCandidates = [_view[@"candidates"] isKindOfClass:NSArray.class] ? _view[@"candidates"] : @[];
     const NSEventModifierFlags glossModifiers = event.modifierFlags &
         (NSEventModifierFlagShift | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand);
@@ -5587,7 +5588,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
             _panel.isVisible, digitIsSpelling,
             (event.modifierFlags & candidateDigitModifiers) == NSEventModifierFlagShift,
             MSIMESpellingSymbolString(_view, event.characters))) {
-        const int slot = msime::mac::PhysicalCandidateDigitSlot(event.keyCode);
+        const int slot = physicalDigit;
         if (slot >= 0) {
             // The panel owns the rendered snapshot. If it is from an older
             // generation, consume the key until the new page is visible instead

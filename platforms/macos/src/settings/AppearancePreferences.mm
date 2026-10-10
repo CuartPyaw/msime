@@ -2714,7 +2714,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     id page = preferences[@"candidate_page_size"];
     // Match the shared integer ranges; booleans and fractions are not sizes.
     if (ValidCandidateStyleInteger(font, 12, 32)) _sharedFontSize = font;
-    if (ValidCandidateStyleInteger(page, 1, 9))
+    if (ValidCandidateStyleInteger(page, (NSInteger)msime::mac::kMinimumCandidatePageSize, (NSInteger)msime::mac::kMaximumCandidatePageSize))
         _sharedPageSize = @(msime::mac::NormalizeCandidatePageSize([page unsignedIntegerValue]));
     id theme = preferences[@"theme"];
     if ([ThemeModes() containsObject:theme]) _sharedTheme = [theme copy];

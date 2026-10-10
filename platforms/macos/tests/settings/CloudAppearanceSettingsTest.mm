@@ -137,8 +137,8 @@ int main() {
       assert([MSIMECloudAppearanceSnapshot(defaults) isEqual:saved]);
     }
     // 1 and 6 are sizes the shared preferences accept, so a snapshot carrying either is applied rather
-    // than refused; what stays invalid is a non-number, a non-integer, and anything outside 1..9.
-    for (id invalid in @[@YES, @0, @10, @1.5,
+    // than refused; what stays invalid is a non-number, a non-integer, and anything outside 1..10.
+    for (id invalid in @[@YES, @0, @11, @1.5,
                          [NSDecimalNumber decimalNumberWithString:@"5.0000000000000001"],
                          @"5", NSNull.null]) {
       values = [saved mutableCopy];
@@ -146,7 +146,7 @@ int main() {
       assert(!MSIMEApplyCloudAppearance(values, defaults));
       assert([MSIMECloudAppearanceSnapshot(defaults) isEqual:saved]);
     }
-    for (NSNumber *accepted in @[@1, @4, @6, @9]) {
+    for (NSNumber *accepted in @[@1, @4, @6, @9, @10]) {
       values = [saved mutableCopy];
       values[@"platform.macos.candidate_page_size"] = accepted;
       assert(MSIMEApplyCloudAppearance(values, defaults));
