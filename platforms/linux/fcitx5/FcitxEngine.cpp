@@ -923,6 +923,9 @@ public:
         session_, reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size())).at("view");
     preferences_ = snapshot.at("preferences");
     applyContextOverrides(preferences_);
+    // 智能标点两项由宿主自己处理，按键读的是宿主副本；快照已在本地改好，下一拍读到的存储与它相同、不会重算，所以这里直接跟上，否则托盘关掉智能标点后本会话仍照旧替换。
+    smart_punctuation_ = preferences_.value("smart_punctuation", true);
+    smart_punctuation_repeat_ = preferences_.value("smart_punctuation_repeat", true);
     preferences_snapshot_ = std::move(snapshot);
     saveBooleanPreference(key, enabled);
     render();
@@ -1044,6 +1047,8 @@ public:
         session_, reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size())).at("view");
     preferences_ = snapshot.at("preferences");
     applyContextOverrides(preferences_);
+    // 按键处理读的是这份宿主副本；快照已在本地改好，下一拍读到的存储与它相同、不会重算，所以这里直接跟上，否则菜单勾掉了，`[`/`]` 在本会话里仍按旧值以词定字。
+    word_character_enabled_ = enabled;
     preferences_snapshot_ = std::move(snapshot);
     saveNestedBooleanPreference("word_character", "enabled", enabled);
     render();
@@ -1571,7 +1576,49 @@ public:
     // means no session can ever open on a deployment that installed skins.
     options.erase("candidate_skin_catalog");
     private_ = privateInput();
-    preferences_ = options.value("preferences", Json::object());
+    options_path_ = options.value("preferences_directory", std::string());
+    // The failed save kept across the focus change belongs to its store; once the runtime options point elsewhere it is not retried there, as refreshProviderSockets does while focused.
+    if (preferences_save_retry_ && preferences_save_retry_->directory != options_path_)
+      preferences_save_retry_.reset();
+    // 先定下这次会话用的那一份偏好，再从它读出宿主自己保存的各项（繁体、中文标点、配对标点、智能标点、标点锁定、模式快捷键、启动模式、导航、以词定字）。这几项若在换成存储之前就按 runtime options 读好，之后不再重算：下一拍读到的存储与会话记下的快照相同，不会纠正，于是托盘里切的繁体、中文标点等换个程序又回到文件里的值，`syncSessionChinesePunctuation` 还会把文件里的中文标点推回已按存储建好的会话。
+    auto session_preferences = options.value("preferences", Json::object());
+    if (!options_path_.empty()) {
+      try {
+        auto snapshot = response(msime_client_load_preferences(
+            reinterpret_cast<const uint8_t *>(options_path_.data()), options_path_.size()));
+        if (snapshot.is_object() && snapshot.contains("revision") && snapshot.contains("preferences")) {
+          preferences_snapshot_ = std::move(snapshot);
+          // 状态栏的每一项选择（方案、主题、候选窗明暗、候选布局、云候选、AI 候选、标点、繁体和其余开关）都只写偏好存储，runtime options 文件只有设置页保存时才重写，所以新会话以存储为准，与 refreshPreferences 每一拍和 IBus 宿主（`configured["preferences"]` 跟随存储）一致。此前这里只从存储取方案、双拼方案、全半角和辅助码几项，其余仍取文件里的旧值：托盘里关掉的 AI 候选、换的皮肤在下一个新会话又回到文件里的值，而那一拍读到的存储与会话记下的快照相同，不会再纠正（#6540）。
+          // 存储里还没有文件时（修订号 0）读到的只是版本缺省值，没有哪一项是状态栏选过的，仍以 runtime options 为准。
+          // 键盘自定义照片只给屏幕键盘用，体积可达几百 KiB，设置页发布 runtime options 时同样去掉它（`sync_runtime_options`），这里也不带进 `msime_client_create`，免得整份选项超过 `HOST_OPTIONS_DOCUMENT_LIMIT`。
+          const auto &stored = preferences_snapshot_.at("preferences");
+          auto base = session_preferences;
+          if (stored.is_object() &&
+              msime::linux_host::strict_json_value(preferences_snapshot_, "revision", uint64_t{0}) > 0) {
+            base = stored;
+            if (auto theme = base.find("custom_theme"); theme != base.end() && theme->is_object())
+              if (auto keyboard = theme->find("keyboard"); keyboard != theme->end() && keyboard->is_object())
+                keyboard->erase("photo");
+          }
+          // 下面这几项不论修订号都按存储取（#618 起的规则）；有存储文件时它们已在 base 里，这里只是原样再写一遍。
+          for (const auto *key : {"scheme", "shuangpin_profile", "character_width"})
+            if (stored.contains(key) && stored.at(key).is_string()) base[key] = stored.at(key);
+          for (const auto *section : {"quanpin_helpcode", "shuangpin_helpcode"})
+            if (stored.contains(section) && stored.at(section).is_object() &&
+                stored.at(section).contains("schema") && stored.at(section).at("schema").is_string())
+              base[section]["schema"] = stored.at(section).at("schema");
+          // A 辅助码方案 choice clears the scheme's helpcode pack in the store alone, so the pack follows the store too.
+          for (const auto *scheme : {"quanpin", "shuangpin"})
+            msime::linux_host::set_helpcode_pack(base, scheme, msime::linux_host::helpcode_pack(stored, scheme));
+          expireContextOverrides(stored);
+          session_preferences = std::move(base);
+        }
+      } catch (...) {
+        // The prepared options remain usable for composition; preference actions will retry
+        // through the normal save/reload path when the store becomes available.
+      }
+    }
+    preferences_ = std::move(session_preferences);
     applyContextOverrides(preferences_);
     traditional_ = preferences_.value("traditional_chinese_output", false);
     chinese_punctuation_ = preferences_.value("chinese_punctuation", true);
@@ -1616,37 +1663,6 @@ public:
     const auto wordCharacter = preferences_.value("word_character", Json::object());
     word_character_enabled_ = wordCharacter.value("enabled", true);
     word_character_minus_equal_ = wordCharacter.value("keys", std::string("brackets")) == "minus_equal";
-    options_path_ = options.value("preferences_directory", std::string());
-    // The failed save kept across the focus change belongs to its store; once the runtime options point elsewhere it is not retried there, as refreshProviderSockets does while focused.
-    if (preferences_save_retry_ && preferences_save_retry_->directory != options_path_)
-      preferences_save_retry_.reset();
-    if (!options_path_.empty()) {
-      try {
-        auto snapshot = response(msime_client_load_preferences(
-            reinterpret_cast<const uint8_t *>(options_path_.data()), options_path_.size()));
-        if (snapshot.is_object() && snapshot.contains("revision") && snapshot.contains("preferences")) {
-          preferences_snapshot_ = std::move(snapshot);
-          // Status-bar saves reach the store but never the runtime options file, so for the choices the status bar makes the store is the authority: the file can hold a value no window has chosen since, e.g. after another window's status bar or the settings page moved the store while this context had no session.
-          const auto &stored = preferences_snapshot_.at("preferences");
-          auto base = options.value("preferences", Json::object());
-          for (const auto *key : {"scheme", "shuangpin_profile", "character_width"})
-            if (stored.contains(key) && stored.at(key).is_string()) base[key] = stored.at(key);
-          for (const auto *section : {"quanpin_helpcode", "shuangpin_helpcode"})
-            if (stored.contains(section) && stored.at(section).is_object() &&
-                stored.at(section).contains("schema") && stored.at(section).at("schema").is_string())
-              base[section]["schema"] = stored.at(section).at("schema");
-          // A 辅助码方案 choice clears the scheme's helpcode pack in the store alone, so the pack follows the store too.
-          for (const auto *scheme : {"quanpin", "shuangpin"})
-            msime::linux_host::set_helpcode_pack(base, scheme, msime::linux_host::helpcode_pack(stored, scheme));
-          expireContextOverrides(stored);
-          preferences_ = std::move(base);
-          applyContextOverrides(preferences_);
-        }
-      } catch (...) {
-        // The prepared options remain usable for composition; preference actions will retry
-        // through the normal save/reload path when the store becomes available.
-      }
-    }
     // Only now is options_path_ this session's store: configured any earlier, the sink saw the empty path close() left and stayed shut whatever the switch said.
     configureDiagnostics();
     resources_ = options.value("resources", std::string());

@@ -48,10 +48,35 @@ def main():
             host.msime_client_string_free(raw)
         assert result["ok"], "Host preparation failed"
         options = result["value"]
+        for name in ("msime_client_load_preferences", "msime_client_save_preferences"):
+            getattr(host, name).restype = ctypes.c_void_p
+        host.msime_client_load_preferences.argtypes = [ctypes.c_char_p, ctypes.c_size_t]
+        host.msime_client_save_preferences.argtypes = [
+            ctypes.c_char_p, ctypes.c_size_t, ctypes.c_uint64, ctypes.c_char_p, ctypes.c_size_t]
+
+        def call(raw):
+            assert raw, "Host API returned no result"
+            try:
+                reply = json.loads(ctypes.string_at(raw))
+            finally:
+                host.msime_client_string_free(raw)
+            assert reply["ok"], "Host API request failed"
+            return reply["value"]
+
+        def publish():
+            # 设置页的做法：先写偏好存储，再把同一份偏好抄进 runtime options。插件新建会话时以存储为准，只改文件的偏好不会生效。
+            store = options["preferences_directory"].encode()
+            snapshot = call(host.msime_client_load_preferences(store, len(store)))
+            revision = snapshot["revision"]
+            snapshot["preferences"] = options["preferences"]
+            document = json.dumps(snapshot).encode()
+            call(host.msime_client_save_preferences(store, len(store), revision, document, len(document)))
+            (root / "options.json").write_text(json.dumps(options))
+
         options["preferences"].update(learning=False, cloud_candidates=False)
         if "--wayland-punctuation" in sys.argv[4:]:
             options["preferences"]["usage_reporting"] = False
-        (root / "options.json").write_text(json.dumps(options))
+        publish()
         config = root / "config" / "fcitx5"
         config.mkdir(parents=True)
         (config / "profile").write_text(
@@ -128,7 +153,7 @@ def main():
                             options["preferences"].pop("show_candidate_page_number", None)
                         else:
                             options["preferences"]["show_candidate_page_number"] = show_page
-                        (root / "options.json").write_text(json.dumps(options))
+                        publish()
                         control.ReloadAddonConfig("msime")
                         panels.clear()
                         for character in "nihao":

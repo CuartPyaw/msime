@@ -571,6 +571,8 @@ int candidateThemePriority() {
       const auto paper = save_theme("paper");
       refresh(active_state, paper);
       require(option("Theme") == "msime", "设置页的主动主题选择接管第三方主题");
+      // 存储里是 paper 时会话写出的主题文件，下面的新会话按字节比对，不在测试里另抄一份颜色。
+      const auto paper_theme = theme_text();
       pick_third_party(false);
       active_window.focusOut();
       old_window.focusIn();
@@ -580,6 +582,8 @@ int candidateThemePriority() {
               "旧窗口补读已处理的偏好不能夺回第三方主题");
       refresh(old_state, save_theme("ink"));
       require(option("Theme") == "msime", "旧窗口中的下一次主动主题选择仍能接管");
+      const auto ink_theme = theme_text();
+      require(ink_theme != paper_theme, "ink 与 paper 写出的主题文件不同");
       pick_third_party(false);
       require(old_state->setThemeChoice("paper"), "主题菜单主动选择成功");
       old_state->preferences_save_job_.wait();
@@ -617,11 +621,120 @@ int candidateThemePriority() {
         settings_return_state->refreshProviderSockets();
         require(option("Theme") == "msime" && (!has_dark_theme || option("DarkTheme") == "msime"),
                 "设置页的新选择不能在新会话建立基线时丢掉主动接管");
+        // 只写了存储、runtime options 还是旧主题时，新会话画的也是存储里的主题，而不是文件里的。
+        require(theme_text() == (publish_options ? paper_theme : ink_theme),
+                "设置页保存后的新会话按存储里的主题写主题文件");
         pick_third_party(false);
         settings_return_state->refreshProviderSockets();
         require(option("Theme") == "Nord-Dark", "新会话处理过选择后也不能后台夺回第三方主题");
         settings_return_window.focusOut();
         settings_return_state->close();
+      }
+      // 托盘里的选择只写存储、不重写 runtime options（此时文件里仍是 paper）：切到别的程序新建会话后，皮肤、候选布局、候选窗明暗和云候选都不能回到文件里的旧值（#6540）。
+      {
+        FixtureContext menu_window(instance.inputContextManager());
+        menu_window.focusIn();
+        auto *menu_state = menu_window.propertyFor(&engine.factory_);
+        require(menu_state->ensure(), "托盘选择的窗口建立会话");
+        const auto wait_save = [&] {
+          menu_state->preferences_save_job_.wait();
+          menu_state->waitForPreferenceSave();
+        };
+        require(menu_state->setThemeChoice("ink"), "主题菜单选择 ink");
+        wait_save();
+        require(option("Theme") == "msime" && theme_text() == ink_theme, "菜单选择立即写出 ink 主题");
+        menu_window.focusOut();
+        FixtureContext next_window(instance.inputContextManager());
+        next_window.focusIn();
+        auto *next_state = next_window.propertyFor(&engine.factory_);
+        require(next_state->ensure(), "切到另一个程序新建会话");
+        next_state->refreshProviderSockets();
+        require(next_state->preferences_.value("global_theme", std::string()) == "ink",
+                "新会话的偏好是托盘选的 ink");
+        require(next_state->currentThemeChoice() == "ink", "新会话的主题菜单勾选 ink");
+        require(option("Theme") == "msime" && theme_text() == ink_theme,
+                "新会话不把主题文件改回 runtime options 里的 paper");
+        const auto layout = next_state->preferences_.value("candidate_layout", std::string("vertical"));
+        const auto appearance = next_state->preferences_.value("candidate_theme", std::string("follow"));
+        const bool cloud = next_state->preferences_.value("cloud_candidates", true);
+        require(next_state->cycleCandidateLayout(), "托盘切换候选布局");
+        require(next_state->cycleCandidateTheme(), "托盘切换候选窗明暗");
+        require(next_state->toggleCloudCandidates(), "托盘切换云候选");
+        // 宿主自己另存一份的几项（繁体、中文标点、成对标点、智能标点、以词定字、标点锁定）：建会话时若先按文件读好、再换成存储，它们留着文件里的值。标点锁定放最后，锁定后中文标点的切换不生效。
+        const bool traditional = next_state->traditional_;
+        const bool chinese_punctuation = next_state->chinese_punctuation_;
+        const bool paired_punctuation = next_state->paired_punctuation_;
+        const bool word_character = next_state->word_character_enabled_;
+        const auto punctuation_lock = next_state->punctuation_lock_;
+        const bool smart_punctuation = next_state->smart_punctuation_;
+        require(next_state->toggleTraditional(), "托盘切换繁体");
+        require(next_state->toggleChinesePunctuation(), "托盘切换中文标点");
+        require(next_state->togglePairedPunctuation(), "托盘切换成对标点");
+        require(next_state->toggleTopLevelBoolean("smart_punctuation", true), "托盘切换智能标点");
+        require(next_state->toggleWordCharacter(), "托盘切换以词定字");
+        require(next_state->cyclePunctuationLock(), "托盘切换标点锁定");
+        next_state->preferences_save_job_.wait();
+        next_state->waitForPreferenceSave();
+        next_state->refreshProviderSockets();
+        const auto toggled = next_state->preferences_;
+        const auto toggled_theme = theme_text();
+        require(toggled.value("candidate_layout", layout) != layout &&
+                    toggled.value("candidate_theme", appearance) != appearance &&
+                    toggled.value("cloud_candidates", cloud) != cloud,
+                "托盘的三项选择在当前会话生效");
+        require(next_state->traditional_ != traditional && next_state->chinese_punctuation_ != chinese_punctuation &&
+                    next_state->paired_punctuation_ != paired_punctuation &&
+                    next_state->smart_punctuation_ != smart_punctuation &&
+                    next_state->word_character_enabled_ != word_character &&
+                    next_state->punctuation_lock_ != punctuation_lock,
+                "托盘的繁体、标点和以词定字选择在当前会话生效");
+        next_window.focusOut();
+        // 设置应用另存了一张屏幕键盘照片（合成的 1x1 PNG）：存储里有，新会话交给 Host API 的偏好里没有。
+        {
+          auto snapshot = response(msime_client_load_preferences(
+              reinterpret_cast<const uint8_t *>(state_directory.data()), state_directory.size()));
+          const auto revision = snapshot.at("revision").get<uint64_t>();
+          snapshot["preferences"]["custom_theme"]["keyboard"]["photo"] =
+              "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+          const auto encoded = snapshot.dump();
+          response(msime_client_save_preferences(
+              reinterpret_cast<const uint8_t *>(state_directory.data()), state_directory.size(), revision,
+              reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
+        }
+        FixtureContext third_window(instance.inputContextManager());
+        third_window.focusIn();
+        auto *third_state = third_window.propertyFor(&engine.factory_);
+        require(third_state->ensure(), "再切到一个程序新建会话");
+        third_state->refreshProviderSockets();
+        for (const auto *key : {"global_theme", "candidate_layout", "candidate_theme", "cloud_candidates"})
+          require(third_state->preferences_.value(key, Json()) == toggled.value(key, Json()),
+                  "新会话保留托盘选的皮肤、候选布局、候选窗明暗和云候选");
+        require(third_state->traditional_ == !traditional &&
+                    engine.traditional_action_.isChecked(&third_window) == !traditional,
+                "新会话的繁体输出和菜单勾选跟随托盘的选择");
+        require(third_state->chinese_punctuation_ == !chinese_punctuation &&
+                    third_state->session_chinese_punctuation_ == !chinese_punctuation &&
+                    engine.chinese_punctuation_action_.isChecked(&third_window) == !chinese_punctuation,
+                "新会话的中文标点、交给会话的标点和菜单勾选跟随托盘的选择");
+        require(third_state->paired_punctuation_ == !paired_punctuation &&
+                    engine.paired_punctuation_action_.isChecked(&third_window) == !paired_punctuation,
+                "新会话的成对标点和菜单勾选跟随托盘的选择");
+        require(third_state->smart_punctuation_ == !smart_punctuation &&
+                    engine.smart_punctuation_action_.isChecked(&third_window) == !smart_punctuation,
+                "新会话的智能标点和菜单勾选跟随托盘的选择");
+        require(third_state->word_character_enabled_ == !word_character &&
+                    third_state->punctuation_lock_ == next_state->punctuation_lock_,
+                "新会话的以词定字和标点锁定跟随托盘的选择");
+        require(theme_text() == toggled_theme, "新会话的主题文件与托盘选择后的一致");
+        require(third_state->preferences_snapshot_.at("preferences").at("custom_theme").at("keyboard").contains("photo"),
+                "存储快照保留键盘照片");
+        require(!third_state->preferences_.at("custom_theme").at("keyboard").contains("photo") &&
+                    !third_state->voice_host_options_.at("preferences").at("custom_theme").at("keyboard").contains("photo"),
+                "建立会话的偏好不带键盘照片");
+        third_window.focusOut();
+        third_state->close();
+        next_state->close();
+        menu_state->close();
       }
       // 不带偏好存储的合法 runtime options 仍可建立会话，不能对 null 快照调用 value()。
       old_state->close();
@@ -939,7 +1052,23 @@ int main(int argc, char **argv) {
             listen(voiceServer, 1) == 0, "voice listener");
     options["voice_provider_socket"] = voiceSocketPath;
     const auto path = std::string(directory) + "/runtime-options.json";
-    std::ofstream(path) << options.dump();
+    // 设置页的做法：先写偏好存储，再把同一份偏好抄进 runtime options。新会话以存储为准，所以夹具要生效的偏好两边都写；`edit` 同时改存储和 `options`。
+    const auto settingsPageSaves = [&](const auto &edit) {
+      const auto store = options.at("preferences_directory").get<std::string>();
+      auto snapshot = response(msime_client_load_preferences(
+          reinterpret_cast<const uint8_t *>(store.data()), store.size()));
+      const auto revision = snapshot.at("revision").get<uint64_t>();
+      edit(snapshot["preferences"]);
+      edit(options["preferences"]);
+      const auto document = snapshot.dump();
+      // 内容没变的保存保留原修订号，所以这里只要求保存成功（失败时 response 抛出）。
+      response(msime_client_save_preferences(
+          reinterpret_cast<const uint8_t *>(store.data()), store.size(), revision,
+          reinterpret_cast<const uint8_t *>(document.data()), document.size()));
+      std::ofstream(path) << options.dump();
+    };
+    const auto fixturePreferences = options.at("preferences");
+    settingsPageSaves([&](Json &preferences) { preferences = fixturePreferences; });
     // Online and cloud clipboard requests arrive after earlier native checks; voice starts its listener immediately before its own key test below.
     constexpr int kProviderAcceptMs = 30000;
     std::thread provider([providerServer, ai, suggestion] {
@@ -2219,6 +2348,12 @@ int main(int argc, char **argv) {
     ic.focusIn();
     engine.activate(entry, focus);
     require(state->session_ != 0 && state->session_ != heldSession, "focus in creates a fresh host session");
+    // 新会话以存储为准：热加载存进去的横向布局不回到 runtime options 里的纵向（#6540）。再从托盘切回纵向，下面验证旧候选页保留自己的布局快照。
+    require(state->preferences_.value("candidate_layout", std::string{}) == "horizontal",
+            "a fresh session keeps the stored horizontal layout");
+    engine.candidate_layout_action_.activate(&ic);
+    require(state->preferences_.value("candidate_layout", std::string{}) == "vertical",
+            "the tray switches the fresh session back to vertical");
     for (const auto sym : {FcitxKey_n, FcitxKey_i, FcitxKey_h, FcitxKey_a, FcitxKey_o,
                            FcitxKey_j, FcitxKey_i, FcitxKey_e})
       require(key(sym), "composition after refocus");
@@ -2313,7 +2448,7 @@ int main(int argc, char **argv) {
     provider.join();
     auto page = ic.inputPanel().candidateList();
     require(page && page->layoutHint() == fcitx::CandidateLayoutHint::Vertical,
-            "bootstrap vertical layout reaches native candidate list");
+            "the tray's vertical layout reaches native candidate list");
     require(horizontalPage->layoutHint() == fcitx::CandidateLayoutHint::Horizontal,
             "previous candidate page retains its layout snapshot");
     require(page && page->size() == 2 && page->toPageable()->hasNext(), "runtime candidate page");
@@ -2756,10 +2891,11 @@ int main(int argc, char **argv) {
       return send(client.fd, reply.data(), reply.size(), MSG_NOSIGNAL) == static_cast<ssize_t>(reply.size());
     });
     options["translation_provider_socket"] = translationPath;
-    options["preferences"]["candidate_translations"] = true;
-    options["preferences"]["candidate_english_gloss"] = false;
-    options["preferences"]["translation_target_language"] = "en";
-    std::ofstream(path) << options.dump();
+    settingsPageSaves([](Json &preferences) {
+      preferences["candidate_translations"] = true;
+      preferences["candidate_english_gloss"] = false;
+      preferences["translation_target_language"] = "en";
+    });
     require(key(FcitxKey_n) && key(FcitxKey_i), "translation composition");
     state->refreshTranslations();
     require(!state->translation_job_.valid(), "translation waits for idle debounce");
@@ -3362,6 +3498,10 @@ int main(int argc, char **argv) {
         const auto revision = snapshot.at("revision").get<uint64_t>();
         snapshot["preferences"]["scheme"] = "zhuyin";
         snapshot["preferences"]["character_width"] = "halfwidth";
+        // 新会话的其余偏好也以存储为准，文件里这几项要同样写进存储才会生效。
+        snapshot["preferences"]["last_chinese_scheme"] = "quanpin";
+        snapshot["preferences"]["number_row_selection"] = true;
+        snapshot["preferences"]["vietnamese"]["input_method"] = "vni";
         snapshot["revision"] = revision + 1;
         const auto document = snapshot.dump();
         const auto saved = response(msime_client_save_preferences(
