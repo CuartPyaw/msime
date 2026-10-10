@@ -63,7 +63,7 @@ public final class ClipboardSegmentation {
             String piece = source.substring(start, end);
             if (TextPolicy.blank(piece)) {
                 appendSeparator(segments, piece);
-            } else if (isIdeographRun(piece) && piece.codePointCount(0, piece.length()) > MAX_IDEOGRAPH_RUN) {
+            } else if (isIdeographRun(piece) && TextPolicy.codePointLength(piece) > MAX_IDEOGRAPH_RUN) {
                 for (int offset = 0; offset < piece.length(); ) {
                     int next = piece.offsetByCodePoints(offset, 1);
                     segments.add(new Segment(piece.substring(offset, next), false));
