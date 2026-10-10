@@ -55,7 +55,7 @@ public final class BackspaceSwipePolicy {
         float preferred = keyTop - ARM_DP * density;
         float lowest = (MARGIN_DP + MIN_BOX_HEIGHT_DP) * density;
         float highestAllowed = keyTop - (REVEAL_DP + MIN_ARM_TRAVEL_DP) * density;
-        return Math.min(Math.max(preferred, lowest), highestAllowed);
+        return BoundsPolicy.bounded(preferred, lowest, highestAllowed);
     }
 
     /**
@@ -72,7 +72,7 @@ public final class BackspaceSwipePolicy {
             BoundsPolicy.nonNegative(surfaceWidth - 2 * margin));
         float center = (keyLeft + keyRight) / 2f;
         float left = BoundsPolicy.bounded(center - width / 2f, margin,
-            Math.max(margin, surfaceWidth - margin - width));
+            BoundsPolicy.atLeast(surfaceWidth - margin - width, margin));
         return new Box(left, top, left + width, bottom);
     }
 
