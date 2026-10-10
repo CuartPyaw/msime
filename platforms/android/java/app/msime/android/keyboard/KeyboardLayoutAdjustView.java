@@ -86,15 +86,15 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
 
         Button close = button("完成", "返回键盘", listener::close);
         bar.addView(close, LayoutPolicy.wrapMatchParentParams());
-        update(KeyboardGeometry.DEFAULT_KEY_SPACING_TENTHS,
-            KeyboardGeometry.DEFAULT_ROW_SPACING_TENTHS,
+        update(KeyboardSpacingPolicy.DEFAULT_KEY_SPACING_TENTHS,
+            KeyboardSpacingPolicy.DEFAULT_ROW_SPACING_TENTHS,
             KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_DP, false);
     }
 
     public void update(int keySpacing, int rowSpacing, int heightAdjustment,
             boolean voiceShortcutEnabled) {
-        this.keySpacing = KeyboardGeometry.keySpacing(keySpacing);
-        this.rowSpacing = KeyboardGeometry.rowSpacing(rowSpacing);
+        this.keySpacing = KeyboardSpacingPolicy.keySpacing(keySpacing);
+        this.rowSpacing = KeyboardSpacingPolicy.rowSpacing(rowSpacing);
         this.heightAdjustment = KeyboardGeometry.heightAdjustment(heightAdjustment);
         if (voiceShortcut.isChecked() != voiceShortcutEnabled)
             voiceShortcut.setChecked(voiceShortcutEnabled);

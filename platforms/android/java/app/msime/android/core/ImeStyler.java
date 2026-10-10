@@ -109,9 +109,9 @@ final class ImeStyler {
         s.imeDebugOverlay.refreshPreferences();
     }
 
-    /** The key spacing the displayed layout draws with: the user's setting, capped on the eleven-column Dachen rows (KeyboardGeometry.layoutKeySpacing). */
+    /** The key spacing the displayed layout draws with: the user's setting, capped on the eleven-column Dachen rows (KeyboardSpacingPolicy.layoutKeySpacing). */
     private int layoutKeySpacingTenths() {
-        return KeyboardGeometry.layoutKeySpacing(s.touchKeySpacingTenths, s.displayedTouchLayout(s.view));
+        return KeyboardSpacingPolicy.layoutKeySpacing(s.touchKeySpacingTenths, s.displayedTouchLayout(s.view));
     }
 
     void applyKeyboardGeometry(View node) {

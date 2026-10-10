@@ -18,17 +18,17 @@ public final class KeyboardLayoutAdjustPolicy {
     }
 
     public static int keySpacingFromDrag(int baseTenths, float translationDp) {
-        if (!Float.isFinite(translationDp)) return KeyboardGeometry.keySpacing(baseTenths);
+        if (!Float.isFinite(translationDp)) return KeyboardSpacingPolicy.keySpacing(baseTenths);
         int delta = Math.round(translationDp * 10f / SPACING_DRAG_SCALE_DP);
-        return BoundsPolicy.bounded(baseTenths + delta, KeyboardGeometry.MIN_KEY_SPACING_TENTHS,
-            KeyboardGeometry.MAX_KEY_SPACING_TENTHS);
+        return BoundsPolicy.bounded(baseTenths + delta, KeyboardSpacingPolicy.MIN_KEY_SPACING_TENTHS,
+            KeyboardSpacingPolicy.MAX_KEY_SPACING_TENTHS);
     }
 
     public static int rowSpacingFromDrag(int baseTenths, float translationDp) {
-        if (!Float.isFinite(translationDp)) return KeyboardGeometry.rowSpacing(baseTenths);
+        if (!Float.isFinite(translationDp)) return KeyboardSpacingPolicy.rowSpacing(baseTenths);
         int delta = Math.round(translationDp * 10f / SPACING_DRAG_SCALE_DP);
-        return BoundsPolicy.bounded(baseTenths + delta, KeyboardGeometry.MIN_ROW_SPACING_TENTHS,
-            KeyboardGeometry.MAX_ROW_SPACING_TENTHS);
+        return BoundsPolicy.bounded(baseTenths + delta, KeyboardSpacingPolicy.MIN_ROW_SPACING_TENTHS,
+            KeyboardSpacingPolicy.MAX_ROW_SPACING_TENTHS);
     }
 
     public static int heightFromDrag(int baseAdjustment, float translationDp) {

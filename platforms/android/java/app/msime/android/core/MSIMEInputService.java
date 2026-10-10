@@ -242,8 +242,8 @@ public final class MSIMEInputService extends InputMethodService {
     int candidatePreeditFontSize = 16;
     CandidateAppearance.Palette candidateAppearance =
         CandidateAppearance.fromSkin(KeyboardSkin.system(false));
-    int touchKeySpacingTenths = KeyboardGeometry.DEFAULT_KEY_SPACING_TENTHS;
-    int touchRowSpacingTenths = KeyboardGeometry.DEFAULT_ROW_SPACING_TENTHS;
+    int touchKeySpacingTenths = KeyboardSpacingPolicy.DEFAULT_KEY_SPACING_TENTHS;
+    int touchRowSpacingTenths = KeyboardSpacingPolicy.DEFAULT_ROW_SPACING_TENTHS;
     int touchKeyboardHeightAdjustment = KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_DP;
     private boolean touchVoiceShortcutEnabled;
     /** 九键数字键面用计算器顺序（7 8 9 在上），来自共享偏好 `touch_number_keypad_order`。 */
@@ -1806,9 +1806,9 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private void applyTouchGeometry(JSONObject preferences) {
-        touchKeySpacingTenths = KeyboardGeometry.keySpacing(preferences == null ? -1
+        touchKeySpacingTenths = KeyboardSpacingPolicy.keySpacing(preferences == null ? -1
             : NumberPolicy.strictInt(preferences, "touch_key_spacing_tenths", -1));
-        touchRowSpacingTenths = KeyboardGeometry.rowSpacing(preferences == null ? -1
+        touchRowSpacingTenths = KeyboardSpacingPolicy.rowSpacing(preferences == null ? -1
             : NumberPolicy.strictInt(preferences, "touch_row_spacing_tenths", -1));
         adoptSavedHeightAdjustment(heightAdjustmentFrom(preferences));
         touchVoiceShortcutEnabled = preferences != null
@@ -2200,9 +2200,9 @@ public final class MSIMEInputService extends InputMethodService {
             NumberPolicy.strictInt(preferences, "candidate_font_size", 16));
         int nextPreeditFontSize = CandidateAppearance.fontSize(
             NumberPolicy.strictInt(preferences, "candidate_preedit_font_size", nextFontSize));
-        int nextKeySpacing = KeyboardGeometry.keySpacing(
+        int nextKeySpacing = KeyboardSpacingPolicy.keySpacing(
             NumberPolicy.strictInt(preferences, "touch_key_spacing_tenths", -1));
-        int nextRowSpacing = KeyboardGeometry.rowSpacing(
+        int nextRowSpacing = KeyboardSpacingPolicy.rowSpacing(
             NumberPolicy.strictInt(preferences, "touch_row_spacing_tenths", -1));
         int savedHeightAdjustment = heightAdjustmentFrom(preferences);
         // 键盘里正在调高度时，同步或设置页写来的新快照不能把预览覆盖回去（那样点「完成」时高度已经和保存值相同，什么也不会存下）；新的保存值记为「取消」时要回到的高度。
@@ -4264,7 +4264,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     int halfSpacingPixels(int tenths) {
-        return KeyboardGeometry.halfGapPixels(tenths, DimensionPolicy.density(this));
+        return KeyboardSpacingPolicy.halfGapPixels(tenths, DimensionPolicy.density(this));
     }
 
     /**
@@ -5353,8 +5353,8 @@ public final class MSIMEInputService extends InputMethodService {
 
     private void previewTouchGeometry(boolean keySpacing, int value) {
         if (touchGeometrySaving || traditionalOutputSaving) return;
-        if (keySpacing) touchKeySpacingTenths = KeyboardGeometry.keySpacing(value);
-        else touchRowSpacingTenths = KeyboardGeometry.rowSpacing(value);
+        if (keySpacing) touchKeySpacingTenths = KeyboardSpacingPolicy.keySpacing(value);
+        else touchRowSpacingTenths = KeyboardSpacingPolicy.rowSpacing(value);
         renderLayoutSettingsState();
         imeStyler.applyKeyboardGeometry();
     }
@@ -5367,10 +5367,10 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private void configureSpacingSlider(SeekBar slider, boolean keySpacing) {
-        slider.setMin(keySpacing ? KeyboardGeometry.MIN_KEY_SPACING_TENTHS
-            : KeyboardGeometry.MIN_ROW_SPACING_TENTHS);
-        slider.setMax(keySpacing ? KeyboardGeometry.MAX_KEY_SPACING_TENTHS
-            : KeyboardGeometry.MAX_ROW_SPACING_TENTHS);
+        slider.setMin(keySpacing ? KeyboardSpacingPolicy.MIN_KEY_SPACING_TENTHS
+            : KeyboardSpacingPolicy.MIN_ROW_SPACING_TENTHS);
+        slider.setMax(keySpacing ? KeyboardSpacingPolicy.MAX_KEY_SPACING_TENTHS
+            : KeyboardSpacingPolicy.MAX_ROW_SPACING_TENTHS);
         slider.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar source, int progress, boolean fromUser) {
                 if (fromUser) {
@@ -5429,8 +5429,8 @@ public final class MSIMEInputService extends InputMethodService {
     private void resetTouchGeometry() {
         if (touchGeometrySaving || traditionalOutputSaving || session == 0
                 || preferencesSnapshot == null || preferencesDirectory.isEmpty()) return;
-        touchKeySpacingTenths = KeyboardGeometry.DEFAULT_KEY_SPACING_TENTHS;
-        touchRowSpacingTenths = KeyboardGeometry.DEFAULT_ROW_SPACING_TENTHS;
+        touchKeySpacingTenths = KeyboardSpacingPolicy.DEFAULT_KEY_SPACING_TENTHS;
+        touchRowSpacingTenths = KeyboardSpacingPolicy.DEFAULT_ROW_SPACING_TENTHS;
         touchKeyboardHeightAdjustment = KeyboardGeometry.DEFAULT_HEIGHT_ADJUSTMENT_DP;
         touchVoiceShortcutEnabled = false;
         imeStyler.applyKeyboardGeometry();
@@ -5444,9 +5444,9 @@ public final class MSIMEInputService extends InputMethodService {
         JSONObject acceptedPreferences = preferencesSnapshot.optJSONObject("preferences");
         // 高度在本地设置里，间距和语音入口在共享文档里，各自只在变了时写：只调高度时不去碰共享文档，免得一次无谓的 revision 冲突让保存失败。
         boolean sharedChanged = reset || acceptedPreferences == null
-            || KeyboardGeometry.keySpacing(NumberPolicy.strictInt(
+            || KeyboardSpacingPolicy.keySpacing(NumberPolicy.strictInt(
                 acceptedPreferences, "touch_key_spacing_tenths", -1)) != touchKeySpacingTenths
-            || KeyboardGeometry.rowSpacing(NumberPolicy.strictInt(
+            || KeyboardSpacingPolicy.rowSpacing(NumberPolicy.strictInt(
                 acceptedPreferences, "touch_row_spacing_tenths", -1)) != touchRowSpacingTenths
             || acceptedPreferences.optBoolean("touch_voice_shortcut", false)
                 != touchVoiceShortcutEnabled;
