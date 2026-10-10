@@ -180,9 +180,10 @@ struct CloudDictionaryView: View {
   }
   @MainActor private func load(offset: Int) async throws {
     guard let identity = try await session.user()?.id else { throw BackendAccountClient.Failure(status: 401) }
-    let token = try await authorizedToken(matching: identity)
-    let result = try await client.dictionary(kind, search: search, offset: offset, token: token)
-    _ = try await authorizedToken(matching: identity)
+    let credentials = try await session.credentials(matchingUserID: identity, matchingSessionID: sessionID)
+    let result = try await client.dictionary(kind, search: search, offset: offset,
+      session: session, matchingUserID: credentials.userID, matchingSessionID: credentials.sessionID)
+    sessionID = credentials.sessionID
     page = result; userID = identity
   }
   @MainActor private func run(_ work: @escaping @MainActor () async throws -> Void) {

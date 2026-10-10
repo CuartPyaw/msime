@@ -88,6 +88,22 @@ extension BackendAccountClient {
           }) else { throw Failure(status: 0) }
     return page
   }
+  /// Read a dictionary page while keeping the account session bound across an access-token refresh.
+  /// The page is discarded if the account changes while the request is in flight.
+  func dictionary(_ kind: DictionaryKind, search: String = "", offset: Int = 0,
+                  session: BackendAccountSession,
+                  matchingUserID expected: String? = nil,
+                  matchingSessionID expectedSessionID: UUID? = nil) async throws -> DictionaryPage {
+    let identity = try await session.credentials(matchingUserID: expected,
+                                                 matchingSessionID: expectedSessionID)
+    let page = try await session.authenticated(matchingUserID: identity.userID,
+                                               matchingSessionID: identity.sessionID) { token in
+      try await dictionary(kind, search: search, offset: offset, token: token)
+    }.value
+    try await session.requireSession(matchingUserID: identity.userID, matchingSessionID: identity.sessionID)
+    try Task.checkCancellation()
+    return page
+  }
   func addDictionary(_ kind: DictionaryKind, value: DictionaryValue, token: String) async throws -> DictionaryChange {
     guard Self.validNewDictionaryValue(value, kind: kind) else { throw Failure(status: 400) }
     let change: DictionaryChange = try await json("POST", "/v1/users/me/dictionaries/" + kind.rawValue, token: token, body: JSONEncoder().encode(value))
