@@ -51,7 +51,7 @@ public final class NineKeySidebarPolicy {
             } else {
                 if (TextPolicy.isControl(codePoint)) return null;
                 token.appendCodePoint(codePoint);
-                if (token.codePointCount(0, token.length()) > MAX_SYMBOL_CODE_POINTS) return null;
+                if (TextPolicy.codePointLength(token.toString()) > MAX_SYMBOL_CODE_POINTS) return null;
             }
             index += index < text.length() ? Character.charCount(codePoint) : 1;
         }

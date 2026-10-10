@@ -58,7 +58,7 @@ public final class PlatformSpeechPolicy {
     static String serviceLabel(String service) {
         if (service == null) return null;
         String label = service.strip();
-        if (label.isEmpty() || label.codePointCount(0, label.length()) > MAX_SERVICE_LABEL) return null;
+        if (label.isEmpty() || TextPolicy.codePointLength(label) > MAX_SERVICE_LABEL) return null;
         return label.codePoints().anyMatch(TextPolicy::isControl) ? null : label;
     }
 

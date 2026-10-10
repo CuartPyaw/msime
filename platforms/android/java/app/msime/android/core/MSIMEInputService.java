@@ -1170,7 +1170,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (PairedPunctuationPolicy.caretPassedClosing(closing, after, before)) {
             selectionEcho.commit(closing.length());
             selectionEcho.expect();
-            for (int index = closing.codePointCount(0, closing.length()); index > 0; index--)
+            for (int index = TextPolicy.codePointLength(closing); index > 0; index--)
                 sendDownUpKeyEvents(KeyEvent.KEYCODE_DPAD_LEFT);
             selectionEcho.caretLeft(closing.length());
         } else {
