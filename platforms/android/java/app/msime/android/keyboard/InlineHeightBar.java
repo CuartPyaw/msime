@@ -130,7 +130,7 @@ public final class InlineHeightBar extends LinearLayout {
 
     /** 键盘实际画出来的高度（像素），由键盘外框的布局回调传入；变了才重画。 */
     public void setHeightPixels(int value) {
-        int next = Math.max(0, value);
+        int next = BoundsPolicy.nonNegative(value);
         if (next == heightPixels) return;
         heightPixels = next;
         handle.invalidate();
