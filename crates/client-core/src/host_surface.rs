@@ -39,6 +39,16 @@ pub enum HostPlatform {
 }
 
 impl HostPlatform {
+    /// 这个宿主每页最多排几个候选，见 `HostCapabilities::max_candidate_page_size`。
+    pub fn max_candidate_page_size(self) -> u8 {
+        match self {
+            HostPlatform::Macos | HostPlatform::Linux | HostPlatform::Android => {
+                crate::preferences::MAX_CANDIDATE_PAGE_SIZE
+            }
+            HostPlatform::Windows | HostPlatform::Ios | HostPlatform::Harmony => 9,
+        }
+    }
+
     pub fn as_str(self) -> &'static str {
         match self {
             HostPlatform::Windows => "windows",
@@ -252,6 +262,8 @@ pub struct HostCapabilities {
     /// The one candidate page size the host draws, when it offers no choice. The iOS keyboard numbers its strip's chips 1-9 to match the digits on its symbol layer and lays the expanded panel out in nines, so it holds the Engine to nine whatever the shared setting says; the page shows the count instead of a selector that would do nothing. Absent on a host that pages by the setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixed_candidate_page_size: Option<u8>,
+    /// 宿主能画、能用数字键选的每页候选数上限，共享文档里更大的值在这个宿主上按它截断，设置页也只给到它。macOS、Linux 和 Android 的实体键盘用 0 键选第十个，上限是 `MAX_CANDIDATE_PAGE_SIZE`（10）；Windows 的 TSF 只把 1–9 当作选词键、候选窗口也只排得下九个，iOS 固定九个，鸿蒙没有这项设置、实体键盘也只认 1–9，这三个宿主是 9。
+    pub max_candidate_page_size: u8,
     /// The one candidate layout the host draws, when it offers no choice. The iOS candidate strip is a horizontal row above the keys, so an external skin is adopted there only for its horizontal layout; the skin page has to judge compatibility by that rather than by the shared setting, which defaults to vertical. Absent on a host that follows the setting.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fixed_candidate_layout: Option<crate::preferences::CandidateLayout>,
@@ -601,6 +613,7 @@ impl HostCapabilities {
             // The skin folder is inside the sandbox on HarmonyOS and in the App Group container on iOS, where no file manager reaches it, so the skin is picked and copied in instead.
             skin_directory_import: matches!(platform, HostPlatform::Harmony | HostPlatform::Ios),
             fixed_candidate_page_size: (platform == HostPlatform::Ios).then_some(9),
+            max_candidate_page_size: platform.max_candidate_page_size(),
             fixed_candidate_layout: (platform == HostPlatform::Ios)
                 .then_some(crate::preferences::CandidateLayout::Horizontal),
             // The iOS shortcut bar is the touch counterpart of the Windows floating toolbar, and its buttons follow the same kind of per-component switches. Android 的原生键盘工具栏也按 `touch_toolbar` 选按钮。

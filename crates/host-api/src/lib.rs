@@ -92,6 +92,11 @@ pub(crate) fn valid_uuid_string(value: &str) -> bool {
 
 mod ffi;
 pub use ffi::*;
+
+/// 会话实际用的每页候选数：偏好或宿主覆盖的值，按本库编译到的平台能排的上限截断（`HostPlatform::max_candidate_page_size`）。共享文档在别的设备上存了 10 时，只排得下九个的宿主仍拿到 9。
+fn host_page_size(requested: u8) -> u8 {
+    requested.min(ffi::host::compiled_platform().max_candidate_page_size())
+}
 mod doubao_auth;
 #[cfg(not(any(target_os = "android", target_env = "ohos")))]
 mod handwriting_cells;
@@ -453,7 +458,7 @@ impl HostSession {
         if self.runtime.is_idle() {
             if let Some(size) = self.page_size_override {
                 self.runtime
-                    .set_page_size(size)
+                    .set_page_size(host_page_size(size))
                     .map_err(|e| e.to_string())?;
             }
             // 落定重排模型不属于 Engine，换模型不用重建 Engine。约 25 MB 的权重由 `refresh_resource_packs` 起的后台线程加载，这里只在加载完之后、输入空闲时换上，不在输入线程上读文件；还没加载完就留到下一次。
@@ -584,8 +589,10 @@ impl HostSession {
         self.runtime
             .replace_engine_with_touch_layout(
                 engine,
-                self.page_size_override
-                    .unwrap_or(preferences.candidate_page_size),
+                host_page_size(
+                    self.page_size_override
+                        .unwrap_or(preferences.candidate_page_size),
+                ),
                 preferences.touch_keyboard_layout,
             )
             .map_err(|e| e.to_string())?;

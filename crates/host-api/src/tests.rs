@@ -6135,7 +6135,7 @@ fn custom_translation_plan_preserves_direction_and_filters_visible_sources() {
     }
     for request in [
         json!({"target_language":"unknown","candidates":[]}),
-        json!({"target_language":"en","candidates":vec![json!({"text":"hello","source":0}); 10]}),
+        json!({"target_language":"en","candidates":vec![json!({"text":"hello","source":0}); 11]}),
         json!({"target_language":"en","candidates":[{"text":"hello","source":true}]}),
     ] {
         assert_eq!(plan(request)["ok"], false);
@@ -6245,7 +6245,7 @@ fn tencent_translation_buffers_are_bounded() {
         read(unsafe { msime_client_tencent_translation_http_request(b"x".as_ptr(), 65537) })["ok"],
         false
     );
-    for (length, expected) in [(1048577, 1), (1, 0), (1, 10)] {
+    for (length, expected) in [(1048577, 1), (1, 0), (1, 11)] {
         assert_eq!(
             read(unsafe {
                 msime_client_parse_tencent_translation_response(b"x".as_ptr(), length, expected)

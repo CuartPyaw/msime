@@ -290,6 +290,7 @@ fn capabilities_describe_each_host() {
     assert!(ios.skin_directory_import);
     // The strip pages in nines and is always a horizontal row, whatever the shared document says.
     assert_eq!(ios.fixed_candidate_page_size, Some(9));
+    assert_eq!(ios.max_candidate_page_size, 9);
     assert_eq!(
         ios.fixed_candidate_layout,
         Some(crate::preferences::CandidateLayout::Horizontal)
@@ -303,6 +304,18 @@ fn capabilities_describe_each_host() {
     ] {
         let other = HostCapabilities::for_platform(platform);
         assert_eq!(other.fixed_candidate_page_size, None);
+        // 第十个候选要靠 0 键选，只开给已经接好 0 键的宿主。
+        assert_eq!(
+            other.max_candidate_page_size,
+            if matches!(
+                platform,
+                HostPlatform::Macos | HostPlatform::Linux | HostPlatform::Android
+            ) {
+                10
+            } else {
+                9
+            }
+        );
         assert_eq!(other.fixed_candidate_layout, None);
         // 只有 iOS 和 Android 的键盘工具栏按 `touch_toolbar` 选按钮。
         assert_eq!(

@@ -8396,8 +8396,8 @@ int main(int argc, char **argv) {
             appearance.globalTheme = invalid;
             assert([appearance.globalTheme isEqual:@"system"]);
         }
-        appearance.pageSize = 10;
-        assert(appearance.pageSize == 9);
+        appearance.pageSize = 11;
+        assert(appearance.pageSize == 10);
         appearance.pageSize = 4;
         assert(appearance.pageSize == 4);
         appearance.pageShortcut = 99;
@@ -8428,9 +8428,9 @@ int main(int argc, char **argv) {
             assert([loaded.globalTheme isEqual:skinIDs[option]]);
         }
         appearance.globalTheme = @"system";
-        // The reference's set, three through nine.
+        // 三到十：参考实现的三到九，加上 0 键选第十个的 10（#6679）。
         assert(sizeControl.numberOfItems == (NSInteger)msime::mac::kOfferedCandidatePageSizes);
-        NSArray *pageSizes = @[@3, @4, @5, @6, @7, @8, @9];
+        NSArray *pageSizes = @[@3, @4, @5, @6, @7, @8, @9, @10];
         for (NSInteger option = 0; option < (NSInteger)msime::mac::kOfferedCandidatePageSizes; ++option) {
             assert(([sizeControl.itemTitles[option] isEqual:[NSString stringWithFormat:@"%@ 个", pageSizes[option]]]));
             [sizeControl selectItemAtIndex:option];
@@ -8499,7 +8499,8 @@ int main(int argc, char **argv) {
         [controller setValue:appearance forKey:@"appearance"];
         [NSUserDefaults.standardUserDefaults removeObjectForKey:@"MSIMEClientPinnedCandidates"];
         [controller syncPageSize];
-        assert(session.requestedPageSize == 9);
+        // 上面逐项点过每页候选的弹出菜单，停在最后一项 10。
+        assert(session.requestedPageSize == 10);
         appearance.pageSize = 5;
         [controller appearanceChanged:nil];
         assert(session.requestedPageSize == 5);

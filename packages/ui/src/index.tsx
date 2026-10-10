@@ -1640,6 +1640,8 @@ export interface HostCapabilities {
   skin_directory_import: boolean;
   /** The one candidate page size the host draws; set when the host offers no choice. */
   fixed_candidate_page_size?: number;
+  /** 宿主能排的最大每页候选数：macOS、Linux、Android 为 10（第十个用 0 键选），其余为 9。 */
+  max_candidate_page_size?: number;
   /** The one candidate layout the host draws; set when the host offers no choice. */
   fixed_candidate_layout?: "horizontal" | "vertical";
   /** The touch keyboard picks its toolbar buttons from `touch_toolbar`. */

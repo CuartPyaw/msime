@@ -236,7 +236,7 @@ static NSDictionary *decode(char *response, NSError **error) {
     return [value isKindOfClass:NSDictionary.class] ? value : nil;
 }
 + (NSArray *)parseTencentTranslationResponse:(NSData *)body expectedCount:(NSUInteger)count error:(NSError **)error {
-    if (![body isKindOfClass:NSData.class] || body.length > 1048576 || count < 1 || count > 9) {
+    if (![body isKindOfClass:NSData.class] || body.length > 1048576 || count < 1 || count > 10) {
         setError(error, @"腾讯翻译响应格式错误或过大"); return nil;
     }
     if (!body.length) return nil;
