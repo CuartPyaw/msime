@@ -35,6 +35,8 @@ Server 换客户端时用 `process_image_base_name`（`src/system/ProcessImageNa
 
 **设置界面。** 新能力位 `app_input_mode_rules`（macOS、Windows）控制共享设置页「中英文」组里的规则表（`app-input-mode-rules-section.tsx`）：每条规则一行，可以改模式、可以移除；末尾一行填标识后添加，新规则从中文开始。Windows 上填的是程序文件名，粘贴完整路径时只取文件名。WinUI 设置的同一组有同样的规则表，写入前的校验在 `settings/AppInputModeRuleList.h`。两处校验和偏好库一致，另外要求 Windows 上以 `.exe` 结尾。
 
+**MCP 也能读写这两项。** `crates/mcp-server/src/preferences.rs` 的 `get_preferences` 显示 `app_input_mode_rules`（模式沿用 `default_ime_mode` 的 `chinese`/`english`）和 `shuangpin_keymap_hint`（从没设置过时为 null，macOS 这时仍读本机旧设置）；`update_preferences` 可以整张替换规则表（`{}` 清空）、开关键位提示。规则表的合法性由存储层的同一条校验判定，不合法时整次更新被拒、原表不变，不在 MCP 里另写一份规则。
+
 ## Alternatives considered
 
 - **规则只放在 Windows 本地（注册表或 Server 自己的配置）。** 改动最小，macOS 和共享偏好都不用动。但这样会出现第二份「应用例外」，共享设置页仍然没有地方编辑它，两个平台说法不一。用户要的是一个规则表，所以把它提升成共享偏好，并迁移 macOS。
@@ -60,6 +62,7 @@ Server 换客户端时用 `process_image_base_name`（`src/system/ProcessImageNa
 ## Verification
 
 - Rust：`cargo test -p msime-client-core --lib -- app_input_mode host_surface` 覆盖文档读写、校验和能力位。
+- MCP：`cargo test -p msime-mcp-server` 的 `app_input_mode_rules_and_the_keymap_hint_are_set_and_invalid_rules_refused` 覆盖设置、只差大小写的重复被拒且原表不变、清空；`the_mirrors_serialize_as_the_store_does` 钉住模式值与存储一致。
 - 共享设置页：`apps/desktop/tests/settings/app-input-mode-rules.test.tsx` 覆盖规范化、校验、Windows 上编辑并保存规则表、切换提示与 Alt+Shift+H 开关。
 - macOS：`tests/settings/PreferenceSnapshotMergeTest.mm` 覆盖整表替换；`tests/input/ShortcutTest.mm` 的 `TestApplicationInputModeRulesFollowSharedDocument` 覆盖迁移、回退、载入后要求发布、未发布旧规则的合并、发布过滤、收不下的旧规则留在本机生效和清空；`TestApplicationInputModeRuleEditsKeepDocumentTable` 覆盖原生窗口改规则时两边分开改、还没载入文档时不写规则表、按应用查规则不分大小写。
 - Windows 宿主：`tests/input/mode_authority.cpp`（规则、让位、推送落地、`user_changed`）、`tests/input/app_input_mode_rules.cpp`、`tests/ui/input_mode_hud_layout.cpp`（含读屏播报文案）、`tests/ui/app_input_mode_rule_list.cpp` 和 `tsf/tests/input/fullwidth_chord_policy.cpp`。
