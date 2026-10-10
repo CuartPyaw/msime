@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.KeyboardTypographyPolicy;
 import app.msime.android.NumberPolicy;
 
 import app.msime.android.LayoutPolicy;

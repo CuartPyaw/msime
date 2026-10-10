@@ -128,7 +128,7 @@ public final class KeyboardKeyPreview extends View {
             DimensionPolicy.floatPixels(getContext(), .5f), 1f, Float.MAX_VALUE));
         canvas.drawPath(shape, outline);
         if (label.isEmpty()) return;
-        ViewPolicy.setTextSize(text, KeyboardGeometry.keySp(getContext(), TEXT_SP));
+        ViewPolicy.setTextSize(text, KeyboardTypographyPolicy.keySp(getContext(), TEXT_SP));
         Paint.FontMetrics metrics = text.getFontMetrics();
         canvas.drawText(label, rect.centerX(), rect.centerY() - (metrics.ascent + metrics.descent) / 2f,
             text);

@@ -88,7 +88,7 @@ public final class SymbolPanelView extends LinearLayout {
         back.setLayoutParams(LayoutPolicy.linearParams(getContext(), 56, 42));
         title.addView(back);
         TextView heading = ViewPolicy.centeredText(context, "符号", 17);
-        KeyboardGeometry.setKeyTextSize(heading, 17);
+        KeyboardTypographyPolicy.setKeyTextSize(heading, 17);
         title.addView(heading, LayoutPolicy.weightedHeightParams(getContext(), 42, 1));
         Button delete = buttons.create("⌫", "删除", listener::delete, true);
         delete.setLayoutParams(LayoutPolicy.linearParams(getContext(), 56, 42));
@@ -133,7 +133,7 @@ public final class SymbolPanelView extends LinearLayout {
             ViewPolicy.setCenteredTextSizeSp(button, 13);
             ViewPolicy.clearMinimumHeight(button);
             ViewPolicy.clearPadding(button);
-            KeyboardGeometry.setKeyTextSize(button, 13);
+            KeyboardTypographyPolicy.setKeyTextSize(button, 13);
             categoryButtons.add(button);
             categories.addView(button, LayoutPolicy.matchWidthHeightPx(
                 DimensionPolicy.pixels(getContext(), 40)));
@@ -176,7 +176,7 @@ public final class SymbolPanelView extends LinearLayout {
     private void showHint(String text, int columns) {
         grid.removeAllViews();
         TextView hint = ViewPolicy.centeredText(getContext(), text, 14);
-        KeyboardGeometry.setKeyTextSize(hint, 14);
+        KeyboardTypographyPolicy.setKeyTextSize(hint, 14);
         GridLayout.LayoutParams params = new GridLayout.LayoutParams(GridLayout.spec(0),
             GridLayout.spec(0, columns, 1f));
         params.width = 0;

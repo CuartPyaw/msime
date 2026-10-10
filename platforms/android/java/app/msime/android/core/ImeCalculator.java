@@ -25,7 +25,7 @@ final class ImeCalculator {
             button.setKeyboardRole(KeyboardKeyRole.PILL);
             ViewPolicy.setAllCapsFalse(button);
             ViewPolicy.setSingleLineEllipsized(button);
-            KeyboardGeometry.setKeyTextSize(button, 15);
+            KeyboardTypographyPolicy.setKeyTextSize(button, 15);
             LayoutPolicy.setHorizontalPaddingDp(button, s, 8);
             ViewPolicy.clearMinimumHeight(button);
             // 工具栏七个键各至少 40 dp，加起来约 294 dp；胶囊再宽就把最右边的「收起」挤出 393 dp 宽的屏幕。长结果在胶囊里截断显示，点按上屏的仍是完整结果，无障碍描述也读完整结果。

@@ -1,3 +1,4 @@
+import app.msime.android.KeyboardTypographyPolicy;
 import app.msime.android.NumberPolicy;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.KeyboardGapPolicy;
@@ -149,13 +150,13 @@ public final class KeyboardGeometrySmoke {
         check(KeyboardGapPolicy.inside(104, 100) == 99f);
         check(KeyboardGapPolicy.inside(37.5f, 100) == 37.5f);
         // 键盘文字随系统字体调小照样跟随，调大时封顶：国产机出厂的「大」「超大」字体会把固定高度的键帽撑爆。
-        check(KeyboardGeometry.keyboardFontScale(0.85f) == 0.85f);
-        check(KeyboardGeometry.keyboardFontScale(1f) == 1f);
-        check(KeyboardGeometry.keyboardFontScale(1.3f) == KeyboardGeometry.MAX_KEYBOARD_FONT_SCALE);
-        check(KeyboardGeometry.keyboardFontScale(2f) == KeyboardGeometry.MAX_KEYBOARD_FONT_SCALE);
-        check(KeyboardGeometry.keyboardFontScale(0f) == 1f);
-        check(KeyboardGeometry.keyboardFontScale(Float.NaN) == 1f);
-        check(KeyboardGeometry.keyboardFontScale(Float.POSITIVE_INFINITY) == 1f);
+        check(KeyboardTypographyPolicy.keyboardFontScale(0.85f) == 0.85f);
+        check(KeyboardTypographyPolicy.keyboardFontScale(1f) == 1f);
+        check(KeyboardTypographyPolicy.keyboardFontScale(1.3f) == KeyboardTypographyPolicy.MAX_KEYBOARD_FONT_SCALE);
+        check(KeyboardTypographyPolicy.keyboardFontScale(2f) == KeyboardTypographyPolicy.MAX_KEYBOARD_FONT_SCALE);
+        check(KeyboardTypographyPolicy.keyboardFontScale(0f) == 1f);
+        check(KeyboardTypographyPolicy.keyboardFontScale(Float.NaN) == 1f);
+        check(KeyboardTypographyPolicy.keyboardFontScale(Float.POSITIVE_INFINITY) == 1f);
         System.out.println("Android keyboard geometry: Apple defaults, bounds and precision passed");
     }
 }

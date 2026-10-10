@@ -61,7 +61,7 @@ final class ImeBottomBar {
         bar.addView(switchButton, buttonParams());
         track = new TextView(s);
         ViewPolicy.setCentered(track);
-        KeyboardGeometry.setKeyTextSize(track, 12);
+        KeyboardTypographyPolicy.setKeyTextSize(track, 12);
         track.setContentDescription("左右滑动移动光标");
         bindCursorTrack(track);
         bar.addView(track, LayoutPolicy.weightedMatchParentParams(1));

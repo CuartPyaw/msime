@@ -87,7 +87,7 @@ final class ImeTextEditPanel {
         } else {
             button = s.keyboardKey(spec.label(), spec.description(), run);
             if (action == TextEditPanelModel.Action.SELECT || spec.label().length() > 1)
-                KeyboardGeometry.setKeyTextSize(button, 16);
+                KeyboardTypographyPolicy.setKeyTextSize(button, 16);
             if (spec.repeats()) bindRepeat(button, run);
         }
         ViewPolicy.clearPadding(button);

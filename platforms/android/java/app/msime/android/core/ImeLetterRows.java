@@ -552,7 +552,7 @@ final class ImeLetterRows {
                 s.shuangpinKeyInputs.add(input);
                 String hint = standardLetters ? LetterHintTable.hint(input) : null;
                 hintButton.setCornerHint(hint);
-                KeyboardGeometry.setKeyTextSize(hintButton, 22);
+                KeyboardTypographyPolicy.setKeyTextSize(hintButton, 22);
                 bindLetterGestures(hintButton, face, hint);
             } else {
                 keyButton = s.keyboardKey(face, face, () -> s.type(input.charAt(0)));
@@ -603,7 +603,7 @@ final class ImeLetterRows {
                     "Semicolon");
                 s.shuangpinKeyButtons.add((ShuangpinHintButton) s.microsoftFinalKey);
                 s.shuangpinKeyInputs.add(";");
-                KeyboardGeometry.setKeyTextSize(s.microsoftFinalKey, 22);
+                KeyboardTypographyPolicy.setKeyTextSize(s.microsoftFinalKey, 22);
                 row.addView(s.microsoftFinalKey, LayoutPolicy.weightedMatchParentParams(1));
             }
             if (standardLetters && rowIndex == 1) {
@@ -652,7 +652,7 @@ final class ImeLetterRows {
         for (String digit : KeyboardLayout.NUMBER_ROW) {
             char input = digit.charAt(0);
             Button key = s.keyboardKey(digit, digit, () -> s.type(input));
-            KeyboardGeometry.setKeyTextSize(key, 20);
+            KeyboardTypographyPolicy.setKeyTextSize(key, 20);
             if (key instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
             s.keyId(key, KeyPressIds.forCharacter(input));
             row.addView(key, LayoutPolicy.weightedMatchParentParams(1));
@@ -712,7 +712,7 @@ final class ImeLetterRows {
         switch (layerKey.kind()) {
             case CHARACTER -> {
                 key = s.keyboardKey(text, text, () -> s.imeLayoutRows.commitNineKeyLiteral(text));
-                KeyboardGeometry.setKeyTextSize(key, firstRow ? 20 : 18);
+                KeyboardTypographyPolicy.setKeyTextSize(key, firstRow ? 20 : 18);
                 if (key instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
                 if (text.length() == 1) s.keyId(key, KeyPressIds.forCharacter(text.charAt(0)));
                 return key;
@@ -766,7 +766,7 @@ final class ImeLetterRows {
         }
         // 功能键（层切换、返回字母、表情、符号）：功能键底色、15 sp，描述按 §2.8。
         key.setContentDescription(layerKey.description());
-        KeyboardGeometry.setKeyTextSize(key, 15);
+        KeyboardTypographyPolicy.setKeyTextSize(key, 15);
         if (key instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.ACCENT);
         s.imeStyler.styleButton(key, KeyboardKeyRole.ACCENT, s.skin);
         return key;

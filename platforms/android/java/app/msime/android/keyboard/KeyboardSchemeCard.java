@@ -65,7 +65,7 @@ public final class KeyboardSchemeCard extends FrameLayout {
         ViewPolicy.hide(check);
 
         title = centeredLabel(context, titleText, 12, false);
-        KeyboardGeometry.setKeyTextSize(title, 12);
+        KeyboardTypographyPolicy.setKeyTextSize(title, 12);
         // 卡片格子只有 56 dp，字形区占去 44 dp；去掉字体留白，标题在 1.15 倍字体下仍放得下。
         ViewPolicy.clearFontPadding(title);
         ViewPolicy.setMaxLinesEllipsized(title, 1);

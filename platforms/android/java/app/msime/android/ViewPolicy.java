@@ -373,7 +373,7 @@ public final class ViewPolicy {
 
     /** Set a keyboard-scaled size and center the text view's content. */
     public static void setCenteredKeyTextSizeSp(TextView view, float sizeSp) {
-        KeyboardGeometry.setKeyTextSize(view, sizeSp);
+        KeyboardTypographyPolicy.setKeyTextSize(view, sizeSp);
         setCentered(view);
     }
 
@@ -398,7 +398,7 @@ public final class ViewPolicy {
 
     /** Set a keyboard-scaled size and align its content to the start edge vertically centered. */
     public static void setStartCenteredKeyTextSizeSp(TextView view, float sizeSp) {
-        KeyboardGeometry.setKeyTextSize(view, sizeSp);
+        KeyboardTypographyPolicy.setKeyTextSize(view, sizeSp);
         setStartCenteredVertically(view);
     }
 
