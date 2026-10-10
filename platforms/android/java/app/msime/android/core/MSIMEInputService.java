@@ -1938,7 +1938,7 @@ public final class MSIMEInputService extends InputMethodService {
         }
         AiPolishConfiguration previous = aiPolishConfiguration;
         aiPolishConfiguration = next;
-        if (aiPolishContainer != null && aiPolishContainer.getVisibility() == View.VISIBLE
+        if (ViewPolicy.isVisible(aiPolishContainer)
                 && aiRequestConfiguration != null && !aiRequestConfiguration.equals(next)) {
             cancelAiRequest();
             aiError = "AI 配置已变化，请返回键盘后重新打开。";
@@ -2380,7 +2380,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (rebuildLayout || numberKeypadRebuild) imeLetterRows.rebuildKeyRows();
         else if (geometryChanged) imeStyler.applyKeyboardGeometry();
         renderLayoutSettingsState();
-        if (voiceResultScroll != null && voiceResultScroll.getVisibility() == View.VISIBLE)
+        if (ViewPolicy.isVisible(voiceResultScroll))
             renderVoiceResult();
         preferencesNotice = strictBoolean(result, "deferred")
             ? " · 设置将在组词结束后应用" : "";
@@ -3093,8 +3093,7 @@ public final class MSIMEInputService extends InputMethodService {
         int readingRow = readingRowHeight();
         if (candidateHeader != null) ViewPolicy.setFixedHeight(candidateHeader, readingRow);
         // 空闲时的工具栏和组词时的读音行 + 候选行占同一个位置，两者同高，打字时键盘才不会变高。空闲时读音行若在显示常驻的模式标签（直接输入、准备中），它已经占了读音行那一截，工具栏只取候选行的高度，总高不变。
-        boolean idleHeader = candidateHeader != null
-            && candidateHeader.getVisibility() == View.VISIBLE;
+        boolean idleHeader = ViewPolicy.isVisible(candidateHeader);
         if (shortcutScroll != null)
             ViewPolicy.setFixedHeight(shortcutScroll, (idleHeader ? 0 : readingRow) + pixels(line));
         // 「最近复制」占的是工具栏那一行的位置，同高，出现和消失时键盘不跳。
@@ -4054,14 +4053,13 @@ public final class MSIMEInputService extends InputMethodService {
             closeVoiceResult();
             closeAiPolish();
         }
-        if (aiPolishContainer != null && aiPolishContainer.getVisibility() == View.VISIBLE
+        if (ViewPolicy.isVisible(aiPolishContainer)
                 && aiTarget != null && !aiTargetMatches()) {
             cancelAiRequest();
             aiError = "输入位置已变化，请返回键盘后重新选择文字。";
             imePanels.renderAiPolish();
         }
-        boolean replyVisible = replyKeyboard != null
-            && replyKeyboard.getVisibility() == View.VISIBLE;
+        boolean replyVisible = ViewPolicy.isVisible(replyKeyboard);
         if (replyTarget != null || (selectionChanged && replyVisible)) {
             invalidateReplyContext("输入位置已变化，请重新选择回复方式");
         }
@@ -4598,7 +4596,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     boolean emojiPickerVisible() {
-        return emojiPanel != null && emojiPanel.getVisibility() == View.VISIBLE;
+        return ViewPolicy.isVisible(emojiPanel);
     }
 
     void selectEmojiCategory(int category) {
@@ -4757,8 +4755,7 @@ public final class MSIMEInputService extends InputMethodService {
     /** Keep the shared candidate/shortcut bar visible while the reply surface owns the key area. */
     void setReplyKeyboardVisible(boolean visible) {
         // 面板顶替按键区，就该和按键区一样高：键盘外层按内容定高，只靠权重占「剩下的空间」时，按键行一隐藏键盘就整体变矮，面板里的风格格子被压扁。打开前量一次按键区的实际高度给面板；还没布局过（高度为 0）时保留权重。
-        if (visible && replyKeyboard != null && keyRows != null && actionRow != null
-                && keyRows.getVisibility() == View.VISIBLE) {
+        if (visible && replyKeyboard != null && actionRow != null && ViewPolicy.isVisible(keyRows)) {
             int keyArea = actionRow.getBottom() - keyRows.getTop();
             if (keyArea > 0 && replyKeyboard.getLayoutParams() instanceof LinearLayout.LayoutParams params) {
                 params.height = keyArea;
@@ -4840,7 +4837,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     private void showKeyboardSkinStatus(String value) {
-        if (replyKeyboard != null && replyKeyboard.getVisibility() == View.VISIBLE) {
+        if (ViewPolicy.isVisible(replyKeyboard)) {
             replyModel.showStatus(value);
             imePanels.renderReplyKeyboard();
         } else {
@@ -6379,8 +6376,7 @@ public final class MSIMEInputService extends InputMethodService {
         handwritingStatus.setText(text);
         ViewPolicy.setVisible(handwritingStatus, text != null && !text.isEmpty());
         if (handwritingStatus.getLayoutParams() instanceof FrameLayout.LayoutParams params) {
-            boolean downloadVisible = handwritingDownload != null
-                && handwritingDownload.getVisibility() == View.VISIBLE;
+            boolean downloadVisible = ViewPolicy.isVisible(handwritingDownload);
             params.gravity = downloadVisible
                 ? Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL : Gravity.CENTER;
             params.bottomMargin = downloadVisible ? pixels(8) : 0;
@@ -7588,7 +7584,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (session == 0 || runtimeOptionsBase.isEmpty()) return;
         if (connection != null && view != null && !InputViewValuePolicy.editingText(view).isEmpty())
             command(FINISH_COMPOSITION_COMMAND);
-        boolean panelOpen = moreToolsScroll != null && moreToolsScroll.getVisibility() == View.VISIBLE;
+        boolean panelOpen = ViewPolicy.isVisible(moreToolsScroll);
         stop(false);
         // stop 会收起所有面板；用户是在功能面板上点的隐私，面板应该留在原处。
         if (panelOpen) imePanels.showFeedbackMenu();
@@ -7828,7 +7824,7 @@ public final class MSIMEInputService extends InputMethodService {
             ViewPolicy.setVisible(shortcutScroll, toolbarRow && recent == null);
         if (candidateLine != null)
             ViewPolicy.setVisible(candidateLine, !heightMode && !idle && !hasDiagnostic);
-        if (replyKeyboard == null || replyKeyboard.getVisibility() != View.VISIBLE)
+        if (!ViewPolicy.isVisible(replyKeyboard))
             imeBottomRow.updateActionRow();
         if (candidateViewport != null)
             ViewPolicy.setVisible(candidateViewport, !idle && !hasDiagnostic);
@@ -7877,14 +7873,12 @@ public final class MSIMEInputService extends InputMethodService {
         if (emojiShortcutButton != null) {
             ViewPolicy.setVisible(emojiShortcutButton, toolbarEmoji);
             ViewPolicy.setEnabled(emojiShortcutButton, session != 0 && !emojiResources.isEmpty());
-            ViewPolicy.setSelected(emojiShortcutButton, emojiPanel != null
-                && emojiPanel.getVisibility() == View.VISIBLE);
+            ViewPolicy.setSelected(emojiShortcutButton, ViewPolicy.isVisible(emojiPanel));
         }
         if (phraseShortcutButton != null) {
             ViewPolicy.setVisible(phraseShortcutButton, toolbarPhrase);
             ViewPolicy.setEnabled(phraseShortcutButton, session != 0 && !preferencesDirectory.isEmpty());
-            ViewPolicy.setSelected(phraseShortcutButton, phraseScroll != null
-                && phraseScroll.getVisibility() == View.VISIBLE);
+            ViewPolicy.setSelected(phraseShortcutButton, ViewPolicy.isVisible(phraseScroll));
         }
         if (clipboardShortcutButton != null) {
             ViewPolicy.setVisible(clipboardShortcutButton, toolbarClipboard);
@@ -7986,7 +7980,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (schemeButton != null) {
             ViewPolicy.setVisible(schemeButton, toolbarScheme);
             ViewPolicy.setSelected(schemeButton,
-                schemeScroll != null && schemeScroll.getVisibility() == View.VISIBLE);
+                ViewPolicy.isVisible(schemeScroll));
             schemeButton.setText(selectedScheme.glyph() + selectedScheme.badge(wubiProfile));
             schemeButton.setContentDescription("输入方案：" + selectedScheme.title(wubiProfile));
             // 只按「会话与偏好是否就绪」决定可用：简繁、键高、方案的保存都在一瞬间完成，若跟着保存状态禁用，图标每切一次简繁就变灰再变回来。保存进行中的点按由 showSchemePicker 忽略。
@@ -8003,7 +7997,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (skinButton != null) {
             ViewPolicy.setVisible(skinButton, toolbarSkin);
             ViewPolicy.setSelected(skinButton,
-                skinScroll != null && skinScroll.getVisibility() == View.VISIBLE);
+                ViewPolicy.isVisible(skinScroll));
             // 同上：保存进行中的点按由 ImePanels.showSkinPicker 按 canSaveKeyboardSkin 忽略，图标不跟着变灰。
             ViewPolicy.setEnabled(skinButton, session != 0 && preferencesSnapshot != null
                 && !preferencesDirectory.isEmpty());
@@ -8025,8 +8019,7 @@ public final class MSIMEInputService extends InputMethodService {
             return;
         }
         // 注音 9 键的读音选择条叠在候选区上：选择条只在候选列表关着时出现，那时候选行本来就是空的，所以把候选滚动区让成不可见（仍占位，键盘高度不变）。
-        boolean zhuyinSpellingsShown = nineKeySpellingScroll != null
-            && nineKeySpellingScroll.getVisibility() == View.VISIBLE
+        boolean zhuyinSpellingsShown = ViewPolicy.isVisible(nineKeySpellingScroll)
             && displayedTouchLayout(view) == KeyboardLayout.ZHUYIN_NINE_KEY_LAYOUT;
         int candidateScrollShown = zhuyinSpellingsShown ? View.INVISIBLE : View.VISIBLE;
         if (horizontalCandidateScroll != null) {
@@ -8086,7 +8079,7 @@ public final class MSIMEInputService extends InputMethodService {
         if (hasDiagnostic) closeCandidatePanel();
         resetCandidateScrollIfViewChanged();
         imeCandidates.renderExpandedCandidates();
-        if (moreToolsScroll != null && moreToolsScroll.getVisibility() == View.VISIBLE)
+        if (ViewPolicy.isVisible(moreToolsScroll))
             imeFunctionPanel.renderMoreTools();
         imeStyler.applySkin();
         imeToolbar.styleTopRow();
