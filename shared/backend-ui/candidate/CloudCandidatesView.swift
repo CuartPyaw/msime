@@ -21,6 +21,7 @@ struct CloudCandidatesView: View {
   @State private var busy = false
   @State private var message: String?
   @State private var pending: Task<Void, Never>?
+  @State private var sessionID: UUID?
   private let client = BackendAccountClient()
   private enum Action: Sendable {
     case rank(BackendAccountClient.PersonalCandidate)
@@ -157,9 +158,10 @@ struct CloudCandidatesView: View {
     try await load(query)
     message = status
   }
-  private func authenticated<T: Sendable>(_ operation: @escaping @Sendable (String) async throws -> T) async throws -> T {
+  @MainActor private func authenticated<T: Sendable>(_ operation: @escaping @Sendable (String) async throws -> T) async throws -> T {
     if let session, let accountID {
-      let identity = try await session.credentials(matchingUserID: accountID)
+      let identity = try await session.credentials(matchingUserID: accountID, matchingSessionID: sessionID)
+      sessionID = identity.sessionID
       return try await session.authenticated(matchingUserID: identity.userID,
                                              matchingSessionID: identity.sessionID, operation).value
     }
