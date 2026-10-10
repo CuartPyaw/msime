@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.DrawablePolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.Manifest;
@@ -197,7 +198,7 @@ public final class AboutPage extends DetailPage {
 
         FrameLayout disc = new FrameLayout(context);
         ViewPolicy.setBackground(disc, DrawablePolicy.pill(ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorTertiaryContainer)));
-        ImageView mark = Ui.decorativeIcon(context, R.drawable.splash_mark);
+        ImageView mark = ImageViewPolicy.decorative(context, R.drawable.splash_mark);
         int markSize = Ui.dp(context, 60);
         disc.addView(mark, Ui.squareFrameParamsPx(markSize, Gravity.CENTER));
         int discSize = Ui.dp(context, 116);

@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.DimensionPolicy;
 
@@ -310,7 +311,7 @@ final class LoginSheet {
         int pressed = ColorPolicy.withAlpha(fill == Color.BLACK ? Color.WHITE : ThemeColorPolicy.text(activity), 0.12f);
         ViewPolicy.setBackground(button, DrawablePolicy.ripple(pressed, face, mask));
         if (icon != null) {
-            ImageView glyph = Ui.decorativeIcon(activity, icon);
+            ImageView glyph = ImageViewPolicy.decorative(activity, icon);
             LinearLayout.LayoutParams params = Ui.squareParams(activity, 20);
             params.setMarginEnd(Ui.dp(activity, 8));
             button.addView(glyph, params);

@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.DrawablePolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
@@ -33,7 +34,7 @@ public final class SearchPill extends LinearLayout {
         Ui.setHorizontalPaddingDp(this, context, 18);
         setBackground(DrawablePolicy.pill(ThemeColorPolicy.card(context)));
 
-        ImageView glyph = Ui.decorativeIcon(context, R.drawable.ic_search, ThemeColorPolicy.subText(context));
+        ImageView glyph = ImageViewPolicy.decorative(context, R.drawable.ic_search, ThemeColorPolicy.subText(context));
         int icon = Ui.dp(context, 16);
         addView(glyph, new LayoutParams(icon, icon));
 
