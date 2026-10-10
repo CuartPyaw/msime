@@ -15,6 +15,7 @@ struct CloudDictionaryCatalogView: View {
   @State private var busy = false
   @State private var message: String?
   @State private var pending: Task<Void, Never>?
+  @State private var sessionID: UUID?
   private let client = BackendAccountClient()
   private struct Query: Sendable { let code: String; let scheme: String; let profile: String }
   private struct Edit: Identifiable, Sendable { let id = UUID(); let entry: BackendAccountClient.CatalogEntry; let revision: Int64 }
@@ -119,9 +120,10 @@ struct CloudDictionaryCatalogView: View {
     }
     page = result; confirmedQuery = query
   }
-  private func authenticated<T: Sendable>(_ operation: @escaping @Sendable (String) async throws -> T) async throws -> T {
+  @MainActor private func authenticated<T: Sendable>(_ operation: @escaping @Sendable (String) async throws -> T) async throws -> T {
     if let session, let accountID {
-      let identity = try await session.credentials(matchingUserID: accountID)
+      let identity = try await session.credentials(matchingUserID: accountID, matchingSessionID: sessionID)
+      sessionID = identity.sessionID
       return try await session.authenticated(matchingUserID: identity.userID,
                                              matchingSessionID: identity.sessionID, operation).value
     }
