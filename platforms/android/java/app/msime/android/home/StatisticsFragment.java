@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ThemeColorPolicy;
 import app.msime.android.LayoutPolicy;
 
 import android.content.Context;
@@ -100,7 +101,7 @@ public final class StatisticsFragment extends HomeTabFragment {
             lock = lock.mutate();
             int size = Ui.dp(requireContext(), 14);
             lock.setBounds(0, 0, size, size);
-            lock.setTint(Ui.subText(requireContext()));
+            lock.setTint(ThemeColorPolicy.subText(requireContext()));
             footer.setCompoundDrawablesRelative(lock, null, null, null);
         }
         reload();
@@ -232,15 +233,15 @@ public final class StatisticsFragment extends HomeTabFragment {
 
     private void overview(Context context, LinearLayout content, Overview overview) {
         LinearLayout hero = card(context, content, 18);
-        hero.addView(Ui.label(context, "近 7 天共输入", 13, Ui.subText(context)));
+        hero.addView(Ui.label(context, "近 7 天共输入", 13, ThemeColorPolicy.subText(context)));
         TextView total = Ui.label(context,
             figure(context, NumberPolicy.grouped(overview.weekTotal()), 40, "字"),
-            40, Ui.text(context));
+            40, ThemeColorPolicy.text(context));
         Ui.setPaddingDp(total, context, 0, 4, 0, 0);
         hero.addView(total);
         String delta = TypingStatisticsSummary.weekDelta(overview.weekTotal(), overview.previousWeekTotal());
         if (delta != null) {
-            TextView change = Ui.label(context, delta, 13, Ui.accent(context));
+            TextView change = Ui.label(context, delta, 13, ThemeColorPolicy.accent(context));
             ViewPolicy.setTypefaceStyle(change, Typeface.BOLD);
         Ui.setPaddingDp(change, context, 0, 4, 0, 0);
             hero.addView(change);
@@ -285,7 +286,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         header(context, content, "输入构成", null);
         LinearLayout composition = card(context, content, 16);
         if (mix.isEmpty()) {
-            composition.addView(Ui.label(context, "还没有记录", 14, Ui.subText(context)));
+            composition.addView(Ui.label(context, "还没有记录", 14, ThemeColorPolicy.subText(context)));
         } else {
             DistributionView bar = new DistributionView(context);
             bar.setShares(mix, DistributionView.Style.STACK);
@@ -379,19 +380,19 @@ public final class StatisticsFragment extends HomeTabFragment {
         int start = text.length();
         text.append(" / ").append(String.valueOf(badges.size())).append(" 已解锁");
         text.setSpan(new AbsoluteSizeSpan(15, true), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        text.setSpan(new ForegroundColorSpan(Ui.subText(context)), start, text.length(),
+        text.setSpan(new ForegroundColorSpan(ThemeColorPolicy.subText(context)), start, text.length(),
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        TextView count = Ui.label(context, text, 15, Ui.text(context));
+        TextView count = Ui.label(context, text, 15, ThemeColorPolicy.text(context));
         progress.addView(count);
         View track = new View(context);
-        track.setBackground(Ui.pill(Ui.hairline(context)));
+        track.setBackground(Ui.pill(ThemeColorPolicy.hairline(context)));
         LinearLayout.LayoutParams trackParams = Ui.matchWidthHeight(context, 6);
         trackParams.topMargin = Ui.dp(context, 12);
         android.widget.FrameLayout bar = new android.widget.FrameLayout(context);
         bar.addView(track, new android.widget.FrameLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, 6)));
         View fillView = new View(context);
-        fillView.setBackground(Ui.pill(Ui.accent(context)));
+        fillView.setBackground(Ui.pill(ThemeColorPolicy.accent(context)));
         bar.addView(fillView, new android.widget.FrameLayout.LayoutParams(0, Ui.dp(context, 6)));
         progress.addView(bar, trackParams);
         float share = badges.isEmpty() ? 0 : unlocked / (float) badges.size();
@@ -429,9 +430,9 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout row = Ui.row(context);
         ViewPolicy.setCenteredVertically(row);
         Ui.setHorizontalPaddingDp(row, context, 4);
-        TextView heading = Ui.headingLabel(context, title, 13, Ui.subText(context));
+        TextView heading = Ui.headingLabel(context, title, 13, ThemeColorPolicy.subText(context));
         row.addView(heading, Ui.weightWrap(1f));
-        if (trailing != null) row.addView(Ui.label(context, trailing, 13, Ui.subText(context)));
+        if (trailing != null) row.addView(Ui.label(context, trailing, 13, ThemeColorPolicy.subText(context)));
         LinearLayout.LayoutParams params = Ui.matchWidth();
         params.topMargin = Ui.dp(context, 22);
         // 最小 32 dp 而不是固定 32 dp：系统字体调大后标题和右侧的分段控件都比它高。
@@ -459,13 +460,13 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout tile = Ui.column(context);
         int pad = Ui.dp(context, 14);
         Ui.setSymmetricPaddingPx(tile, pad);
-        ViewPolicy.setBackground(tile, DrawablePolicy.rounded(Ui.card(context), Ui.dp(context, 20)));
-        tile.addView(Ui.label(context, title, 13, Ui.text(context)));
+        ViewPolicy.setBackground(tile, DrawablePolicy.rounded(ThemeColorPolicy.card(context), Ui.dp(context, 20)));
+        tile.addView(Ui.label(context, title, 13, ThemeColorPolicy.text(context)));
         TextView number = Ui.label(context, figure(context, value, 24,
-            "—".equals(value) ? "" : unit), 24, Ui.text(context));
+            "—".equals(value) ? "" : unit), 24, ThemeColorPolicy.text(context));
         Ui.setPaddingDp(number, context, 0, 6, 0, 6);
         tile.addView(number);
-        tile.addView(Ui.label(context, note, 12, highlight ? Ui.accent(context) : Ui.subText(context)));
+        tile.addView(Ui.label(context, note, 12, highlight ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.subText(context)));
         tile.setContentDescription(title + " " + value + ("—".equals(value) ? "" : " " + unit) + "，" + note);
         ViewPolicy.setImportantForAccessibility(tile, View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         return tile;
@@ -477,7 +478,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         text.setSpan(new AbsoluteSizeSpan(sizeSp, true), 0, value.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         text.setSpan(new android.text.style.StyleSpan(Typeface.BOLD), 0, value.length(),
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        text.setSpan(new ForegroundColorSpan(Ui.text(context)), 0, value.length(),
+        text.setSpan(new ForegroundColorSpan(ThemeColorPolicy.text(context)), 0, value.length(),
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         if (!unit.isEmpty()) {
             int start = text.length();
@@ -485,7 +486,7 @@ public final class StatisticsFragment extends HomeTabFragment {
             text.setSpan(new AbsoluteSizeSpan(
                 BoundsPolicy.bounded(sizeSp / 3, 12, Integer.MAX_VALUE), true), start, text.length(),
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            text.setSpan(new ForegroundColorSpan(Ui.text(context)), start, text.length(),
+            text.setSpan(new ForegroundColorSpan(ThemeColorPolicy.text(context)), start, text.length(),
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         return text;

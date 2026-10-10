@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ThemeColorPolicy;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.DrawablePolicy;
 import app.msime.android.KeyboardGeometry;
@@ -36,8 +37,8 @@ public final class MsSlider extends SeekBar {
         int track = Ui.dp(context, Ui.SLIDER_TRACK);
         float radius = track / 2f;
 
-        GradientDrawable rest = DrawablePolicy.rounded(Ui.accentSoft(context), radius);
-        GradientDrawable done = DrawablePolicy.rounded(Ui.accent(context), radius);
+        GradientDrawable rest = DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), radius);
+        GradientDrawable done = DrawablePolicy.rounded(ThemeColorPolicy.accent(context), radius);
         Drawable progress = new ClipDrawable(done, Gravity.START, ClipDrawable.HORIZONTAL);
         LayerDrawable layers = new LayerDrawable(new Drawable[] {rest, progress});
         layers.setId(0, android.R.id.background);
@@ -49,7 +50,7 @@ public final class MsSlider extends SeekBar {
         }
         setProgressDrawable(layers);
 
-        GradientDrawable thumb = DrawablePolicy.rounded(Ui.accent(context), Ui.dp(context, 2),
+        GradientDrawable thumb = DrawablePolicy.rounded(ThemeColorPolicy.accent(context), Ui.dp(context, 2),
             Ui.dp(context, Ui.SLIDER_THUMB_WIDTH), Ui.dp(context, Ui.SLIDER_THUMB_HEIGHT));
         setThumb(thumb);
         setThumbOffset(Ui.dp(context, Ui.SLIDER_THUMB_WIDTH) / 2);

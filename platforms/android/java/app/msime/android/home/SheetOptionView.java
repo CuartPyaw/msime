@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ThemeColorPolicy;
 import app.msime.android.LayoutPolicy;
 
 import android.content.Context;
@@ -40,7 +41,7 @@ final class SheetOptionView {
 
         if (selected) {
             ImageView check = Ui.decorativeIcon(context, R.drawable.ms_w1_a2_check,
-                Ui.accent(context));
+                ThemeColorPolicy.accent(context));
             FrameLayout.LayoutParams checkParams = Ui.squareFrameParams(context, Ui.SHEET_CHECK_SIZE);
             checkParams.gravity = Gravity.CENTER_VERTICAL | Gravity.END;
             checkParams.setMarginEnd(Ui.dp(context, Ui.SHEET_CHECK_END_MARGIN));

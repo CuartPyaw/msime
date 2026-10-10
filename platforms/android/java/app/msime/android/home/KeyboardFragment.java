@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ThemeColorPolicy;
 import app.msime.android.NumberPolicy;
 
 import android.content.Intent;
@@ -61,7 +62,7 @@ public final class KeyboardFragment extends HomeTabFragment {
 
     @Override public void onViewCreated(@NonNull View view, @Nullable Bundle state) {
         View card = view.findViewById(R.id.keyboard_status_card);
-        ViewPolicy.setBackground(card, DrawablePolicy.rounded(Ui.card(requireContext()),
+        ViewPolicy.setBackground(card, DrawablePolicy.rounded(ThemeColorPolicy.card(requireContext()),
             Ui.dp(requireContext(), Ui.NAV_GROUP_RADIUS)));
 
         MaterialButton trial = view.findViewById(R.id.keyboard_try);
@@ -106,7 +107,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         // Preparation is silent while it works out and while it is done; it only takes the screen
         // when the keyboard cannot reach the Engine, which is the one case the user has to know.
         TextView preparation = view.findViewById(R.id.keyboard_preparation);
-        ViewPolicy.setBackground(preparation, DrawablePolicy.rounded(Ui.page(requireContext()), Ui.dp(requireContext(), 12)));
+        ViewPolicy.setBackground(preparation, DrawablePolicy.rounded(ThemeColorPolicy.page(requireContext()), Ui.dp(requireContext(), 12)));
         ViewPolicy.bindClick(preparation, () -> FirstRunPreparation.retry(requireContext()));
         preparationListener = status -> {
             if (!isAdded()) return;
@@ -335,7 +336,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         TextView button = view.findViewById(actionId);
         ViewPolicy.setVisible(button, !done);
         ViewPolicy.bindOptionalClick(button, done ? null : action);
-        ViewPolicy.setTextColor(button, ColorStateList.valueOf(Ui.accent(requireContext())));
+        ViewPolicy.setTextColor(button, ColorStateList.valueOf(ThemeColorPolicy.accent(requireContext())));
         view.findViewById(rowId).setContentDescription(
             getString(label) + (done ? "，已完成" : "，未完成"));
     }
