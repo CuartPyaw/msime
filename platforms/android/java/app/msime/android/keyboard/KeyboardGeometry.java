@@ -468,7 +468,7 @@ public final class KeyboardGeometry {
      */
     public static float keyboardFontScale(float systemFontScale) {
         if (!(systemFontScale > 0) || Float.isInfinite(systemFontScale)) return 1f;
-        return Math.min(systemFontScale, MAX_KEYBOARD_FONT_SCALE);
+        return BoundsPolicy.atMost(systemFontScale, MAX_KEYBOARD_FONT_SCALE);
     }
 
     /** 键盘文字的 sp 换算成像素，字体缩放按 {@link #keyboardFontScale} 封顶。 */
