@@ -68,8 +68,7 @@ public final class KeyPressIds {
      * <p>This is how a soft 26-key letter or a symbol-layer key gets its id: "!" on the symbol layer is Digit1, the key a hardware keyboard types it with.
      */
     public static String forCharacter(char character) {
-        if (character >= 'a' && character <= 'z') return "Key" + (char) (character - 'a' + 'A');
-        if (character >= 'A' && character <= 'Z') return "Key" + character;
+        if (TextPolicy.isAsciiLetter(character)) return "Key" + Character.toUpperCase(character);
         if (character >= '0' && character <= '9') return "Digit" + character;
         if (character == ' ') return "Space";
         if (character == '\n') return "Enter";

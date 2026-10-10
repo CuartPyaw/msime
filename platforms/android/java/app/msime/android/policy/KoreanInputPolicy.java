@@ -44,7 +44,7 @@ public final class KoreanInputPolicy {
      * <p>Shift decides the case and Caps Lock does not: the case of a Korean letter is not capitalisation but a different jamo (Shift+R is ㄲ), so a latched Caps Lock must not turn every ㄱ into ㄲ. Anything that is not an ASCII letter is passed through unchanged.
      */
     public static int hardwareCharacter(int unicode, boolean shift) {
-        boolean letter = (unicode >= 'a' && unicode <= 'z') || (unicode >= 'A' && unicode <= 'Z');
+        boolean letter = TextPolicy.isAsciiLetter(unicode);
         if (!letter) return unicode;
         return shift ? Character.toUpperCase(unicode) : Character.toLowerCase(unicode);
     }
