@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -31,7 +32,7 @@ public final class NineKeyDigitButton extends KeyboardPressButton {
         String next = TextPolicy.emptyIfNull(value);
         if (digitText.equals(next)) return;
         digitText = next;
-        setPadding(getPaddingLeft(), basePaddingTop + (digitText.isEmpty() ? 0 : KeyboardGeometry.pixels(getContext(), 10)),
+        setPadding(getPaddingLeft(), basePaddingTop + (digitText.isEmpty() ? 0 : DimensionPolicy.pixels(getContext(), 10)),
             getPaddingRight(), getPaddingBottom());
         invalidate();
     }
@@ -50,6 +51,6 @@ public final class NineKeyDigitButton extends KeyboardPressButton {
         digitPaint.setAlpha(ColorPolicy.enabledAlpha(isEnabled(), 204, 96));
         Paint.FontMetrics metrics = digitPaint.getFontMetrics();
         canvas.drawText(digitText, getWidth() / 2f,
-            KeyboardGeometry.pixels(getContext(), 3) - metrics.top, digitPaint);
+            DimensionPolicy.pixels(getContext(), 3) - metrics.top, digitPaint);
     }
 }

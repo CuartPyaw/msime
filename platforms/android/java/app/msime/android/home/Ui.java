@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.DrawablePolicy;
 import android.content.Context;
 import android.graphics.Color;
@@ -168,7 +170,7 @@ public final class Ui {
     // ---- 读取 ----
 
     public static int dp(Context context, float value) {
-        return KeyboardGeometry.pixels(context, value);
+        return DimensionPolicy.pixels(context, value);
     }
 
     /** Apply the standard detail-row horizontal and vertical insets to a view. */
@@ -268,7 +270,7 @@ public final class Ui {
     /** Create a theme-coloured one-pixel divider in either orientation. */
     public static View divider(Context context, boolean horizontal) {
         View view = ViewPolicy.newColorView(context, hairline(context));
-        int thin = KeyboardGeometry.atLeastOnePixel(context, 0.5f);
+        int thin = DimensionPolicy.atLeastOnePixel(context, 0.5f);
         view.setLayoutParams(horizontal
             ? KeyboardGeometry.matchWidthHeightPx(thin)
             : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));

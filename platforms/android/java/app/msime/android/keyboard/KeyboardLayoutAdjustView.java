@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import android.graphics.Color;
 import android.graphics.drawable.GradientDrawable;
 import android.os.Bundle;
@@ -103,8 +104,8 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
         int foreground = ColorPolicy.parse(skin.keyForeground(), Color.WHITE);
         int accent = ColorPolicy.parse(skin.accent(), Color.WHITE);
         GradientDrawable surface = DrawablePolicy.outlined(keyBackground,
-            KeyboardGeometry.pixels(getContext(), 10),
-            KeyboardGeometry.atLeastOnePixel(getContext(), 1), accent);
+            DimensionPolicy.pixels(getContext(), 10),
+            DimensionPolicy.atLeastOnePixel(getContext(), 1), accent);
         ViewPolicy.setBackground(bar, surface);
         ViewPolicy.setTextColor(hint, foreground);
         ViewPolicy.setTextColor(voiceShortcut, foreground);
@@ -142,9 +143,9 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
             }
             case MotionEvent.ACTION_MOVE -> {
                 if (trackingHeight) return true;
-                float translationX = KeyboardGeometry.fromPixels(
+                float translationX = DimensionPolicy.fromPixels(
                     getContext(), event.getX() - downX);
-                float translationY = KeyboardGeometry.fromPixels(
+                float translationY = DimensionPolicy.fromPixels(
                     getContext(), event.getY() - downY);
                 axis = KeyboardLayoutAdjustPolicy.chooseAxis(translationX, translationY, axis);
                 if (axis == KeyboardLayoutAdjustPolicy.Axis.HORIZONTAL) {
@@ -178,7 +179,7 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
                 return true;
             }
             case MotionEvent.ACTION_MOVE -> {
-                float translationY = KeyboardGeometry.fromPixels(
+                float translationY = DimensionPolicy.fromPixels(
                     getContext(), event.getY() - downY);
                 heightAdjustment = KeyboardLayoutAdjustPolicy.heightFromDrag(baseHeight, translationY);
                 listener.height(heightAdjustment);
@@ -215,9 +216,9 @@ public final class KeyboardLayoutAdjustView extends FrameLayout {
 
     private FrameLayout.LayoutParams barParams() {
         FrameLayout.LayoutParams params = KeyboardGeometry.frameMatchWidthHeightPx(
-            KeyboardGeometry.pixels(getContext(), BAR_HEIGHT_DP));
-        params.setMargins(KeyboardGeometry.pixels(getContext(), SPACING_MARGIN_DP),
-            KeyboardGeometry.pixels(getContext(), 4), KeyboardGeometry.pixels(getContext(), SPACING_MARGIN_DP), 0);
+            DimensionPolicy.pixels(getContext(), BAR_HEIGHT_DP));
+        params.setMargins(DimensionPolicy.pixels(getContext(), SPACING_MARGIN_DP),
+            DimensionPolicy.pixels(getContext(), 4), DimensionPolicy.pixels(getContext(), SPACING_MARGIN_DP), 0);
         return params;
     }
 

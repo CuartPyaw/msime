@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.pm.PackageManager;
@@ -98,7 +100,7 @@ public final class FeedbackPage extends DetailPage {
 
         View rule = ViewPolicy.newColorView(context, Ui.hairline(context));
         LinearLayout.LayoutParams ruleParams = KeyboardGeometry.matchWidthHeightPx(
-            KeyboardGeometry.atLeastOnePixel(context, 0.5f));
+            DimensionPolicy.atLeastOnePixel(context, 0.5f));
         ruleParams.setMarginStart(Ui.dp(requireContext(), 16));
         card.addView(rule, ruleParams);
 

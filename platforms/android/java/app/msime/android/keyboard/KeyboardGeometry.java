@@ -1,8 +1,7 @@
 package app.msime.android;
 
+
 import android.content.Context;
-import android.content.res.Configuration;
-import android.util.TypedValue;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
@@ -76,37 +75,6 @@ public final class KeyboardGeometry {
     public static final int WINDOW_HEIGHT_ADJUSTMENT_PERCENT = 14;
 
     private KeyboardGeometry() { }
-
-    /** Return the shorter of two dimensions for proportional control sizing. */
-    public static float shorterSide(float width, float height) {
-        return BoundsPolicy.atMost(width, height);
-    }
-
-    /** Return the current display width in physical pixels. */
-    public static int screenWidthPixels(Context context) {
-        return context.getResources().getDisplayMetrics().widthPixels;
-    }
-
-    /** Return whether the supplied context currently uses the system night configuration. */
-    public static boolean isNight(Context context) {
-        return (context.getResources().getConfiguration().uiMode
-            & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-    }
-
-    /** Read the display density used by keyboard geometry calculations. */
-    public static float density(Context context) {
-        return context.getResources().getDisplayMetrics().density;
-    }
-
-    /** Return a view's non-negative width after horizontal padding. */
-    public static int contentWidth(View view) {
-        return BoundsPolicy.nonNegative(view.getWidth() - view.getPaddingLeft() - view.getPaddingRight());
-    }
-
-    /** Return a view's non-negative height after vertical padding. */
-    public static int contentHeight(View view) {
-        return BoundsPolicy.nonNegative(view.getHeight() - view.getPaddingTop() - view.getPaddingBottom());
-    }
 
     /** 键盘高度百分比对应的高度调整 dp：`round(184 × (p − 100) / 100)`，范围外先钳到 75–160（向远离零的方向取整）。 */
     public static int heightPercentToAdjustment(int percent) {
@@ -240,26 +208,6 @@ public final class KeyboardGeometry {
         return BoundsPolicy.nonNegative(Math.round(tenths * density / 20f));
     }
 
-    /** Convert a size to pixels while guaranteeing at least one physical pixel. */
-    public static int atLeastOnePixel(Context context, float dp) {
-        return BoundsPolicy.atLeast(pixels(context, dp), 1);
-    }
-
-    /** Convert an integer density-independent size to pixels using Android's rounding rule. */
-    public static int pixels(int dp, float density) {
-        return Math.round(dp * density);
-    }
-
-    /** Convert a fractional density-independent size to rounded pixels. */
-    public static int pixels(float dp, float density) {
-        return Math.round(dp * density);
-    }
-
-    /** Convert a density-independent size to rounded pixels using the context's density. */
-    public static int pixels(Context context, float dp) {
-        return pixels(dp, density(context));
-    }
-
     /** Create a vertical container for stacked keyboard content. */
     public static LinearLayout column(Context context) {
         return ViewPolicy.newColumn(context);
@@ -272,7 +220,8 @@ public final class KeyboardGeometry {
 
     /** Create linear layout parameters from density-independent dimensions. */
     public static LinearLayout.LayoutParams linearParams(Context context, float widthDp, float heightDp) {
-        return new LinearLayout.LayoutParams(pixels(context, widthDp), pixels(context, heightDp));
+        return new LinearLayout.LayoutParams(DimensionPolicy.pixels(context, widthDp),
+            DimensionPolicy.pixels(context, heightDp));
     }
 
     /** Create linear layout parameters from already pixel-sized dimensions. */
@@ -413,50 +362,29 @@ public final class KeyboardGeometry {
     /** Create weighted linear layout parameters with a fixed height in dp. */
     public static LinearLayout.LayoutParams weightedHeightParams(Context context, float heightDp,
             float weight) {
-        return new LinearLayout.LayoutParams(0, pixels(context, heightDp), weight);
+        return new LinearLayout.LayoutParams(0, DimensionPolicy.pixels(context, heightDp), weight);
     }
 
     /** Apply symmetric horizontal and vertical padding expressed in dp. */
     public static void setSymmetricPaddingDp(View view, Context context, float horizontalDp,
             float verticalDp) {
-        int horizontal = pixels(context, horizontalDp);
-        int vertical = pixels(context, verticalDp);
+        int horizontal = DimensionPolicy.pixels(context, horizontalDp);
+        int vertical = DimensionPolicy.pixels(context, verticalDp);
         ViewPolicy.setSymmetricPadding(view, horizontal, vertical);
     }
 
     /** Apply equal horizontal dp padding with no vertical padding. */
     public static void setHorizontalPaddingDp(View view, Context context, float horizontalDp) {
-        int horizontal = pixels(context, horizontalDp);
+        int horizontal = DimensionPolicy.pixels(context, horizontalDp);
         ViewPolicy.setHorizontalPadding(view, horizontal);
     }
 
     /** Apply four-sided padding expressed in density-independent pixels. */
     public static void setPaddingDp(View view, Context context, float leftDp, float topDp,
             float rightDp, float bottomDp) {
-        ViewPolicy.setPadding(view, pixels(context, leftDp), pixels(context, topDp),
-            pixels(context, rightDp), pixels(context, bottomDp));
-    }
-
-    /** Convert a fractional density-independent size to pixels without rounding. */
-    public static float floatPixels(double dp, float density) {
-        return (float) dp * density;
-    }
-
-    /** Convert a fractional density-independent size to pixels using the context's density. */
-    public static float floatPixels(Context context, double dp) {
-        return floatPixels(dp, density(context));
-    }
-
-    /** Convert pixels back to density-independent units using the context's density. */
-    public static float fromPixels(Context context, float pixels) {
-        float density = density(context);
-        return density <= 0 ? pixels : pixels / density;
-    }
-
-    /** Convert scalable text units using the view context's display metrics. */
-    public static float sp(Context context, float value) {
-        return TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_SP, value,
-            context.getResources().getDisplayMetrics());
+        ViewPolicy.setPadding(view, DimensionPolicy.pixels(context, leftDp),
+            DimensionPolicy.pixels(context, topDp), DimensionPolicy.pixels(context, rightDp),
+            DimensionPolicy.pixels(context, bottomDp));
     }
 
     /** 键盘里的文字最多跟随系统字体放大到这个倍数。 */
@@ -496,7 +424,7 @@ public final class KeyboardGeometry {
      * <p>键帽一直沿用按钮样式自带的内边距，那份内边距来自系统主题的按钮背景：原生 Material 是左右 12 dp、上下 10 dp，各厂商的 `DeviceDefault` 主题又各不相同。TextView 把文字裁在内边距框里，36 dp 宽的字母键扣掉两侧内边距后经常放不下一个字母，于是同一个键盘在不同手机上有的正常、有的字母整排消失。键帽的文字本来就由 gravity 居中，提示、数字和图标由各自的子类在需要时另加内边距，所以这里统一归零上下、左右只留 {@link #KEY_CAP_HORIZONTAL_PADDING_DP}，并去掉字体留白和最小宽高。
      */
     public static void normalizeKeyCap(android.widget.TextView key) {
-        int horizontal = pixels(key.getContext(), KEY_CAP_HORIZONTAL_PADDING_DP);
+        int horizontal = DimensionPolicy.pixels(key.getContext(), KEY_CAP_HORIZONTAL_PADDING_DP);
         ViewPolicy.setHorizontalPadding(key, horizontal);
         ViewPolicy.clearFontPadding(key);
         ViewPolicy.clearMinimumSize(key);

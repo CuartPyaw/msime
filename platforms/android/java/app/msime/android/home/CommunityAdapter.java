@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import android.content.Context;
 import android.graphics.drawable.GradientDrawable;
 import android.view.LayoutInflater;
@@ -302,7 +304,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
 
     /** The slice of the grouped card behind one row: rounded where the group starts and ends. */
     private static GradientDrawable group(View row, boolean first, boolean last) {
-        float radius = KeyboardGeometry.floatPixels(row.getContext(), GROUP_RADIUS_DP);
+        float radius = DimensionPolicy.floatPixels(row.getContext(), GROUP_RADIUS_DP);
         float top = first ? radius : 0f;
         float bottom = last ? radius : 0f;
         return DrawablePolicy.rounded(Ui.card(row.getContext()),

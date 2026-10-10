@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import android.content.Context;
 import android.view.Gravity;
 import android.view.View;
@@ -100,7 +101,7 @@ public final class SymbolPanelView extends LinearLayout {
         categoryScroll.setVerticalScrollBarEnabled(false);
         categoryScroll.addView(categories, KeyboardGeometry.scrollMatchWidthWrapParams());
         body.addView(categoryScroll, KeyboardGeometry.linearParamsPx(
-            KeyboardGeometry.pixels(getContext(), 76), LayoutParams.MATCH_PARENT));
+            DimensionPolicy.pixels(getContext(), 76), LayoutParams.MATCH_PARENT));
         grid.setColumnCount(SymbolPanelModel.COLUMNS);
         grid.setUseDefaultMargins(false);
         grid.setAlignmentMode(GridLayout.ALIGN_BOUNDS);
@@ -120,7 +121,7 @@ public final class SymbolPanelView extends LinearLayout {
         bottom.addView(lockButton, KeyboardGeometry.weightedHeightParams(getContext(), 48, 1));
         Button bottomDelete = buttons.create("⌫", "删除", listener::delete, true);
         bottom.addView(bottomDelete, KeyboardGeometry.weightedHeightParams(getContext(), 48, 1));
-        addView(bottom, KeyboardGeometry.matchWidthHeightPx(KeyboardGeometry.pixels(getContext(), 48)));
+        addView(bottom, KeyboardGeometry.matchWidthHeightPx(DimensionPolicy.pixels(getContext(), 48)));
 
         List<SymbolPanelModel.Category> values = SymbolPanelModel.categories(recents);
         for (int index = 0; index < values.size(); index++) {
@@ -133,7 +134,7 @@ public final class SymbolPanelView extends LinearLayout {
             KeyboardGeometry.setKeyTextSize(button, 13);
             categoryButtons.add(button);
             categories.addView(button, KeyboardGeometry.matchWidthHeightPx(
-                KeyboardGeometry.pixels(getContext(), 40)));
+                DimensionPolicy.pixels(getContext(), 40)));
         }
         select(SymbolPanelModel.initialCategory(recents));
     }
@@ -177,7 +178,7 @@ public final class SymbolPanelView extends LinearLayout {
         GridLayout.LayoutParams params = new GridLayout.LayoutParams(GridLayout.spec(0),
             GridLayout.spec(0, columns, 1f));
         params.width = 0;
-        params.height = KeyboardGeometry.pixels(getContext(), 92);
+        params.height = DimensionPolicy.pixels(getContext(), 92);
         grid.addView(hint, params);
         listener.restyle(hint);
     }
@@ -206,7 +207,7 @@ public final class SymbolPanelView extends LinearLayout {
                 GridLayout.Spec column = GridLayout.spec(index - start, 1f);
                 GridLayout.LayoutParams params = new GridLayout.LayoutParams(row, column);
                 params.width = 0;
-                params.height = KeyboardGeometry.pixels(getContext(), 46);
+                params.height = DimensionPolicy.pixels(getContext(), 46);
                 grid.addView(button, params);
             }
             for (int index = end - start; index < columns; index++) {
@@ -215,7 +216,7 @@ public final class SymbolPanelView extends LinearLayout {
                 GridLayout.Spec column = GridLayout.spec(index, 1f);
                 GridLayout.LayoutParams params = new GridLayout.LayoutParams(row, column);
                 params.width = 0;
-                params.height = KeyboardGeometry.pixels(getContext(), 46);
+                params.height = DimensionPolicy.pixels(getContext(), 46);
                 grid.addView(spacer, params);
             }
         }

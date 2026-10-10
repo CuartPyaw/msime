@@ -1,5 +1,6 @@
 package app.msime.android;
 
+
 import app.msime.android.core.InputViewValuePolicy;
 import android.content.ClipDescription;
 import android.content.ClipboardManager;
@@ -1386,7 +1387,7 @@ final class ImePanels {
             if (items.isEmpty()) notes.add(clipboardNote("复制的文字会自动出现在这里，点按即可插入\n只保存在本机"));
             long now = System.currentTimeMillis();
             int columns = s.clipboardColumns;
-            float reveal = ClipboardSwipePolicy.revealWidth(KeyboardGeometry.density(s), clipboardCellWidth(columns));
+            float reveal = ClipboardSwipePolicy.revealWidth(DimensionPolicy.density(s), clipboardCellWidth(columns));
             boolean swipedPresent = false;
             ClipboardHistory.Item actionItem = null;
             for (int index = 0; index < items.size(); index++) {
@@ -1829,7 +1830,7 @@ final class ImePanels {
             this.trash = trash;
             this.text = text;
             this.reveal = reveal;
-            density = KeyboardGeometry.density(s);
+            density = DimensionPolicy.density(s);
             touchSlop = android.view.ViewConfiguration.get(s).getScaledTouchSlop();
         }
 
@@ -2076,7 +2077,7 @@ final class ImePanels {
             panel.addView(row, KeyboardGeometry.matchWidthWrapParams());
             View hairline = new View(s);
             LinearLayout.LayoutParams line = KeyboardGeometry.matchWidthHeightPx(
-                KeyboardGeometry.atLeastOnePixel(s, 1));
+                DimensionPolicy.atLeastOnePixel(s, 1));
             KeyboardGeometry.setHorizontalMargins(line, s.pixels(12));
             panel.addView(hairline, line);
             lines.add(hairline);

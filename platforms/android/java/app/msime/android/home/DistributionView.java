@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -83,7 +85,7 @@ public final class DistributionView extends View {
     }
 
     private int track() {
-        boolean dark = KeyboardGeometry.isNight(getContext());
+        boolean dark = DimensionPolicy.isNight(getContext());
         return dark ? ColorPolicy.withAlpha(Color.WHITE, .1f) : ColorPolicy.withAlpha(Color.BLACK, .07f);
     }
 

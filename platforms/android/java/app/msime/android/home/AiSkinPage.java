@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.MainThreadPolicy;
 import app.msime.android.TextPolicy;
 
@@ -479,7 +481,7 @@ public final class AiSkinPage extends DetailPage {
                     View dot = new View(context);
                     android.graphics.drawable.GradientDrawable shape = DrawablePolicy.outlined(
                         ColorPolicy.parse(colour, Color.GRAY), 9999f,
-                        KeyboardGeometry.atLeastOnePixel(context, 1), Ui.hairline(context));
+                        DimensionPolicy.atLeastOnePixel(context, 1), Ui.hairline(context));
                     ViewPolicy.setBackground(dot, shape);
                     LinearLayout.LayoutParams params = Ui.squareParams(context, 16);
                     params.setMarginEnd(Ui.dp(context, 6));

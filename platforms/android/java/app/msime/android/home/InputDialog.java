@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.ColorDrawable;
@@ -91,7 +93,7 @@ public final class InputDialog {
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
             window.setLayout(BoundsPolicy.atMost(Ui.dp(context, Ui.DIALOG_WIDTH),
-                KeyboardGeometry.screenWidthPixels(context) - Ui.dp(context, 48)),
+                DimensionPolicy.screenWidthPixels(context) - Ui.dp(context, 48)),
                 ViewGroup.LayoutParams.WRAP_CONTENT);
             window.setDimAmount(0.35f);
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
@@ -113,7 +115,7 @@ public final class InputDialog {
         input.setInputType(inputType == 0 ? InputType.TYPE_CLASS_TEXT : inputType);
         input.setHintTextColor(Ui.subText(context));
         GradientDrawable field = DrawablePolicy.outlined(Ui.rowBackground(context), Ui.dp(context, 10),
-            KeyboardGeometry.atLeastOnePixel(context, 1), Ui.hairline(context));
+            DimensionPolicy.atLeastOnePixel(context, 1), Ui.hairline(context));
         ViewPolicy.setBackground(input, field);
         Ui.setHorizontalPaddingDp(input, context, 12);
         Ui.afterTextChanged(input, ignored -> refresh());
