@@ -324,7 +324,7 @@ public final class DiagnosticsApi {
 
     private static void appendEvents(List<Event> target, List<Event> additions) {
         int overflow = target.size() + additions.size() - MAX_EVENTS;
-        if (overflow > 0) target.subList(0, Math.min(overflow, target.size())).clear();
+        if (overflow > 0) target.subList(0, BoundsPolicy.atMost(overflow, target.size())).clear();
         int remaining = MAX_EVENTS - target.size();
         if (additions.size() > remaining) {
             target.addAll(additions.subList(additions.size() - remaining, additions.size()));
