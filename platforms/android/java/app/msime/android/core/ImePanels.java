@@ -1965,10 +1965,7 @@ final class ImePanels {
         if (timestamp <= 0) return "";
         long millis = timestamp < 100_000_000_000L ? timestamp * 1000 : timestamp;
         long minutes = BoundsPolicy.nonNegative(now - millis) / 60_000;
-        if (minutes < 1) return "刚刚";
-        if (minutes < 60) return minutes + " 分钟前";
-        if (minutes < 60 * 24) return (minutes / 60) + " 小时前";
-        return (minutes / (60 * 24)) + " 天前";
+        return RelativeTimePolicy.minutesAgo(minutes);
     }
 
     /** 云端条目的更新时间（ISO-8601）换成相对时间；解析不了就不显示。 */
