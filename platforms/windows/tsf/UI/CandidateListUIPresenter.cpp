@@ -70,6 +70,8 @@ HRESULT CMetasequoiaIME::_HandleCandidateFinalize(TfEditCookie ec, _In_ ITfConte
     // first; this path has to as well.
     const auto *hostEngine = _pCompositionProcessorEngine->GetHostEngineAdapter();
     const bool hostOwnsComposition = hostEngine && hostEngine->valid();
+    WCHAR candidatePairedOpening = 0;
+    WCHAR candidatePairedClosing = 0;
 
     // _pCandidateListUIPresenter would be null in uwp/metro apps
     if (nullptr == _pCandidateListUIPresenter)
@@ -81,7 +83,14 @@ HRESULT CMetasequoiaIME::_HandleCandidateFinalize(TfEditCookie ec, _In_ ITfConte
     {
         if (!pendingCommitCandidate.empty())
         {
-            candidateString.Set(pendingCommitCandidate.c_str(), pendingCommitCandidate.length());
+            // 点选的符号候选恰好是一个左半边（如「或（）时，与按标点键一样补上右半边，光标留在两半之间。
+            const WCHAR pairedClosing = _CandidateCommitPairedClosing(pendingCommitCandidate);
+            std::wstring committed = pendingCommitCandidate;
+            if (pairedClosing != 0)
+            {
+                committed.push_back(pairedClosing);
+            }
+            candidateString.Set(committed.c_str(), committed.length());
             PerfTimer insertTextTimer;
             hr = _InsertTextToComposition(ec, pContext, &candidateString);
             if (FAILED(hr))
@@ -101,6 +110,7 @@ HRESULT CMetasequoiaIME::_HandleCandidateFinalize(TfEditCookie ec, _In_ ITfConte
 
             PerfTimer completeTimer;
             _HandleCompleteCommitFirst(ec, pContext);
+            _OpenCandidateCommitPair(committed.front(), pairedClosing);
             return hr;
         }
 
@@ -126,11 +136,26 @@ HRESULT CMetasequoiaIME::_HandleCandidateFinalize(TfEditCookie ec, _In_ ITfConte
         {
             return hr;
         }
+        // 日语的空格是「変換」：Server 开始转换或移到下一个候选时回导航回执，什么也不上屏。组字留着，记下转换已经开始，之后的回车上屏高亮候选。
+        if (Global::JapaneseSpaceReplyKeepsComposition(
+                serverMsgType, Global::InputModeScheme.load(std::memory_order_relaxed) ==
+                                   msime::windows::scheme::Japanese))
+        {
+            _NoteJapaneseConversionStarted();
+            return hr;
+        }
         else if (serverMsgType == Global::DataFromServerMsgType::Normal) // 只有正常情况下才会上屏
         {
             GlobalIme::word_for_creating_word = L"";
             _creatingWordRestoreHistory.clear();
             GlobalIme::pending_create_word_preedit.clear();
+            // 空格、数字或回车选中的符号候选恰好是一个左半边时补上右半边，上屏之后再记下这一对并移回光标（见函数末尾）。
+            candidatePairedClosing = _CandidateCommitPairedClosing(serverCandidateString);
+            if (candidatePairedClosing != 0)
+            {
+                candidatePairedOpening = serverCandidateString.front();
+                serverCandidateString.push_back(candidatePairedClosing);
+            }
             candidateString.Set(serverCandidateString.c_str(), serverCandidateString.length());
             PerfTimer insertTextTimer;
             hr = _InsertTextToComposition(ec, pContext, &candidateString);
@@ -220,6 +245,7 @@ NoPresenter:
 
     PerfTimer completeTimer;
     _HandleCompleteCommitFirst(ec, pContext);
+    _OpenCandidateCommitPair(candidatePairedOpening, candidatePairedClosing);
 
     return hr;
 }

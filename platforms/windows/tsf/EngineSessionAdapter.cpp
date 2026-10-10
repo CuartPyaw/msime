@@ -1,4 +1,5 @@
 #include "EngineSessionAdapter.h"
+#include "Global/CandidateArrowKeyPolicy.h"
 #include <nlohmann/json.hpp>
 namespace msime::tsf {
 using json = nlohmann::json;
@@ -107,7 +108,21 @@ bool EngineSessionAdapter::reload_preferences(const std::string &directory,
       if (error) *error = "Preferences unavailable";
       return false;
     }
-    const auto snapshot = response_value.at("value").dump();
+    const auto &value = response_value.at("value");
+    // 只读这两项来决定 ←/→ 的去向；类型不对的值按缺省处理，不让这一步拖垮整次偏好载入。
+    if (const auto preferences = value.find("preferences"); preferences != value.end() && preferences->is_object()) {
+      const auto layout = preferences->find("candidate_layout");
+      const auto navigation = preferences->find("navigation");
+      bool arrows = true;
+      if (navigation != preferences->end() && navigation->is_object()) {
+        const auto arrow = navigation->find("arrows");
+        if (arrow != navigation->end() && arrow->is_boolean()) arrows = arrow->get<bool>();
+      }
+      horizontal_candidate_arrows_ = Global::CandidateArrowsFollowHorizontalLayout(
+          layout != preferences->end() && layout->is_string() ? layout->get_ref<const std::string &>() : std::string_view{},
+          arrows);
+    }
+    const auto snapshot = value.dump();
     return update_preferences(snapshot, out, error);
   } catch (...) { if (error) *error = "Invalid preferences response"; return false; }
 }

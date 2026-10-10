@@ -1,11 +1,15 @@
 #pragma once
 #include "CandidateActionAvailability.h"
+#include "CandidateGlossReadings.h"
 #include "ChineseTextConversion.h"
 #include "FocusGate.h"
 #include "InputSchemeTraits.h"
 #include "PipeMetadata.h"
 #include "ReplyComposer.h"
+#include "ShuangpinKeymapLayout.h"
+#include "TranslationDisplay.h"
 #include "WubiCodeHintPolicy.h"
+#include <algorithm>
 
 namespace msime::windows {
 // TSF can report the candidate show event before it has a usable text extent.
@@ -30,6 +34,10 @@ struct PresentationCandidate {
   std::string wubi_code_hint{};
   // A Korean Hanja's 훈음 (나라 이름 한), which the Engine sends as the row's annotation. It is drawn on the smaller secondary line whatever the translation preferences say, above the translation when there is one, and it is display only: nothing commits it, and `translation` keeps only what the Engine applied as a translation.
   std::string gloss{};
+  // 释义每一行的读音，按 "\n" 分行，和 translation 的各行（U+2028 分行）逐行对应；只用于显示，从不上屏。由翻译工作线程算好、CandidateMailbox 按候选文字和释义挂上来，见 CandidateReading。
+  std::string pronunciation{};
+  // 整句候选的逐词拆解（「我 I · 喜欢 to like · 你 you」），画在释义下面单独一行，同样只用于显示。
+  std::string breakdown{};
 };
 // Whether this view's candidates are a Korean Hanja list: the Korean scheme under its own rules, outside the dedicated English mode and every local mode, where the Engine lists candidates only after MSIME_CONVERT_HANJA. ReplyComposer::korean_hanja reads the same three fields.
 inline bool korean_hanja_view(const nlohmann::json &view) {
@@ -42,22 +50,70 @@ inline void move_korean_hanja_gloss(PresentationCandidate &candidate) {
   candidate.gloss = std::move(candidate.annotation);
   candidate.annotation.clear();
 }
-// The smaller secondary run of a row: the 훈음 alone, the translation alone, or the 훈음 with the translation on the line under it.
+// 释义部分画出来的样子：每种目标语言一行，行后跟读音，整句的逐词拆解在最后一行（candidate_gloss_display）。with_readings 为 false 时只有释义各行，不带读音和拆解。
+inline std::string candidate_translation_display(const PresentationCandidate &candidate,
+                                                 bool with_readings = true) {
+  std::vector<std::string> lines;
+  if (!candidate.translation.empty())
+    lines = translation_lines(candidate.translation);
+  if (!with_readings)
+    return candidate_gloss_display(lines, {}, {});
+  std::vector<std::string> readings;
+  for (size_t start = 0; !candidate.pronunciation.empty();) {
+    const auto cut = candidate.pronunciation.find('\n', start);
+    readings.push_back(candidate.pronunciation.substr(start, cut == std::string::npos ? std::string::npos : cut - start));
+    if (cut == std::string::npos)
+      break;
+    start = cut + 1;
+  }
+  return candidate_gloss_display(lines, readings, candidate.breakdown);
+}
+// 一行候选下面那段较小的次要文字：只有 훈음、只有释义，或 훈음 在上、释义在下一行。释义部分是 candidate_translation_display：每种目标语言一行并跟着读音，最后是逐词拆解。候选窗只画不超过 4096 字节的文字（CandidateWindow 的 wide()），读音和拆解加上去超过时就不带它们，免得一条很长的释义让整个候选窗画不出来。
 inline std::string candidate_secondary_text(const PresentationCandidate &candidate) {
-  if (candidate.gloss.empty())
-    return candidate.translation;
-  if (candidate.translation.empty())
-    return candidate.gloss;
-  return candidate.gloss + "\n" + candidate.translation;
+  const auto compose = [&](bool with_readings) {
+    const auto translation = candidate_translation_display(candidate, with_readings);
+    if (candidate.gloss.empty())
+      return translation;
+    if (translation.empty())
+      return candidate.gloss;
+    return candidate.gloss + "\n" + translation;
+  };
+  auto text = compose(true);
+  if (text.size() > 4096 && (!candidate.pronunciation.empty() || !candidate.breakdown.empty()))
+    text = compose(false);
+  return text;
+}
+// 把翻译工作线程算好的读音和拆解挂到候选上，没有的清空：读音只在候选眼下的释义与算它时的释义相同才挂，拆解按候选文字挂。
+inline void attach_candidate_readings(std::vector<PresentationCandidate> &candidates,
+                                      const CandidateReadings &readings) {
+  for (auto &candidate : candidates) {
+    candidate.pronunciation.clear();
+    candidate.breakdown.clear();
+    const auto found = readings.find(candidate.text);
+    if (found == readings.end())
+      continue;
+    if (!candidate.translation.empty() && found->second.translation == candidate.translation)
+      candidate.pronunciation = found->second.pronunciation;
+    candidate.breakdown = found->second.breakdown;
+  }
 }
 // The correction marker is display-only: keep it out of the text used for
 // selection, dictionary actions and candidate identity.
 inline std::string candidate_primary_text(const PresentationCandidate &candidate) {
   return candidate.text + (candidate.corrected ? "*" : "") + candidate.badge;
 }
-// How many lines candidate_secondary_text starts with before any wrapping. The Engine refuses control characters in a translation, and the 훈음 table has none, so the only line break is the one joining them.
+// 鼠标停在一行候选上时的提示：候选全文，有释义时下一行是释义，和 macOS 候选按钮的 toolTip 一样。长候选和长释义在卡片里会折行，提示里是完整的一段。
+inline std::string candidate_tooltip_text(const PresentationCandidate &candidate) {
+  auto text = candidate_primary_text(candidate);
+  const auto secondary = candidate_secondary_text(candidate);
+  if (!secondary.empty())
+    text += "\n" + secondary;
+  return text;
+}
+// candidate_secondary_text 在折行之前有几行：훈음、每种目标语言一行和逐词拆解。Engine 不收含控制字符的释义，훈음 表里也没有，所以每个换行都是 candidate_secondary_text 自己放进去的。
 inline size_t candidate_secondary_lines(const PresentationCandidate &candidate) {
-  return !candidate.gloss.empty() && !candidate.translation.empty() ? 2 : 1;
+  const auto text = candidate_secondary_text(candidate);
+  return 1 + static_cast<size_t>(std::count(text.begin(), text.end(), '\n'));
 }
 struct CandidatePresentation {
   FocusLease lease;
@@ -85,6 +141,8 @@ struct CandidatePresentation {
   bool pointer_input = true;
   // 游戏会话（包上带 PipeMetadata::GameHost）：宿主给的锚点可能不可信，候选窗允许在游戏客户区里兜底定位。
   bool game_host = false;
+  // 双拼组字时候选窗旁的键位提示（方案名和要高亮的键），按 view 判断，不是双拼组字时为空；开关由 Server 主循环另外看。
+  std::optional<ShuangpinKeymapHint> shuangpin_keymap;
 };
 // Copy the view's page position into `output`, dropping one that is not a page of the count rather than drawing "4 / 3".
 inline void candidate_presentation_page(CandidatePresentation &output,
@@ -162,6 +220,7 @@ candidate_presentation_from_view(const FocusLease &lease,
   candidate_presentation_page(output, view);
   output.pointer_input = !scheme::KeyboardOnlyCandidateList(
       static_cast<int>(view.value("scheme", 0u)));
+  output.shuangpin_keymap = shuangpin_keymap_hint(view);
   output.visible = true;
   return output;
 }
@@ -230,6 +289,7 @@ candidate_presentation(const FocusLease &lease, const PendingReply &reply,
   candidate_presentation_page(output, view);
   output.pointer_input = !scheme::KeyboardOnlyCandidateList(
       static_cast<int>(view.value("scheme", 0u)));
+  output.shuangpin_keymap = shuangpin_keymap_hint(view);
   output.visible = true;
   return output;
 }

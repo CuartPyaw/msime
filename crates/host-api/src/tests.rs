@@ -2412,6 +2412,58 @@ fn restoring_default_preferences_is_a_locked_compare_and_swap() {
 }
 
 #[test]
+fn exported_settings_import_as_a_compare_and_swap_that_keeps_local_services() {
+    let source = tempfile::tempdir().unwrap();
+    let source_store = PreferencesStore::new(source.path());
+    let mut exported = Preferences {
+        candidate_page_size: 8,
+        ..Preferences::default()
+    };
+    exported.voice_input.asr_token = "fixture-exported-token".into();
+    source_store.save(0, exported).unwrap();
+    let source_path = source.path().to_str().unwrap();
+    let document =
+        read(unsafe { msime_client_export_settings(source_path.as_ptr(), source_path.len()) });
+    assert_eq!(document["ok"], true, "{document}");
+    let text = document["value"].as_str().unwrap().to_owned();
+    assert!(!text.contains("fixture-exported-token"));
+
+    let target = tempfile::tempdir().unwrap();
+    let target_store = PreferencesStore::new(target.path());
+    let mut local = Preferences::default();
+    local.voice_input.asr_token = "fixture-local-token".into();
+    let saved = target_store.save(0, local).unwrap();
+    let target_path = target.path().to_str().unwrap();
+    let import = |revision: u64, bytes: &[u8]| {
+        read(unsafe {
+            msime_client_import_settings(
+                target_path.as_ptr(),
+                target_path.len(),
+                revision,
+                bytes.as_ptr(),
+                bytes.len(),
+            )
+        })
+    };
+    let stale = import(saved.revision + 3, text.as_bytes());
+    assert_eq!(stale["error"], "settings_conflict");
+    assert_eq!(target_store.load().unwrap(), saved);
+    assert_eq!(
+        import(saved.revision, b"{\"format\":\"elsewhere\"}")["error"],
+        "settings_document_invalid"
+    );
+    let imported = import(saved.revision, text.as_bytes());
+    assert_eq!(imported["ok"], true, "{imported}");
+    assert_eq!(imported["value"]["revision"], saved.revision + 1);
+    let loaded = target_store.load().unwrap();
+    assert_eq!(loaded.preferences.candidate_page_size, 8);
+    assert_eq!(
+        loaded.preferences.voice_input.asr_token,
+        "fixture-local-token"
+    );
+}
+
+#[test]
 #[cfg(not(target_os = "android"))]
 fn resolve_theme_reads_the_package_from_either_source() {
     let directory = tempfile::tempdir().unwrap();
@@ -4389,10 +4441,18 @@ fn translation_query_carries_the_pronunciation_switch_only_when_on() {
     let on = read(msime_client_translation_query(handle));
     assert_eq!(on["value"]["candidate_pronunciation"], true);
 
+    // 只开在线翻译时也带资源目录，宿主才能给在线翻出来的英文释义标音标。
+    preferences.candidate_english_gloss = false;
+    preferences.candidate_translations = true;
+    update(handle, 2, &preferences);
+    let online = read(msime_client_translation_query(handle));
+    assert_eq!(online["value"]["english_gloss"], false);
+    assert!(online["value"]["resources"].is_string());
+
     // Pronunciation annotates a gloss; with every gloss source off there is nothing to annotate.
     preferences.candidate_english_gloss = false;
     preferences.candidate_translations = false;
-    update(handle, 2, &preferences);
+    update(handle, 3, &preferences);
     assert_eq!(
         read(msime_client_translation_query(handle))["value"],
         Value::Null

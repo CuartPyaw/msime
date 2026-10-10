@@ -82,6 +82,12 @@ public:
   // word. A change takes effect at the next appearance, since the pinned
   // anchor is only forgotten when the card hides.
   void set_follow_cursor(bool enabled) { follow_cursor_ = enabled; }
+  // 「鼠标滚轮翻页」（`navigation.mouse_wheel`），主循环每轮按已发布的偏好设置，和 macOS 每次渲染都重读一样即时生效。关掉时丢掉攒了一半的滚动量，免得重新打开后第一格翻得太早。
+  void set_mouse_wheel(bool enabled) {
+    if (mouse_wheel_ != enabled)
+      wheel_accumulator_ = 0;
+    mouse_wheel_ = enabled;
+  }
   // The mascot a package draws above the card. Empty image means none.
   void set_skin_decoration(const CandidateSkinDecoration &decoration) {
     decoration_image_ = decoration.image;
@@ -120,6 +126,8 @@ private:
   // Each candidate's runs measured the way paint() draws them, and their wrapped heights. card_bounds and paint share both, so the card is sized for exactly the rows that get drawn.
   std::vector<CandidateItemWidths> measure_items(const CandidatePresentation &value);
   CandidateWrapMeasure wrap_measure(const CandidatePresentation &value);
+  // 横排候选为还没到的释义预留几行：偏好算出的目标语言行数，韩文汉字列表再加 훈음 那一行。card_bounds 和 paint 都读它，量出来的尺寸和画出来的行才一致。
+  size_t reserved_secondary_lines(const CandidatePresentation &value) const;
   void paint();
   // UI thread: adopt the waiting typing effect and start its flash and combo timers.
   void take_typing_effect();
@@ -135,6 +143,8 @@ private:
   // The pager arrow under a client point: true for the previous page, false for the next. None over anything else, over the previous arrow on the first page, or without a page callback.
   std::optional<bool> pager_hit(int x, int y);
   void show_context_menu(const CandidateClick &click, POINT client_point);
+  // 按刚画好的行重新登记悬停提示的区域；行的位置和快照都没变时不动，打字闪光每秒重画几十次也不会反复登记。
+  void sync_tooltips();
   Reader reader_;
   Click click_;
   Page page_;
@@ -176,6 +186,10 @@ private:
   bool horizontal_ = false;
   bool show_preedit_ = true;
   bool wubi_code_hint_ = true;
+  // 共享偏好 `show_app_logo`，经 set_layout 即时生效；关掉时首行不画 logo。
+  bool show_app_logo_ = false;
+  // 偏好算出的释义预留行数（0 到 2），经 set_layout 即时生效。
+  unsigned reserved_gloss_lines_ = 0;
   // Configured supplementary faces, in order, for the per-glyph fallback chain.
   // Minimum card width asked for by the active skin package, in DIPs.
   double skin_min_width_ = 0.0;
@@ -198,6 +212,11 @@ private:
   // Owner-drawn menu labels, kept alive for the duration of the popup: the draw messages carry pointers into this list.
   // Built on first use: most sessions never open the right-click menu, and the flyout owns two windows and two Direct2D devices.
   std::unique_ptr<CandidateFlyoutWindow> flyout_;
+  // 悬停提示（comctl32 的 tooltip 控件），每行候选一个区域，文字在 TTN_GETDISPINFOW 时按 painted_ 现取。建不出来时为空，只是没有提示。
+  HWND tooltip_ = nullptr;
+  std::vector<RECT> tooltip_rects_;
+  uint64_t tooltip_serial_ = 0;
+  std::wstring tooltip_text_;
   // The candidate the open flyout acts on, recorded afresh on every right click because the flyout itself outlives any one opening.
   CandidateMenuTarget<CandidateClick> menu_target_;
   std::vector<std::wstring> fallback_families_;

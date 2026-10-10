@@ -42,6 +42,19 @@ shell_surface_request(TrayMenuCommand command) {
     return ShellSurfaceRequest{{}, "skin"};
   case TrayMenuCommand::OpenDictionary:
     return ShellSurfaceRequest{{}, "dictionary"};
+  // 设置窗口把 help 和 feedback 都落到「帮助与反馈」页（SettingsNavigation.h 的 route_aliases）。
+  case TrayMenuCommand::OpenHelp:
+    return ShellSurfaceRequest{{}, "help"};
+  case TrayMenuCommand::OpenFeedback:
+    return ShellSurfaceRequest{{}, "feedback"};
+  // 共享应用按 cloud-clipboard 路由打开面板，打开前记下前台的编辑器（panel_input.rs 的 remember_opening_panel_target），所以条目能直接输入回原来的编辑器。托盘卡片不抢焦点，点这一行时前台仍是那个编辑器。
+  case TrayMenuCommand::OpenCloudClipboard:
+    return ShellSurfaceRequest{"cloud-clipboard", {}};
+  // 检查更新在共享应用的关于页上，Server 直接用 MSIME.exe 打开 settings:about，不经设置窗口的路由；系统表情面板、官网和隐藏工具栏都不是外壳的界面。
+  case TrayMenuCommand::CheckForUpdates:
+  case TrayMenuCommand::OpenSystemEmoji:
+  case TrayMenuCommand::OpenWebsite:
+  case TrayMenuCommand::HideFloatingToolbar:
   case TrayMenuCommand::ToggleFloatingToolbar:
   case TrayMenuCommand::SelectChinese:
   case TrayMenuCommand::SelectEnglish:
@@ -58,6 +71,12 @@ shell_surface_request(TrayMenuCommand command) {
   case TrayMenuCommand::SelectVietnamese:
   case TrayMenuCommand::SelectTibetan:
   case TrayMenuCommand::SelectStroke:
+  case TrayMenuCommand::ToggleDedicatedEnglish:
+  case TrayMenuCommand::ToggleTraditionalOutput:
+  case TrayMenuCommand::SelectTheme:
+  case TrayMenuCommand::ShowSchemes:
+  case TrayMenuCommand::ShowThemes:
+  case TrayMenuCommand::ShowMain:
     break;
   }
   return std::nullopt;

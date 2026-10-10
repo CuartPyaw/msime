@@ -66,9 +66,11 @@ inline constexpr ShellTarget feedback{"", "feedback"};
 inline constexpr ShellTarget about{"", "about"};
 inline constexpr ShellTarget keyboard_panel{"keyboard", ""};
 inline constexpr ShellTarget handwriting_panel{"handwriting", ""};
-inline constexpr std::array<ShellTarget, 13> all{
+// 共享应用的「标点与翻译」页：在线翻译服务的选择和凭据只在那里编辑，本窗口的候选词翻译分组只放一个入口。
+inline constexpr ShellTarget expression{"", "expression"};
+inline constexpr std::array<ShellTarget, 14> all{
     {appearance, skin, dictionary, vocabulary, input, screen_keyboard, voice,
-     handwriting, help, feedback, about, keyboard_panel, handwriting_panel}};
+     handwriting, help, feedback, about, keyboard_panel, handwriting_panel, expression}};
 } // namespace shell_links
 
 struct RouteAlias {

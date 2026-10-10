@@ -7,7 +7,9 @@
 #include "LocalAsrAudioQueue.h"
 #include "ReplyCodec.h"
 #include "SystemAudioMuter.h"
+#include "../../tsf/IPC/PassthroughStatistics.h"
 #include "../../../../shared/voice/VoiceProviders.h"
+#include "VoiceCommitPolicy.h"
 #include "VoiceSessionPolicy.h"
 #include "msime_client.h"
 
@@ -117,16 +119,82 @@ std::string polish_prompt(const VoiceInputConfig &config) {
   return polish_prompt_for(slots);
 }
 
-void send_text_via_send_input(std::wstring_view text) {
+// 一次录音的投递目标：焦点租约所属的 TSF 客户端进程，以及开始录音时的前台窗口（前台是 Server 自己的窗口时为空）。
+struct CommitTarget {
+  uint32_t process = 0;
+  HWND window = nullptr;
+};
+
+// 开始录音时的前台窗口。从托盘菜单或浮动工具栏开始时前台可能是 Server 自己，这时不记窗口，只按进程核对。
+HWND recording_start_window() {
+  const HWND window = GetForegroundWindow();
+  if (!window)
+    return nullptr;
+  DWORD process = 0;
+  (void)GetWindowThreadProcessId(window, &process);
+  return process != 0 && process != GetCurrentProcessId() ? window : nullptr;
+}
+
+// 前台是否仍是录音目标：前台进程是 TSF 客户端进程，或前台窗口仍是开始录音时那一个。
+bool target_in_foreground(const CommitTarget &target) {
+  DWORD foreground = 0;
+  const HWND window = GetForegroundWindow();
+  if (window)
+    (void)GetWindowThreadProcessId(window, &foreground);
+  return voice_target_in_foreground(target.process, foreground,
+                                    GetCurrentProcessId(),
+                                    target.window && window == target.window);
+}
+
+// 逐个 UTF-16 单元模拟输入，每 16 个单元前确认一次目标仍在前台，前台换了就停下，和 macOS 按块投递时反复检查 current() 一样。返回是否送出了文字；已经送出一部分时也算送出，不能再走别的路线重复上屏。
+bool send_text_via_send_input(std::wstring_view text, const CommitTarget &target) {
+  constexpr std::size_t kCheckUnits = 16;
+  std::size_t since_check = kCheckUnits;
+  bool sent = false;
   for (const wchar_t ch : text) {
+    // 不在代理对中间停下，低位代理总跟着它的高位代理发出。
+    const bool low_surrogate = ch >= 0xDC00 && ch <= 0xDFFF;
+    if (since_check >= kCheckUnits && !low_surrogate) {
+      if (!target_in_foreground(target))
+        return sent;
+      since_check = 0;
+    }
     INPUT input[2]{};
     input[0].type = INPUT_KEYBOARD;
     input[0].ki.wScan = static_cast<WORD>(ch);
     input[0].ki.dwFlags = KEYEVENTF_UNICODE;
+    // 这段文字由 Server 记作 voice，带上面板注入标记，tip 就不会再把它当直通字符记一次。
+    input[0].ki.dwExtraInfo = static_cast<ULONG_PTR>(PanelTextSendInputExtraInfo);
     input[1] = input[0];
     input[1].ki.dwFlags |= KEYEVENTF_KEYUP;
     (void)SendInput(2, input, sizeof(INPUT));
+    sent = true;
+    ++since_check;
   }
+  return sent;
+}
+
+// 把一个 DWORD 值以注册格式放进已打开的剪贴板。
+bool set_clipboard_marker(const VoiceClipboardMarker &marker) {
+  const std::wstring name(marker.format);
+  const UINT format = RegisterClipboardFormatW(name.c_str());
+  if (!format)
+    return false;
+  HGLOBAL memory = GlobalAlloc(GMEM_MOVEABLE, sizeof(DWORD));
+  if (!memory)
+    return false;
+  auto *value = static_cast<DWORD *>(GlobalLock(memory));
+  if (!value) {
+    GlobalFree(memory);
+    return false;
+  }
+  *value = marker.value;
+  GlobalUnlock(memory);
+  if (!SetClipboardData(format, memory)) {
+    GlobalFree(memory);
+    return false;
+  }
+  return true;
 }
 
 bool copy_text_to_clipboard(std::wstring_view text) {
@@ -148,8 +216,17 @@ bool copy_text_to_clipboard(std::wstring_view text) {
   static_cast<wchar_t *>(destination)[text.size()] = L'\0';
   GlobalUnlock(memory);
   EmptyClipboard();
+  // 识别文本不能留在任何剪贴板历史里，包括水杉自己的。标记放不上就整段不走剪贴板，调用方改用 SendInput。
+  for (const auto &marker : voice_clipboard_markers)
+    if (!set_clipboard_marker(marker)) {
+      GlobalFree(memory);
+      EmptyClipboard();
+      CloseClipboard();
+      return false;
+    }
   if (!SetClipboardData(CF_UNICODETEXT, memory)) {
     GlobalFree(memory);
+    EmptyClipboard();
     CloseClipboard();
     return false;
   }
@@ -157,12 +234,15 @@ bool copy_text_to_clipboard(std::wstring_view text) {
   return true;
 }
 
-void send_text_via_ctrl_v(std::wstring_view text) {
-  if (!copy_text_to_clipboard(text)) {
-    send_text_via_send_input(text);
-    return;
-  }
+// 返回是否送出了文字。写剪贴板前后各确认一次目标仍在前台；写入后前台换了就不粘贴，文字只留在已标记为不进历史的剪贴板里。
+bool send_text_via_ctrl_v(std::wstring_view text, const CommitTarget &target) {
+  if (!target_in_foreground(target))
+    return false;
+  if (!copy_text_to_clipboard(text))
+    return send_text_via_send_input(text, target);
   Sleep(30);
+  if (!target_in_foreground(target))
+    return false;
   INPUT input[4]{};
   input[0].type = INPUT_KEYBOARD;
   input[0].ki.wVk = VK_CONTROL;
@@ -173,6 +253,7 @@ void send_text_via_ctrl_v(std::wstring_view text) {
   input[3] = input[0];
   input[3].ki.dwFlags = KEYEVENTF_KEYUP;
   (void)SendInput(4, input, sizeof(INPUT));
+  return true;
 }
 
 // The epoch gate prevents generation changes during each visible effect. A new session or a later failure takes the overlay over, so the wait ends early and leaves the overlay to it. This sleeps, so it runs on a worker: the overlay's window belongs to the control thread, and a sleeping control thread would paint nothing and then hide it at once.
@@ -314,9 +395,13 @@ private:
 VoiceInputSession::VoiceInputSession(WaveOverlay &overlay,
                                      LeaseProvider lease_provider,
                                      Sender sender,
-                                     ConfigProvider config_provider)
+                                     ConfigProvider config_provider,
+                                     FocusValidator focus_validator,
+                                     CommitRecorder commit_recorder)
     : overlay_(overlay), lease_provider_(std::move(lease_provider)),
       sender_(std::move(sender)), config_provider_(std::move(config_provider)),
+      focus_validator_(std::move(focus_validator)),
+      commit_recorder_(std::move(commit_recorder)),
       capture_owner_(std::make_unique<AudioCapture>()) {
   capture_ = capture_owner_.get();
 }
@@ -440,9 +525,9 @@ bool VoiceInputSession::start(std::shared_ptr<VoiceReviewResult> review,
     return false;
   if (verdict.check == VoiceStartCheck::Rejected)
     return refuse(verdict.message);
-  // A device this host cannot open is a microphone that will not start.
+  // 这台主机打不开的设备选择（别的平台写下的后端或设备 id）就是所选麦克风不可用。
   if (!config.capture.supported())
-    return refuse(voice_microphone_start_message);
+    return refuse(voice_microphone_device_message);
   bool expected = false;
   if (!starting_.compare_exchange_strong(expected, true))
     return false;
@@ -462,6 +547,7 @@ bool VoiceInputSession::start(std::shared_ptr<VoiceReviewResult> review,
     captured_frames_ = 0;
   }
   lease_ = *lease;
+  start_window_ = recording_start_window();
   const auto generation = static_cast<wchar_t>((session % 0xfffeu) + 1u);
   // Streaming recognizers report the whole transcript so far, from their own thread: inline as the composition when that is allowed, else on the overlay.
   const auto show_partial = [this, lease = *lease, generation, session,
@@ -569,7 +655,7 @@ bool VoiceInputSession::start(std::shared_ptr<VoiceReviewResult> review,
     drop_stream();
     lease_.reset();
     starting_.store(false);
-    return refuse(voice_microphone_start_message);
+    return refuse(voice_capture_start_message(capture_->last_failure()));
   }
   if (cancel_requested_.load()) {
     capture_->stop();
@@ -721,6 +807,7 @@ void VoiceInputSession::stop() {
   const bool stream_inline = voice_inline_allowed(
       review, config.stream_inline_preedit, streaming, config.commit_mode);
   if (!review) {
+    finishing_session_.store(session);
     overlay_.set_compact_status(WaveOverlay::CompactStatus::Recognizing);
     overlay_.set_actions_visible(true);
     overlay_.set_show_transcript(!stream_inline);
@@ -741,10 +828,11 @@ void VoiceInputSession::stop() {
   tasks_.emplace_back(std::async(
       std::launch::async,
       [this, samples = std::move(samples), lease = *lease, config, session,
-       doubao, local_stream, review,
+       doubao, local_stream, review, start_window = start_window_,
        cancelled = std::move(cancelled)]() mutable {
         finish(std::move(samples), lease, config, session, std::move(doubao),
-               std::move(local_stream), std::move(cancelled), review);
+               std::move(local_stream), std::move(cancelled), review,
+               start_window);
       }));
 }
 
@@ -753,7 +841,8 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
                                std::shared_ptr<DoubaoAsrClient> doubao,
                                std::shared_ptr<LocalAsrStream> local_stream,
                                std::shared_ptr<std::atomic_bool> cancelled,
-                               std::shared_ptr<VoiceReviewResult> review) {
+                               std::shared_ptr<VoiceReviewResult> review,
+                               HWND start_window) {
   // However this ends, the stream's recognition task must too: a return before local_stream->finish() (a newer recording took over, the text came back empty) would otherwise leave it waiting for audio that never comes, and the destructor waiting for it.
   struct StreamRelease {
     VoiceInputSession &owner;
@@ -767,6 +856,15 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
         owner.local_stream_.reset();
     }
   } stream_release{*this, local_stream};
+  // 无论从哪里返回，这次会话都不再处于识别中；新会话已经接手时不动它的标记。
+  struct FinishingRelease {
+    std::atomic<uint64_t> &finishing;
+    uint64_t session;
+    ~FinishingRelease() {
+      auto expected = session;
+      finishing.compare_exchange_strong(expected, 0);
+    }
+  } finishing_release{finishing_session_, session};
   const auto clear_current_overlay = [&] {
     if (review)
       review->fail(); // no-op after completion/cancellation
@@ -842,6 +940,10 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
     cancel_inline();
     clear_current_overlay();
     release_doubao();
+    // 识别正常结束却没有文字：告诉人没听到，而不是让浮层一声不响地消失。取消或新会话接手时不提示。
+    if (text.empty() && !review && session_.load() == session &&
+        !cancel_requested_.load())
+      report_failure(voice_no_speech_message, session);
     return;
   }
   if (!review)
@@ -855,7 +957,9 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
       session_.with_current(session, [&] {
         overlay_.set_compact_status(WaveOverlay::CompactStatus::Processing);
         overlay_.set_actions_visible(true);
-        overlay_.show();
+        // 识别中已经点 ✓ 收起的浮层不再为润色弹出来。
+        if (dismissed_session_.load() != session)
+          overlay_.show();
       });
     const auto endpoint = config.polish_endpoint.empty()
                               ? default_polish_endpoint(config.polish_provider)
@@ -871,7 +975,7 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
       auto polished =
           polish_cloud_text(text, config.polish_provider, endpoint, model,
                             config.polish_token, polish_prompt(config),
-                            cancelled);
+                            cancelled, voice_polish_timeout_ms);
       if (!polished.empty())
         final_text = std::move(polished);
     } catch (const std::exception &) {
@@ -885,40 +989,51 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
     release_doubao();
     return;
   }
+  // 模拟按键和粘贴只能投给前台窗口，目标是焦点租约所属的 TSF 客户端进程或开始录音时的前台窗口；前台已经换成别处时文字直接丢弃，和 macOS 的 stale 一样不写进别的应用。
+  const CommitTarget target{client_pid(lease.transport), start_window};
+  bool delivered = false;
   session_.with_current(session, [&] {
     deliver_voice_result(review, final_text, [&] {
       overlay_.set_compact_status(WaveOverlay::CompactStatus::None);
       overlay_.set_transcript(wide(final_text));
       const auto converted = wide(final_text);
       const auto generation = static_cast<wchar_t>((session % 0xfffeu) + 1u);
-      if (config.commit_mode == "sendinput") {
-        send_text_via_send_input(converted);
-        clear_overlay();
-      } else if (config.commit_mode == "ctrl_v") {
-        send_text_via_ctrl_v(converted);
-        clear_overlay();
-      } else {
+      switch (voice_commit_route(config.commit_mode)) {
+      case VoiceCommitRoute::SendInput:
+        delivered = send_text_via_send_input(converted, target);
+        break;
+      case VoiceCommitRoute::CtrlV:
+        delivered = send_text_via_ctrl_v(converted, target);
+        break;
+      case VoiceCommitRoute::Tsf: {
         const auto encoded = voice_composition_bytes(
             FanyImeWorkerReplyType::CommitVoiceComposition, converted,
             generation);
-        if (encoded &&
-            sender_(lease, FanyImeWorkerReplyType::CommitVoiceComposition,
-                    converted, generation) == VoiceCompositionResult::Sent) {
-          clear_overlay();
-        } else {
-          // The TSF route was refused - focus moved to a window with no text
-          // service, or the transaction lock was busy. Upstream falls back to
-          // SendInput rather than dropping the text, which is the whole
-          // recording.
-          if (stream_inline)
-            (void)sender_(lease, FanyImeWorkerReplyType::CancelVoiceComposition,
-                          L"", generation);
-          send_text_via_send_input(converted);
-          clear_overlay();
+        const auto result =
+            encoded ? sender_(lease, FanyImeWorkerReplyType::CommitVoiceComposition,
+                              converted, generation)
+                    : VoiceCompositionResult::Rejected;
+        if (result == VoiceCompositionResult::Sent) {
+          delivered = true;
+          break;
         }
+        if (stream_inline)
+          (void)sender_(lease, FanyImeWorkerReplyType::CancelVoiceComposition,
+                        L"", generation);
+        // 租约失效说明焦点已经去了别的输入框或窗口，整段文字丢弃；事务锁忙、编码失败或管道写失败时，录音目标仍在前台才退回 SendInput，免得丢掉整段录音。
+        if (voice_tsf_refusal_falls_back(
+                encoded && result == VoiceCompositionResult::Rejected,
+                target_in_foreground(target)))
+          delivered = send_text_via_send_input(converted, target);
+        break;
       }
+      }
+      clear_overlay();
     });
   });
+  // 三条路线送出的语音文字都记作 voice，与 macOS 投递路线一致。SendInput 注入的按键带着面板注入标记，tip 的直通统计会跳过它们，不会重复计成 unknown；Ctrl+V 本身带 Ctrl，也不进直通统计。
+  if (delivered && !review && commit_recorder_)
+    commit_recorder_(final_text);
   release_doubao();
   {
     std::lock_guard lock(config_mutex_);
@@ -1038,6 +1153,16 @@ void VoiceInputSession::cancel_session(bool failed) {
   }
 }
 
+void VoiceInputSession::dismiss_processing() {
+  if (recording_.load() || review_)
+    return;
+  const uint64_t session = session_.load();
+  if (finishing_session_.load() != session)
+    return;
+  dismissed_session_.store(session);
+  session_.with_current(session, [&] { clear_overlay(); });
+}
+
 void VoiceInputSession::lock() {
   if (!recording_.load())
     return;
@@ -1050,6 +1175,19 @@ void VoiceInputSession::lock() {
 
 void VoiceInputSession::maintain() {
   release_idle_local_model();
+  // 焦点离开开始录音时的那个输入框（换了输入框、换了窗口或 TIP 断开）就取消，录音和识别、润色阶段都一样，识别结果不会写进别的地方。
+  const bool in_progress =
+      recording_.load() ||
+      (finishing_session_.load() != 0 &&
+       finishing_session_.load() == session_.load());
+  // 只在原生语音进行中才去验租约：它要拿焦点闸门的锁，空闲时不必每轮都碰。
+  if (!review_ && in_progress && lease_ && focus_validator_ &&
+      voice_focus_loss_cancels(true, true, focus_validator_(*lease_))) {
+    cancel_session(false);
+    return;
+  }
+  if (muted_system_audio_.load())
+    follow_default_system_audio_output();
   if (!recording_.load())
     return;
   if (local_stream_overflow_.exchange(false)) {

@@ -668,6 +668,17 @@ test("logged-in accounts expose local designs and every community collection", a
   ]);
 });
 
+test("a community page without the skin gallery offers only its dictionary and reply collections", async () => {
+  const openCommunity = vi.fn();
+  const client = account({ status: vi.fn().mockResolvedValue({ user }) });
+  // Windows：社区页只有词包与回复模板，「我发布的皮肤」不能经社区页打开。
+  render(<AccountPage client={client} onOpenCommunity={openCommunity} communityHasSkins={false} />);
+  fireEvent.click(await screen.findByRole("button", { name: "我发布的词库" }));
+  fireEvent.click(screen.getByRole("button", { name: "收藏的回复模板" }));
+  expect(screen.queryByRole("button", { name: "我发布的皮肤" })).toBeNull();
+  expect(openCommunity.mock.calls).toEqual([["published-dictionary"], ["saved-reply"]]);
+});
+
 test("logged-in mobile accounts expose direct cloud dictionary and clipboard entries", async () => {
   const openCloudDictionary = vi.fn();
   const openCloudClipboard = vi.fn();

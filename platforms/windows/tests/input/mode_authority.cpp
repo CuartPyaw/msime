@@ -65,6 +65,65 @@ int main() {
     require(idle.next.session == state.session);
     require(idle.next.seeded);
 
+    // 推送落地时客户端在同一会话里报告新模式：那是 Server 推的，不算用户切换，也不显示中英文切换提示。
+    ModeAuthorityState pushed;
+    pushed.seeded = true;
+    pushed.chinese = true;
+    pushed.session = 1;
+    pushed.reported = true;
+    step = mode_authority_step(pushed, true, true, 2, false, 20);
+    require(step.push && step.push_chinese && step.next.pushed == true);
+    step = mode_authority_step(step.next, true, true, 2, true, 20);
+    require(!step.push && !step.user_changed && !step.next.pushed);
+    // 之后用户在同一会话里切换，才是用户的选择。
+    step = mode_authority_step(step.next, true, true, 2, false, 20);
+    require(step.user_changed && !step.next.chinese);
+    // 同一会话、模式没变，什么也不发生。
+    auto same = mode_authority_step(step.next, true, true, 2, false, 20);
+    require(!same.push && !same.user_changed);
+
+    // 应用例外：焦点进入有规则的应用时推规则里的模式，全局状态不变。
+    ModeAuthorityState ruled;
+    ruled.seeded = true;
+    ruled.chinese = true;
+    ruled.session = 1;
+    ruled.app = 10;
+    ruled.reported = true;
+    auto rule_step = mode_authority_step(ruled, true, true, 2, true, 11, false);
+    require(rule_step.push && !rule_step.push_chinese);
+    require(rule_step.next.chinese && rule_step.next.app == 11);
+    // 推送落地。
+    rule_step = mode_authority_step(rule_step.next, true, true, 2, false, 11, false);
+    require(!rule_step.user_changed && !rule_step.push);
+    // 同一应用的另一个输入框不是新的停留，规则照样适用。
+    rule_step = mode_authority_step(rule_step.next, true, true, 3, true, 11, false);
+    require(rule_step.push && !rule_step.push_chinese);
+    rule_step = mode_authority_step(rule_step.next, true, true, 3, false, 11, false);
+    // 用户在应用里手动切回中文：规则让位，并且成为全局状态。
+    rule_step = mode_authority_step(rule_step.next, true, true, 3, true, 11, false);
+    require(rule_step.user_changed && rule_step.next.rule_yielded && rule_step.next.chinese);
+    // 让位期间在同一应用里换输入框，不再推规则。
+    rule_step = mode_authority_step(rule_step.next, true, true, 4, true, 11, false);
+    require(!rule_step.push);
+    // 离开再回来是一次新的停留，规则重新生效。
+    rule_step = mode_authority_step(rule_step.next, true, true, 5, true, 12);
+    require(!rule_step.push && !rule_step.next.rule_yielded);
+    rule_step = mode_authority_step(rule_step.next, true, true, 6, true, 11, false);
+    require(rule_step.push && !rule_step.push_chinese);
+
+    // 按应用记忆时规则同样生效；客户端已经在规则的模式里就不推。
+    ModeAuthorityState app_ruled;
+    app_ruled.seeded = true;
+    app_ruled.session = 1;
+    app_ruled.app = 10;
+    auto app_rule = mode_authority_step(app_ruled, false, true, 2, true, 11, false);
+    require(app_rule.push && !app_rule.push_chinese && !app_rule.next.chinese);
+    app_rule = mode_authority_step(app_ruled, false, true, 2, false, 11, false);
+    require(!app_rule.push);
+    // 没有规则的应用按应用记忆时从不推。
+    app_rule = mode_authority_step(app_rule.next, false, true, 3, true, 12);
+    require(!app_rule.push && app_rule.next.chinese);
+
     std::cout << "Mode authority: one CN/EN state follows the user\n";
   } catch (const std::exception &failure) {
     std::cerr << failure.what() << '\n';

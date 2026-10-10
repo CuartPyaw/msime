@@ -21,6 +21,8 @@ export interface CandidateTranslationSettingsOptions {
   macos: boolean;
   harmony: boolean;
   linux: boolean;
+  /** Windows 的候选窗把每种目标语言的释义画成一行，所以也显示「第二种候选语言」。 */
+  windows?: boolean;
   translationAccount: boolean;
   onPreferencesChange: (patch: Partial<Preferences>) => void;
   onDeviceMissingLanguages: readonly (readonly [string, string])[];
@@ -44,6 +46,7 @@ export function createCandidateTranslationSettings({
   macos,
   harmony,
   linux,
+  windows = false,
   translationAccount,
   onPreferencesChange,
   onDeviceMissingLanguages,
@@ -60,7 +63,7 @@ export function createCandidateTranslationSettings({
     candidateGlossLanguagesEnabled,
     visibleLanguages: visibleTranslationLanguages,
     visibleSecondaryLanguages,
-    showSecondaryLanguage: android || ios || macos || harmony,
+    showSecondaryLanguage: android || ios || macos || harmony || windows,
     showAccountTranslation: android,
     accountTranslation: translationAccount,
     onEnabledChange: (enabled) => onPreferencesChange({ candidate_translations: enabled }),

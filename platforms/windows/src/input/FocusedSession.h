@@ -39,6 +39,8 @@ public:
   bool prepare(const FocusLease &lease);
   // No operation may invalidate a key reply awaiting transport confirmation.
   std::optional<nlohmann::json> dedicated_english(const FocusLease &lease, bool exit);
+  // 把 Engine 的英文模式设成 `enabled`（托盘「英文候选模式」）。有等待送达确认的按键回复、正在组字或列着候选时都不动，返回空。
+  std::optional<nlohmann::json> set_dedicated_english(const FocusLease &lease, bool enabled);
   std::optional<PendingReply>
   key(const FocusLease &lease, const FanyImeNamedpipeData &packet,
       ReplyPath path, bool uiless = false,

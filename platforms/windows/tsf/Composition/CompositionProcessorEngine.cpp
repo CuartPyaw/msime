@@ -1482,8 +1482,9 @@ void CCompositionProcessorEngine::SetupPunctuationPair()
 void CCompositionProcessorEngine::InitializeMetasequoiaIMECompartment(_In_ ITfThreadMgr *pThreadMgr,
                                                                       TfClientId tfClientId)
 {
-    // Default CN/EN on IME activate / switch-in (input.default_ime_mode).
-    const BOOL openChinese = FanyUtils::ReadConfiguredDefaultImeModeChinese();
+    // Default CN/EN on IME activate / switch-in (input.default_ime_mode). 本进程在应用例外里有规则时从规则里的模式开始；Server 在焦点从别的应用进来时也按同一条规则推送，这里先定好，第一份状态快照就已经是规则的模式，不会先闪一下默认模式。
+    const auto ruled = FanyUtils::ReadConfiguredAppInputModeChinese(Global::current_process_name);
+    const BOOL openChinese = ruled ? *ruled : FanyUtils::ReadConfiguredDefaultImeModeChinese();
     Global::InputModeScheme.store(
         msime::windows::scheme::mode_scheme(msime::windows::scheme::input_mode(FanyUtils::ReadConfiguredRunningScheme())),
         std::memory_order_relaxed);
@@ -2263,10 +2264,16 @@ BOOL CCompositionProcessorEngine::IsVirtualKeyNeed( //
 
     if (candidateMode != CANDIDATE_NONE && (uCode == VK_LEFT || uCode == VK_RIGHT))
     {
+        // 横排候选时 ←/→ 沿候选方向移动高亮，交给 Server 按 ↑/↓ 处理；竖排或方向键翻选关闭时照旧移动组字光标。
+        const bool movesHighlight = Global::ArrowKeyMovesCandidateHighlight(
+            uCode, true, _hostEngineAdapter && _hostEngineAdapter->horizontal_candidate_arrows(),
+            msime::windows::scheme::AlwaysInlinePreedit(Global::InputModeScheme.load(std::memory_order_relaxed)));
         if (pKeyState)
         {
-            pKeyState->Category = CATEGORY_COMPOSING;
-            pKeyState->Function = uCode == VK_LEFT ? FUNCTION_MOVE_LEFT : FUNCTION_MOVE_RIGHT;
+            pKeyState->Category = movesHighlight ? CATEGORY_CANDIDATE : CATEGORY_COMPOSING;
+            pKeyState->Function = movesHighlight            ? FUNCTION_SERVER_CANDIDATE_KEY
+                                  : uCode == VK_LEFT ? FUNCTION_MOVE_LEFT
+                                                     : FUNCTION_MOVE_RIGHT;
         }
         return TRUE;
     }

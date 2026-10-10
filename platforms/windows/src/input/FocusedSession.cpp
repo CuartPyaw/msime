@@ -136,6 +136,25 @@ FocusedSession::dedicated_english(const FocusLease &lease, bool exit) {
   });
   return result;
 }
+std::optional<nlohmann::json>
+FocusedSession::set_dedicated_english(const FocusLease &lease, bool enabled) {
+  check_thread();
+  if (!prepared(lease) || composer_->has_pending())
+    return std::nullopt;
+  std::optional<nlohmann::json> result;
+  gate_.with_active(lease, [&] {
+    const auto current = session_.view();
+    // 托盘点击不经过 TIP：组字时切换会让 Engine 丢掉组字，而 TIP 手里的组字还留在编辑器里，两边从此对不上。所以只在没有组字、没有候选时切换，组字中的点击什么也不做。
+    if (!current.at("editing_text").get<std::string>().empty() ||
+        !current.at("candidates").empty())
+      return;
+    const bool changed = current.at("dedicated_english").get<bool>() != enabled;
+    result = session_.set_dedicated_english(lease.epoch, enabled);
+    // 切换后回复合成器记下的前缀和译文页属于旧模式，一并作废。
+    if (changed) composer_->cancel();
+  });
+  return result;
+}
 bool FocusedSession::prepare(const FocusLease &lease) {
   check_thread();
   if (lease.transport.client != client_)

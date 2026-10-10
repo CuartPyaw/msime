@@ -122,6 +122,8 @@ pub struct HostCapabilities {
     pub panel_windows: bool,
     /// The host keeps per-application versus global Chinese/English mode state.
     pub ime_mode_scope: bool,
+    /// 宿主认得前台应用并执行 `app_input_mode_rules`（应用例外）：macOS 按 bundle id，Windows 按进程基名。
+    pub app_input_mode_rules: bool,
     /// The host records typing statistics.
     pub typing_statistics: bool,
     /// The host exposes the shared fuzzy-pinyin settings.
@@ -148,7 +150,7 @@ pub struct HostCapabilities {
     /// The toolbar carries a button that starts and stops voice input, for the
     /// same reason as `floating_toolbar_handwriting`.
     pub floating_toolbar_voice: bool,
-    /// 工具栏带切换输入方案的按钮。目前只有 macOS 的工具栏画它，其它宿主不提供这个开关。
+    /// 工具栏带切换输入方案的按钮。macOS 和 Windows 的工具栏画它，其它宿主不提供这个开关。
     pub floating_toolbar_input_scheme: bool,
     /// The host consumes the shared `keybindings` preferences to switch
     /// Chinese/English and simplified/traditional mode.
@@ -201,6 +203,8 @@ pub struct HostCapabilities {
     /// snapshot's `preedit` to a desktop panel still decides which string goes
     /// there, so the difference is its to show.
     pub shuangpin_preedit: bool,
+    /// 宿主在双拼组字时按共享偏好 `shuangpin_keymap_hint` 在候选窗旁画当前方案的键位图，所以设置页给出「输入时显示双拼键位提示」。
+    pub shuangpin_keymap_hint: bool,
     /// The host tells the runtime which character width it is in, so the Engine
     /// widens what it commits. The preference is the width a session starts at;
     /// the host's own toolbar, menu or chord moves it from there. A host that
@@ -405,6 +409,8 @@ impl HostCapabilities {
                     | HostPlatform::Android
                     | HostPlatform::Harmony
             ),
+            // macOS 的输入控制器在每次切换客户端时按 bundle id 查规则；Windows 由 Server 按焦点客户端的进程基名查规则，TIP 激活时也按它定起始模式。其余宿主不认规则，设置页不显示规则表。
+            app_input_mode_rules: matches!(platform, HostPlatform::Macos | HostPlatform::Windows),
             typing_statistics: true,
             // Every input host consumes the shared fuzzy-pinyin options. The
             // iOS Tauri settings surface writes the same PreferencesStore that
@@ -441,10 +447,16 @@ impl HostCapabilities {
             // emoji and screen-keyboard buttons open the same surfaces its
             // phone keyboard reaches from a key face.
             floating_toolbar_components: platform.is_desktop() || platform == HostPlatform::Harmony,
-            // Only this client's macOS toolbar draws these two.
-            floating_toolbar_handwriting: platform == HostPlatform::Macos,
-            floating_toolbar_voice: platform == HostPlatform::Macos,
-            floating_toolbar_input_scheme: platform == HostPlatform::Macos,
+            // macOS 和 Windows 的工具栏画这三个按钮；手写还要随版本收窄（narrow_to_edition）。
+            floating_toolbar_handwriting: matches!(
+                platform,
+                HostPlatform::Macos | HostPlatform::Windows
+            ),
+            floating_toolbar_voice: matches!(platform, HostPlatform::Macos | HostPlatform::Windows),
+            floating_toolbar_input_scheme: matches!(
+                platform,
+                HostPlatform::Macos | HostPlatform::Windows
+            ),
             // The IBus host consumes these directly, and the Windows TIP reads them from the shared preferences document at activation. The HarmonyOS host reads all four in its hardware key router, which only a machine with a physical keyboard has anything to route.
             mode_switch_shortcuts: matches!(
                 platform,
@@ -493,8 +505,8 @@ impl HostCapabilities {
             // the Fcitx5 classic UI.
             candidate_font_controls: true,
             candidate_page_number: matches!(platform, HostPlatform::Linux),
-            // 目前只有 macOS 按这个开关画 logo；Windows、Linux 和鸿蒙的候选窗照常显示 logo，不提供这个开关。
-            app_logo: platform == HostPlatform::Macos,
+            // macOS 和 Windows 按这个开关画 logo；Linux 和鸿蒙的候选窗照常显示 logo，不提供这个开关。
+            app_logo: matches!(platform, HostPlatform::Macos | HostPlatform::Windows),
             // The iOS strip scales its composition line by `candidate_preedit_font_size`.
             candidate_preedit_font: matches!(
                 platform,
@@ -558,11 +570,14 @@ impl HostCapabilities {
             // badge itself either - the Fcitx5 panel offers exactly this popup for "input method
             // that has internal switches", which is what the Chinese/English mode is, so the host
             // asks the panel rather than placing a window of its own.
+            // Windows 的 Server 在光标旁画一个不抢焦点的小窗（InputModeHudWindow），配色和尺寸取悬浮工具栏的。
             input_mode_hud: matches!(
                 platform,
-                HostPlatform::Macos | HostPlatform::Harmony | HostPlatform::Linux
+                HostPlatform::Macos
+                    | HostPlatform::Harmony
+                    | HostPlatform::Linux
+                    | HostPlatform::Windows
             ),
-            // macOS draws its own composition, and the HarmonyOS keyboard draws the Engine's editing text on its composition row, so both show the difference. The other hosts hand the text to the application or to the desktop, which decides how it looks.
             // Windows chooses between TSF, SendInput and a paste; macOS between system events and its input session. The Linux hosts commit through the IBus or Fcitx5 input context, the desktop voice panel hands its text to the active host the way every panel does, and the voice provider only recognizes, so a stored mode would change nothing there. A keyboard extension commits through its input client and has nothing to choose between either.
             voice_commit_mode: matches!(platform, HostPlatform::Windows | HostPlatform::Macos),
             // The Linux hosts write the snapshot's `preedit` into the IBus and
@@ -570,13 +585,17 @@ impl HostCapabilities {
             // toggle for this in the native status menu - a setting the shared
             // page was hiding could only be reached from there, and only while
             // the shuangpin scheme was active.
+            // Windows 的候选窗预编辑行画的是 view.preedit，TIP 的行内组字也取自己宿主会话 View 的 preedit（「原始按键」样式）或 Server 回传的预编辑（「拼音分词」样式），两处都随这个偏好变化，所以 Windows 同样给出这一项。
             shuangpin_preedit: matches!(
                 platform,
                 HostPlatform::Macos
+                    | HostPlatform::Windows
                     | HostPlatform::Harmony
                     | HostPlatform::Linux
                     | HostPlatform::Ios
             ),
+            // macOS 的 MSIMEShuangpinKeymapPanel 和 Windows Server 的 ShuangpinKeymapWindow 在候选窗旁画键位图；其他宿主没有这块浮窗，开关在那里什么也不做。
+            shuangpin_keymap_hint: matches!(platform, HostPlatform::Macos | HostPlatform::Windows),
             // Every host calls `msime_client_set_character_width` when its session starts and
             // from its own width switch, so the preference always has something to act on.
             character_width: true,
@@ -587,9 +606,11 @@ impl HostCapabilities {
             // Harmony reaches this through its form-factor projection of `panel_windows`, which
             // the page still consults, so it is not named here and its behaviour is unchanged.
             maintenance_shortcuts: platform.is_desktop() || platform == HostPlatform::Android,
-            // macOS has reserved it since it shipped; the Android host reads the same preference
-            // for its own Alt+Shift+H. No other host binds that chord.
-            fullwidth_chord: matches!(platform, HostPlatform::Macos | HostPlatform::Android),
+            // macOS 从上线起就占用这个组合键；Android 宿主的 Alt+Shift+H 读同一个偏好；Windows 的 TSF 在中文模式下同样认 Alt+Shift+H。其他宿主不绑定它。
+            fullwidth_chord: matches!(
+                platform,
+                HostPlatform::Macos | HostPlatform::Android | HostPlatform::Windows
+            ),
             voice_provider_settings: true,
             voice_stream_preedit: !matches!(platform, HostPlatform::Android | HostPlatform::Ios),
             english_suggestions: matches!(platform, HostPlatform::Android | HostPlatform::Harmony),

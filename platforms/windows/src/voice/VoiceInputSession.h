@@ -74,9 +74,15 @@ public:
   using Sender = std::function<VoiceCompositionResult(
       const FocusLease &, uint32_t, std::wstring_view, wchar_t)>;
   using ConfigProvider = std::function<VoiceInputConfig()>;
+  // 控制线程调用：租约是否仍是当前获得焦点的 TSF 客户端。maintain() 用它在焦点离开时取消原生语音。
+  using FocusValidator = std::function<bool(const FocusLease &)>;
+  // 原生语音成功上屏后调用一次，参数是上屏的 UTF-8 文本，由 Server 记入打字统计（来源 voice）。在识别工作线程上调用，不得阻塞。
+  using CommitRecorder = std::function<void(const std::string &)>;
 
   VoiceInputSession(WaveOverlay &overlay, LeaseProvider lease_provider,
-                    Sender sender, ConfigProvider config_provider);
+                    Sender sender, ConfigProvider config_provider,
+                    FocusValidator focus_validator,
+                    CommitRecorder commit_recorder);
   ~VoiceInputSession();
   VoiceInputSession(const VoiceInputSession &) = delete;
   VoiceInputSession &operator=(const VoiceInputSession &) = delete;
@@ -90,6 +96,8 @@ public:
   bool cancel_review(const std::shared_ptr<VoiceReviewResult> &expected);
   void stop();
   void cancel();
+  // 控制线程调用。识别或润色进行中点浮层的 ✓：只收起浮层，结果照常在后台上屏，对应 macOS 的 dismissProcessing。之后的状态更新不再弹出浮层，失败提示照常显示。
+  void dismiss_processing();
   void lock();
   // Control-thread only; the Server loop calls it on every pass. Ends a recording whose capture stopped delivering (with a message) or whose batch buffer is full (submitting what it holds). The capture callback cannot do either itself.
   void maintain();
@@ -105,7 +113,7 @@ private:
               std::shared_ptr<DoubaoAsrClient> doubao,
               std::shared_ptr<LocalAsrStream> local_stream,
               std::shared_ptr<std::atomic_bool> cancelled,
-              std::shared_ptr<VoiceReviewResult> review);
+              std::shared_ptr<VoiceReviewResult> review, HWND start_window);
   void clear_overlay();
   void cancel_session(bool failed);
   // Stamps the time a local model was last used, for release_idle_local_model(). Any thread.
@@ -123,6 +131,8 @@ private:
   LeaseProvider lease_provider_;
   Sender sender_;
   ConfigProvider config_provider_;
+  FocusValidator focus_validator_;
+  CommitRecorder commit_recorder_;
   AudioCapture *capture_ = nullptr;
   std::unique_ptr<AudioCapture> capture_owner_;
   CuePlayer cue_player_;
@@ -131,11 +141,17 @@ private:
   std::atomic<bool> locked_{false};
   std::atomic<bool> cancel_requested_{false};
   VoiceSessionEpoch session_;
+  // 原生录音停止后、finish() 还在识别或润色时等于该次会话的代次，finish() 结束时清零。maintain() 据此在识别期间也检查焦点，dismiss_processing() 据此判断是否有结果在路上。
+  std::atomic<uint64_t> finishing_session_{0};
+  // dismiss_processing() 收起浮层的那次会话代次；finish() 不再为它重新显示浮层。
+  std::atomic<uint64_t> dismissed_session_{0};
   std::mutex samples_mutex_;
   std::vector<float> samples_;
   std::size_t captured_frames_ = 0;
   std::atomic<bool> capture_full_{false};
   std::optional<FocusLease> lease_;
+  // 开始录音时的前台窗口，控制线程写入并随识别任务带进 finish()；SendInput 和 Ctrl+V 上屏时前台仍是它也算目标在前台。
+  HWND start_window_ = nullptr;
   std::shared_ptr<VoiceReviewResult> review_; // control-thread owned
   std::mutex config_mutex_;
   std::optional<VoiceInputConfig> active_config_;

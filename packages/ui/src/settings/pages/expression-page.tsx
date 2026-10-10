@@ -152,6 +152,7 @@ export function ExpressionSettingsPage() {
         showCandidatePronunciation={client.candidatePronunciation}
         candidatePronunciation={draft.candidate_pronunciation ?? false}
         candidatePronunciationDisabled={!candidateGlossLanguagesEnabled}
+        candidatePronunciationRomaji={!windowsPlatform}
         onCandidatePronunciationChange={(candidate_pronunciation) =>
           onPreferencesChange({ candidate_pronunciation })
         }

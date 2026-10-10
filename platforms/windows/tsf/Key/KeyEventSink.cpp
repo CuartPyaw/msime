@@ -17,6 +17,7 @@
 #include "KeyPressStatisticsQueue.h"
 #include "FanyDefines.h"
 #include "AltGrKeyPolicy.h"
+#include "FullwidthChordPolicy.h"
 #include "FanyUtils.h"
 #include "FanyLog.h"
 #include "../Utils/PerfTimer.h"
@@ -165,6 +166,12 @@ void ApplyDeferredKeyState(DeferredShadowState &shadow, const _KEYSTROKE_STATE &
         shadow.candidateActive = shadow.inputLength > 0;
         break;
     case FUNCTION_CONVERT:
+        // 日语的空格是「変換」：Server 开始或步进转换时组字留着（Global/JapaneseConversionPolicy.h），所以投影里的组字不清空，排在它后面的空格和回车仍按组字中分类，不会因为投影以为组字已经结束而把它们漏给应用。连打几次空格翻候选正是排队最常见的时候；投影作废改读实际状态也不行，那时前面排队的字母可能还没处理，实际组字比投影还短。只有唯一候选是 Fallback 时空格才上屏，这种少见情形里排在它后面的空格仍按组字中的空格处理，没有组字可转换，结果是这个空格被吞掉而不是打进文档。
+        if (code == VK_SPACE &&
+            Global::InputModeScheme.load(std::memory_order_relaxed) == msime::windows::scheme::Japanese)
+        {
+            break;
+        }
         // This TIP routes Space+Convert to WM_AsyncFinalizeCandidate, which
         // commits and ends the composition rather than merely opening a list.
         clearComposition();
@@ -632,6 +639,21 @@ bool CMetasequoiaIME::_MatchChordInputHotkey(WPARAM wParam, _Out_ GUID *hotkeyGu
     {
         *hotkeyGuid = Global::MetasequoiaIMEGuidDoubleSingleBytePreserveKey;
         return true;
+    }
+    // Alt+Shift+H 也切换全半角（共享偏好可关），只在中文模式下认；先比按键再读开关和中英文状态。
+    if (code == 'H' && shift && alt && !ctrl)
+    {
+        BOOL isOpen = FALSE;
+        CCompartment CompartmentKeyboardOpen(_pThreadMgr, _tfClientId, GUID_COMPARTMENT_KEYBOARD_OPENCLOSE);
+        CompartmentKeyboardOpen._GetCompartmentBOOL(isOpen);
+        const bool win = (GetKeyState(VK_LWIN) & 0x8000) != 0 || (GetKeyState(VK_RWIN) & 0x8000) != 0;
+        if (Global::IsFullwidthAltShiftH(code, shift, ctrl, alt, win, isOpen != FALSE,
+                                         FanyUtils::ReadConfiguredSwitchLanguageHotkeys().fullwidth_alt_shift_h))
+        {
+            *hotkeyGuid = Global::MetasequoiaIMEGuidDoubleSingleBytePreserveKey;
+            return true;
+        }
+        return false;
     }
     if (code == VK_OEM_PERIOD && ctrl && !shift && !alt)
     {
@@ -1758,9 +1780,17 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
         case VK_ESCAPE:
             return setKeyState(CATEGORY_CANDIDATE, FUNCTION_CANCEL);
         case VK_LEFT:
-            return setKeyState(CATEGORY_COMPOSING, FUNCTION_MOVE_LEFT);
-        case VK_RIGHT:
-            return setKeyState(CATEGORY_COMPOSING, FUNCTION_MOVE_RIGHT);
+        case VK_RIGHT: {
+            // 与普通路径（CompositionProcessorEngine::IsVirtualKeyNeed）一致：横排候选时 ←/→ 移动候选高亮。普通路径在组字时（增量候选也算）就把 ↑/↓ 交给 Server，这里的 ↑/↓ 同样只看是否在组字，所以 ←/→ 也不看 candidateKey（它只在展开候选列表时为真），否则排队的 ←/→ 会和立即处理的走不同的路。
+            const auto *host = _pCompositionProcessorEngine->GetHostEngineAdapter();
+            if (Global::ArrowKeyMovesCandidateHighlight(*classifiedCode, true,
+                                                        host && host->horizontal_candidate_arrows(),
+                                                        msime::windows::scheme::AlwaysInlinePreedit(scheme)))
+            {
+                return setKeyState(CATEGORY_CANDIDATE, FUNCTION_SERVER_CANDIDATE_KEY);
+            }
+            return setKeyState(CATEGORY_COMPOSING, *classifiedCode == VK_LEFT ? FUNCTION_MOVE_LEFT : FUNCTION_MOVE_RIGHT);
+        }
         case VK_HOME:
             return setKeyState(CATEGORY_CANDIDATE, FUNCTION_MOVE_PAGE_TOP);
         case VK_END:
@@ -1846,6 +1876,11 @@ bool CMetasequoiaIME::_ClassifyDeferredKeyDown(_In_ ITfContext *pContext, WPARAM
 
 void CMetasequoiaIME::_NotePassthroughStatistics(UINT virtualKey, WCHAR wch, bool keyboardKnownEnabled)
 {
+    // 设置应用面板注入的文字由它自己按来源计数（PassthroughStatistics.h）。
+    if (IsPanelTextSendInput(static_cast<std::uintptr_t>(GetMessageExtraInfo())))
+    {
+        return;
+    }
     const LONG messageTime = GetMessageTime();
     if (virtualKey != 0 && virtualKey == _passthroughStatsVirtualKey && messageTime == _passthroughStatsMessageTime)
     {
@@ -2763,7 +2798,18 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
             return KeyDownDispatchResult::Complete;
         }
 
-        Global::Keycode = code;
+        // 日语转换开始之后的回车上屏 Server 高亮的候选（Global/JapaneseConversionPolicy.h）：按候选键处理并带上 CandidateActive，Server 走选中高亮候选的回车路径，TIP 读它的回复上屏，而不是自己宿主会话里的假名。
+        const bool japaneseCandidateEnter =
+            code == VK_RETURN && KeystrokeState.Category != CATEGORY_NONE && _IsComposing() &&
+            _JapaneseEnterCommitsCandidate(capturedModifiers);
+        if (japaneseCandidateEnter)
+        {
+            KeystrokeState.Category = CATEGORY_CANDIDATE;
+            KeystrokeState.Function = FUNCTION_FINALIZE_CANDIDATELIST;
+        }
+        // 移动候选高亮的 ←/→ 按 ↑/↓ 发给 Server（Global/CandidateArrowKeyPolicy.h）；只有横排候选时它们才会被归为 FUNCTION_SERVER_CANDIDATE_KEY。
+        Global::Keycode = Global::CandidateNavigationWireKey(
+            code, KeystrokeState.Function == FUNCTION_SERVER_CANDIDATE_KEY);
         Global::wch = wch;
         // The modifiers the key was classified with: an AltGr character goes without Ctrl+Alt, or the Server would cancel it as a shortcut.
         Global::ModifiersDown = Global::CharacterModifiers(capturedModifiers, wch, code);
@@ -2794,7 +2840,7 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
         }
         const UINT ipcModifiers =
             Global::ModifiersDown |
-            (_candidateMode == CANDIDATE_ORIGINAL
+            (_candidateMode == CANDIDATE_ORIGINAL || japaneseCandidateEnter
                  ? msime::windows::PipeMetadata::CandidateActive
                  : 0u) |
             (IsAutoRepeat(lParam) ? msime::windows::PipeMetadata::AutoRepeat : 0u);

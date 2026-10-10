@@ -70,10 +70,17 @@ SessionController::SessionController(
               [this, result = std::move(result)](InputState &state) mutable {
                 if (stopping_ || !transport_.current(result.lease.transport))
                   return;
-                auto view = state.apply_translations(
-                    result.lease, result.generation, result.translations);
+                // 只带读音和拆解、没有释义的结果（TranslationWorker 交的是空列表）不交给会话：空列表会把会话里已有的释义清掉。
+                std::optional<nlohmann::json> view;
+                if (result.translations != "[]")
+                  view = state.apply_translations(
+                      result.lease, result.generation, result.translations);
+                // 读音和逐词拆解只用于显示，不进会话，随释义一起交给候选窗；没有新释义可交时单独交。
                 if (view)
-                  candidates_.translations(result.lease, *view);
+                  candidates_.translations(result.lease, *view,
+                                           std::move(result.readings));
+                else if (!result.readings.empty())
+                  candidates_.readings(result.lease, std::move(result.readings));
               });
         } catch (...) {
           // Optional provider delivery must never stop the input queue.
@@ -149,6 +156,8 @@ SessionController::SessionController(
             // both positive and negative results before asking for the new
             // query, even when the candidate page remains eligible.
             translations_.clear_cache();
+            // 读音开关、释义开关或目标语言变了：旧的读音和拆解作废，等这次重新翻译带回新的。
+            candidates_.clear_readings();
             if (auto request = state.current_translation_request())
               (void)translations_.submit(request->first,
                                           std::move(request->second));
@@ -359,7 +368,7 @@ SessionController::request_page(const CandidatePage &page) {
       if (!stopping_ && transport_.current(page.lease.transport))
         transition = state.page_candidate(page.lease, page.session,
                                           page.generation, page.previous,
-                                          page.steps);
+                                          page.steps, page.from_wheel);
       if (transition) {
         candidates_.action(page.lease, *transition);
         // Paging advances the Engine generation and replaces the visible
@@ -495,6 +504,23 @@ bool SessionController::exit_dedicated_english(const FocusLease &lease) {
   if (!submitted || submitted->wait_for(std::chrono::seconds(2)) != std::future_status::ready)
     return false;
   return submitted->get() == InputTaskStatus::Completed && exited;
+}
+bool SessionController::set_dedicated_english(const FocusLease &lease,
+                                              bool enabled) {
+  if (input_.on_worker_thread() || active_controller == this || stopping_.load())
+    throw std::logic_error("Dedicated-English switch cannot reenter controller callbacks");
+  std::unique_lock transaction(*transactions_, std::try_to_lock);
+  if (!transaction.owns_lock()) return false;
+  // 等待可能超时，任务之后仍会在输入队列上运行，所以结果和租约放在任务自己持有的存储里，不引用这个栈帧。
+  auto applied = std::make_shared<bool>(false);
+  auto submitted = input_.submit([this, lease, enabled, applied](InputState &state) {
+    if (stopping_ || !transport_.current(lease.transport)) return;
+    if (auto view = state.set_dedicated_english(lease, enabled))
+      *applied = view->at("dedicated_english").get<bool>() == enabled;
+  });
+  if (!submitted || submitted->wait_for(std::chrono::seconds(2)) != std::future_status::ready)
+    return false;
+  return submitted->get() == InputTaskStatus::Completed && *applied;
 }
 bool SessionController::focus_current(const FocusLease &lease) {
   if (input_.on_worker_thread() || active_controller == this)

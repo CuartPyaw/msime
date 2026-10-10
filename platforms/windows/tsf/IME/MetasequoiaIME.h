@@ -4,6 +4,7 @@
 #include "KeyHandlerEditSession.h"
 #include "MetasequoiaIMEBaseStructure.h"
 #include "Ipc.h"
+#include "JapaneseConversionPolicy.h"
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -250,6 +251,14 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     void _ClearPairedPunctuationStack();
     bool _TryStepOverPairedPunctuation(TfEditCookie ec, _In_ ITfContext *pContext, WCHAR closing);
     void _NoteKeyForPairedPunctuation(UINT code);
+    // 候选上屏的整条文字恰好是一个左半边时要补的右半边，成对补全关闭或宿主被排除时为 0。
+    WCHAR _CandidateCommitPairedClosing(const std::wstring &text) const;
+    // 补出右半边之后记下这一对，并把光标移回两半之间，与标点键补全走同一条带焦点令牌的路径。
+    void _OpenCandidateCommitPair(WCHAR opening, WCHAR closing);
+    // 日语空格的回执是导航类时记下：这段组字的转换已经开始，回车改为上屏 Server 高亮的候选。
+    void _NoteJapaneseConversionStarted();
+    // 这次回车（`modifiers` 是线上的修饰键位）要不要上屏 Server 高亮的候选：日语、裸回车、转换开始后组字和读音都没变。
+    bool _JapaneseEnterCommitsCandidate(UINT modifiers);
     void _QueuePairedPunctuationCaretMove(int delta);
     void _RunPairedPunctuationCaretMove();
     void _CancelPairedPunctuationCaretMove();
@@ -662,6 +671,8 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
         uint64_t focusToken = 0;
     };
     std::vector<PairedPunctuationEntry> _pairedPunctuationStack;
+    // 日语空格「変換」：Server 已经开始转换的那段组字（Global/JapaneseConversionPolicy.h）。
+    Global::JapaneseConversionMark _japaneseConversion;
     struct CreatingWordRestoreEntry
     {
         std::string consumedRaw;

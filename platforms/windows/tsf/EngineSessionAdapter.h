@@ -57,8 +57,11 @@ public:
   // Loads the atomically published, validated snapshot without synthesizing
   // defaults. A busy store is reported as false and leaves the session intact.
   bool reload_preferences(const std::string &, std::string *, std::string *);
+  // 最近一次载入的偏好是否让横排候选窗的 ←/→ 移动候选高亮（候选横排且打开了方向键翻选，见 Global/CandidateArrowKeyPolicy.h）。每次 reload_preferences 成功读到文档时更新，没读到过时为否，←/→ 照旧移动组字光标。
+  bool horizontal_candidate_arrows() const noexcept { return horizontal_candidate_arrows_; }
 private:
   bool response(char *, std::string *, std::string *) const;
   uint64_t session_ = 0;
+  bool horizontal_candidate_arrows_ = false;
 };
 }

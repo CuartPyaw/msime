@@ -41,8 +41,15 @@ void CuePlayer::shutdown() {
   }
 }
 
-void CuePlayer::play_start() { play_sound(start_sound_, start_loaded_, "start"); }
-void CuePlayer::play_end() { play_sound(end_sound_, end_loaded_, "end"); }
+// 提示音文件缺失、解码失败或音频引擎起不来时退回系统声音，开始和结束仍有声音反馈，对应 macOS 退回 NSSound 的 Glass 和 Pop。MessageBeep 是异步的，不会卡住调用它的控制线程。
+void CuePlayer::play_start() {
+  if (!play_sound(start_sound_, start_loaded_, "start"))
+    (void)MessageBeep(MB_ICONASTERISK);
+}
+void CuePlayer::play_end() {
+  if (!play_sound(end_sound_, end_loaded_, "end"))
+    (void)MessageBeep(MB_OK);
+}
 
 bool CuePlayer::load_sound(const std::wstring &path, ma_sound *sound,
                            bool *loaded, const char *label) {

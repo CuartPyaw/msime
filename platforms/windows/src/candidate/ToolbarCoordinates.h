@@ -27,4 +27,15 @@ inline bool toolbar_drag_at_pixel(double x, double y, unsigned dpi, double scale
          y / unit < metrics.shadow.top + metrics.height &&
          toolbar_is_drag_strip(x / unit, metrics);
 }
+// 指针是否落在工具栏的卡片上（不含四周的阴影边距）。右键菜单只在卡片上打开，阴影属于它后面的窗口。
+inline bool toolbar_card_at_pixel(double x, double y, unsigned dpi, double scale,
+                                  size_t buttons, const ToolbarMetrics &metrics) {
+  const double unit = toolbar_pixel_unit(dpi, scale);
+  if (!(unit > 0.0) || !std::isfinite(unit) || !std::isfinite(x) || !std::isfinite(y))
+    return false;
+  const auto card = toolbar_card(buttons, metrics);
+  x /= unit;
+  y /= unit;
+  return x >= card.left && x < card.right && y >= card.top && y < card.bottom;
+}
 } // namespace msime::windows

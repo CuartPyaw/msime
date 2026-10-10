@@ -1,6 +1,7 @@
 #pragma once
 #include "ReplyCodec.h"
 #include "EditPolicy.h"
+#include "JapaneseSpacePolicy.h"
 #include "ServerSession.h"
 #include <functional>
 #include <optional>
@@ -120,6 +121,11 @@ public:
   std::optional<PendingReply> korean_syllable_end(
       ServerSession &session, const FanyImeNamedpipeData &packet,
       uint64_t epoch);
+  // 日语方案组字时的空格（japanese_space_applies 已经判过）：开始转换时回一个不上屏的导航回执，之后每一次在会话里移到下一个候选、过了末尾回到第一个，同样回导航回执，候选窗跟着送达的 view 走。状态机不接管时返回空，空格照常上屏高亮候选。
+  std::optional<PendingReply> japanese_space(ServerSession &session,
+                                             const FanyImeNamedpipeData &packet,
+                                             uint64_t epoch,
+                                             const nlohmann::json &view);
   // Null: not an editing key; no Engine action. Non-null may have no frame
   // because TSF completed this edit locally; still confirm it through the pump.
   std::optional<PendingReply> edit(ServerSession &session,
@@ -156,5 +162,7 @@ private:
   std::vector<std::string> translation_page_items_;
   nlohmann::json translation_page_view_;
   std::vector<PendingReply::SegmentRestore> segment_restore_history_;
+  // 日语空格「変換」进行到哪一个候选、对着哪一段读音。组字结束（回复里 editing_text 为空）或取消时清掉，下一段组字从头开始。
+  input::JapaneseConversion japanese_conversion_;
 };
 } // namespace msime::windows

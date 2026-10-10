@@ -302,6 +302,126 @@ void persist_english_glosses(const nlohmann::json &query,
   }
 }
 
+// 只请求一种目标语言的结果只有一行释义：来源自带的 U+2028、U+2029 折成空格，免得候选窗读回时多出一行。两种目标语言的结果由 join_translation_lines 拼好，行分隔是有意的，不动。
+void flatten_single_target(const std::string &query_bytes,
+                           TranslationWorker::Result &result) {
+  const auto query = query_document(query_bytes);
+  if (!query)
+    return;
+  const auto targets = query->value("target_languages", nlohmann::json::array());
+  if (targets.is_array() && targets.size() > 1)
+    return;
+  auto values = nlohmann::json::parse(result.translations, nullptr, false);
+  if (!values.is_array())
+    return;
+  for (auto &value : values)
+    if (value.is_object() && value.contains("translation") &&
+        value.at("translation").is_string())
+      value["translation"] =
+          flatten_translation_line(value.at("translation").get<std::string>());
+  result.translations = values.dump();
+}
+// 这一页候选的读音和整句逐词拆解，和 macOS 的 synchronizePronunciation、synchronizeGlossBreakdowns 一样：读音只在打开「显示读音」时问，英文释义行（英文候选则是它自己）整行发给共享读音表；拆解只在离线英文释义打开时问，2 到 32 个汉字的候选发给共享拆解表。两张表都装在资源目录旁边，没装时共享层回答空列表，不是错误。都在本线程上读本机文件，不联网。
+CandidateReadings candidate_readings(const std::string &query_bytes,
+                                     const std::string &translations,
+                                     const std::function<bool()> &cancelled) {
+  CandidateReadings readings;
+  const auto query = query_document(query_bytes);
+  if (!query)
+    return readings;
+  const auto resources = query->value("resources", nlohmann::json(nullptr));
+  if (!resources.is_string() || resources.get<std::string>().empty())
+    return readings;
+  const auto resource_path = resources.get<std::string>();
+  const auto generation = query->at("generation").get<uint64_t>();
+  // 候选文字和它眼下的释义，按页上的顺序。
+  std::vector<std::pair<std::string, std::string>> page;
+  {
+    std::unordered_map<std::string, std::string> glossed;
+    const auto values = nlohmann::json::parse(translations, nullptr, false);
+    if (values.is_array())
+      for (const auto &value : values)
+        if (value.is_object() && value.contains("text") && value.at("text").is_string() &&
+            value.contains("translation") && value.at("translation").is_string())
+          glossed.emplace(value.at("text").get<std::string>(),
+                          value.at("translation").get<std::string>());
+    for (const auto &candidate : query->at("candidates")) {
+      const auto text = candidate.at("text").get<std::string>();
+      const auto found = glossed.find(text);
+      page.emplace_back(text, found == glossed.end() ? std::string{} : found->second);
+    }
+  }
+  if (query->value("candidate_pronunciation", false)) {
+    std::vector<std::string> targets;
+    const auto languages = query->value("target_languages", nlohmann::json::array());
+    if (languages.is_array())
+      for (const auto &language : languages)
+        if (language.is_string())
+          targets.push_back(language.get<std::string>());
+    if (targets.empty())
+      targets.push_back(query->at("target_language").get<std::string>());
+    auto items = nlohmann::json::array();
+    std::unordered_set<std::string> asked;
+    for (const auto &[text, translation] : page)
+      for (auto &english : gloss_english_texts(text, translation_lines(translation), targets))
+        if (asked.insert(english).second)
+          items.push_back({{"text", english}, {"language", "en"}});
+    std::unordered_map<std::string, std::string> answered;
+    if (!items.empty() && !cancelled()) {
+      const auto request =
+          nlohmann::json{{"generation", generation}, {"items", std::move(items)}}.dump();
+      if (const auto value = host_value(msime_client_pronunciation_request(
+              reinterpret_cast<const uint8_t *>(request.data()), request.size(),
+              reinterpret_cast<const uint8_t *>(resource_path.data()), resource_path.size()));
+          value && value->is_object())
+        for (const auto &entry : value->value("pronunciations", nlohmann::json::array()))
+          if (entry.is_object() && entry.contains("text") && entry.at("text").is_string() &&
+              entry.contains("pronunciation") && entry.at("pronunciation").is_string())
+            answered.emplace(entry.at("text").get<std::string>(),
+                             entry.at("pronunciation").get<std::string>());
+    }
+    const auto english = [&](const std::string &text) {
+      const auto found = answered.find(text);
+      return found == answered.end() ? std::string{} : found->second;
+    };
+    for (const auto &[text, translation] : page) {
+      const auto lines = gloss_pronunciation_lines(text, translation_lines(translation), targets, english);
+      if (lines.empty())
+        continue;
+      std::string joined;
+      for (size_t index = 0; index < lines.size(); ++index) {
+        if (index)
+          joined.push_back('\n');
+        joined.append(lines[index]);
+      }
+      auto &reading = readings[text];
+      reading.translation = translation;
+      reading.pronunciation = std::move(joined);
+    }
+  }
+  if (query->value("english_gloss", false) && !cancelled()) {
+    auto sentences = nlohmann::json::array();
+    std::unordered_set<std::string> asked;
+    for (const auto &[text, translation] : page)
+      if (gloss_sentence_candidate(text) && asked.insert(text).second)
+        sentences.push_back(text);
+    if (!sentences.empty()) {
+      const auto request =
+          nlohmann::json{{"generation", generation}, {"texts", std::move(sentences)}}.dump();
+      if (const auto value = host_value(msime_client_gloss_breakdown_request(
+              reinterpret_cast<const uint8_t *>(request.data()), request.size(),
+              reinterpret_cast<const uint8_t *>(resource_path.data()), resource_path.size()));
+          value && value->is_object())
+        for (const auto &entry : value->value("breakdowns", nlohmann::json::array()))
+          if (entry.is_object() && entry.contains("text") && entry.at("text").is_string() &&
+              entry.contains("breakdown") && entry.at("breakdown").is_string() &&
+              !entry.at("breakdown").get<std::string>().empty())
+            readings[entry.at("text").get<std::string>()].breakdown =
+                entry.at("breakdown").get<std::string>();
+    }
+  }
+  return readings;
+}
 } // namespace
 
 TranslationWorker::TranslationWorker(Completed completed)
@@ -314,7 +434,19 @@ TranslationWorker::TranslationWorker(Completed completed, Translator translator)
   if (!translate_)
     translate_ = [this](const FocusLease &lease, const std::string &query,
                         const std::function<bool()> &cancelled) {
-      return translate(lease, query, cancelled);
+      auto result = translate(lease, query, cancelled);
+      if (result) {
+        flatten_single_target(query, *result);
+        result->readings = candidate_readings(query, result->translations, cancelled);
+      } else if (!cancelled()) {
+        // 这一页没有任何释义，整句候选仍可能有逐词拆解：只带读音和拆解回去，释义是空列表，SessionController 见到它就不交给会话。
+        auto readings = candidate_readings(query, "[]", cancelled);
+        const auto document = query_document(query);
+        if (!readings.empty() && document && !cancelled())
+          result = Result{lease, document->at("generation").get<uint64_t>(), "[]",
+                          std::move(readings)};
+      }
+      return result;
     };
   worker_ = std::thread([this] { run(); });
 }
@@ -415,20 +547,18 @@ TranslationWorker::translate(const FocusLease &lease, const std::string &query_b
       return TranslationWorker::Result{lease, generation, translations};
     }
 
-    // The host exposes one candidate translation field, while preferences may
-    // request two target languages. Translate each target independently and
-    // join successful rows in preference order, matching the desktop hosts'
-    // presentation contract. A recursive call is reduced to one target so the
-    // existing provider, cache, cancellation, and persistence paths remain
-    // identical for each row.
+    // 宿主只有一个候选释义字段，而偏好可以要两种目标语言。每种语言单独翻译，再按偏好顺序每种语言一行拼起来（join_translation_lines，行间是 U+2028），和 macOS 一样第 N 行始终是第 N 种目标语言，某种语言没有释义时留空行。递归调用只带一种目标语言，所以每一行走的服务、缓存、取消和持久化路径都和单语言时完全相同。
     const auto target_languages = query.value("target_languages",
                                               nlohmann::json::array());
     if (target_languages.is_array() && target_languages.size() > 1) {
-      nlohmann::json merged = nlohmann::json::array();
+      // 候选文字按第一次出现的顺序排，每个候选一组按目标语言排列的行。
+      std::vector<std::pair<std::string, std::vector<std::string>>> merged;
       std::unordered_map<std::string, size_t> positions;
+      size_t line = 0;
       for (const auto &target : target_languages) {
         if (!target.is_string() || target.get<std::string>().empty())
           continue;
+        const size_t column = line++;
         auto single = query;
         single["target_language"] = target;
         single["target_languages"] = nlohmann::json::array({target});
@@ -456,20 +586,27 @@ TranslationWorker::translate(const FocusLease &lease, const std::string &query_b
               continue;
             const auto [it, inserted] = positions.emplace(text, merged.size());
             if (inserted)
-              merged.push_back({{"text", text}, {"translation", translation}});
-            else
-              merged.at(it->second)["translation"] =
-                  append_translation_display(
-                      merged.at(it->second).at("translation").get<std::string>(),
-                      translation);
+              merged.push_back({text, {}});
+            auto &lines = merged.at(it->second).second;
+            if (lines.size() <= column)
+              lines.resize(column + 1);
+            // 同一种语言对同一个候选答了两次时只留第一次。
+            if (lines[column].empty())
+              lines[column] = translation;
           }
         } catch (...) {
           continue;
         }
       }
-      if (cancelled() || merged.empty())
+      auto joined = nlohmann::json::array();
+      for (const auto &[text, lines] : merged) {
+        auto translation = join_translation_lines(lines);
+        if (!translation.empty())
+          joined.push_back({{"text", text}, {"translation", std::move(translation)}});
+      }
+      if (cancelled() || joined.empty())
         return std::nullopt;
-      return TranslationWorker::Result{lease, generation, merged.dump()};
+      return TranslationWorker::Result{lease, generation, joined.dump()};
     }
 
     // The packaged glosses for this page: English without a target language,

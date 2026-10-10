@@ -102,6 +102,23 @@ int main() {
     const std::runtime_error other("synthetic");
     REQUIRE(voice_recognition_failure(other) == std::string(voice_recognition_failed_message));
 
+    // 麦克风启动失败按原因给出能照着改的提示：权限被拒指向 Windows 隐私设置，设备不可用请人重选设备，其余用通用的一句。
+    REQUIRE(voice_capture_start_message(AudioCaptureFailure::AccessDenied) ==
+            voice_microphone_permission_message);
+    REQUIRE(voice_microphone_permission_message.find("隐私和安全性") != std::string_view::npos);
+    REQUIRE(voice_capture_start_message(AudioCaptureFailure::DeviceUnavailable) ==
+            voice_microphone_device_message);
+    REQUIRE(voice_capture_start_message(AudioCaptureFailure::Failed) ==
+            voice_microphone_start_message);
+    REQUIRE(voice_capture_start_message(AudioCaptureFailure::None) ==
+            voice_microphone_start_message);
+    // 所选麦克风不可用的提示与 macOS VoiceCaptureDevice.h 同一句。
+    REQUIRE(voice_microphone_device_message == "所选麦克风不可用，请重新选择录音设备");
+    // 没识别出文字时的提示与 macOS 同一句。
+    REQUIRE(voice_no_speech_message == "未识别到语音，请重试");
+    // 润色等 30 秒，与 macOS 相同；共享层默认的 3 秒等不到 chat completion。
+    REQUIRE(voice_polish_timeout_ms == 30000);
+
     // Space lock shows the confirm and cancel buttons on a native recording only.
     REQUIRE(voice_lock_shows_actions(true, false));
     REQUIRE(!voice_lock_shows_actions(true, true));

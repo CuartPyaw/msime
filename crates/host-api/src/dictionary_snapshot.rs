@@ -1440,14 +1440,31 @@ pub unsafe extern "C" fn msime_client_snapshot_queue(
     length: usize,
 ) -> *mut c_char {
     response(|| {
-        if request.is_null() || length == 0 || length > REQUEST_LIMIT {
+        if request.is_null() {
             return Err("snapshot_invalid".to_owned());
         }
-        let action: SnapshotQueueAction =
-            serde_json::from_slice(unsafe { std::slice::from_raw_parts(request, length) })
-                .map_err(|_| "snapshot_invalid".to_owned())?;
-        run_snapshot_queue(action)
+        snapshot_queue_json(unsafe { std::slice::from_raw_parts(request, length) })
     })
+}
+
+/// 与 [`msime_client_snapshot_queue`] 相同的快照队列请求，给直接链接本 crate 的 Rust 宿主（Windows 设置应用）用，不经过 C 字符串。
+pub fn snapshot_queue_json(request: &[u8]) -> Result<Value, String> {
+    if request.is_empty() || request.len() > REQUEST_LIMIT {
+        return Err("snapshot_invalid".to_owned());
+    }
+    let action: SnapshotQueueAction =
+        serde_json::from_slice(request).map_err(|_| "snapshot_invalid".to_owned())?;
+    run_snapshot_queue(action)
+}
+
+/// 与 [`msime_client_snapshot_inspect`] 相同：校验一份宿主私有的快照文件，只返回元数据（其中有 `fileSha256` 和 `engineRecords`），不返回内容。
+pub fn inspect_snapshot_json(path: &Path) -> Result<Value, String> {
+    if !path.is_absolute() {
+        return Err("invalid snapshot path".into());
+    }
+    inspect_snapshot(path)
+        .and_then(|metadata| serde_json::to_value(metadata).map_err(|_| "snapshot unavailable"))
+        .map_err(Into::into)
 }
 
 /// Inspect one host-private snapshot file without returning its contents.
@@ -1464,13 +1481,7 @@ pub unsafe extern "C" fn msime_client_snapshot_inspect(
         }
         let text = std::str::from_utf8(unsafe { std::slice::from_raw_parts(path, length) })
             .map_err(|_| "invalid snapshot path")?;
-        let path = Path::new(text);
-        if !path.is_absolute() {
-            return Err("invalid snapshot path".into());
-        }
-        inspect_snapshot(path)
-            .and_then(|metadata| serde_json::to_value(metadata).map_err(|_| "snapshot unavailable"))
-            .map_err(Into::into)
+        inspect_snapshot_json(Path::new(text))
     })
 }
 

@@ -342,7 +342,10 @@ pub extern "C" fn msime_client_translation_query(handle: u64) -> *mut c_char {
                 // The packaged resource path is only needed for offline
                 // lookup. The user path is also needed by a background host
                 // worker to persist successful English-target translations.
-                "resources": (english_gloss || !offline_gloss_languages.is_empty())
+                // 打开读音时也带上：读音表（pronunciations/en-phonetic.db）同样装在资源目录旁边，在线翻译出来的英文释义也要靠它标音标。
+                "resources": (english_gloss
+                    || !offline_gloss_languages.is_empty()
+                    || preferences.candidate_pronunciation)
                     .then(|| session.options.resources.clone()),
                 "user_data": (english_gloss || persist_english_translation)
                     .then(|| session.options.user_data.clone()),

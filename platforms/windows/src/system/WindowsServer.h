@@ -72,6 +72,9 @@ public:
   bool exit_dedicated_english(const FocusLease &lease) {
     return controller_->exit_dedicated_english(lease);
   }
+  bool set_dedicated_english(const FocusLease &lease, bool enabled) {
+    return controller_->set_dedicated_english(lease, enabled);
+  }
   std::vector<PipeTicket> current_tsf_tickets() {
     return transport_->current_tickets();
   }

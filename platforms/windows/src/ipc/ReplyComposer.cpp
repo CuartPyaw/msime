@@ -1,5 +1,6 @@
 #include "ReplyComposer.h"
 #include "CandidateTranslationPolicy.h"
+#include "TranslationDisplay.h"
 #include "ChineseTextConversion.h"
 #include "InputSchemeTraits.h"
 #include "KoreanHanjaKey.h"
@@ -223,6 +224,9 @@ ReplyComposer::stage(const KeyResult &result, ReplyPath path, bool uiless,
   }
   }
   session_ = session;
+  // 组字结束了（上屏、取消或删空），正在进行的日语转换随之作废；同一段读音再打一遍也从「开始」算起。
+  if (raw.empty())
+    japanese_conversion_.reset();
   pending_ = std::move(next);
   return *pending_;
 }
@@ -370,12 +374,42 @@ std::optional<PendingReply> ReplyComposer::basic_key(
   const auto key = normalize_digit_key(packet.keycode);
   const auto modifiers = PipeMetadata::key_modifiers(packet.modifiers_down);
   const bool digit = key >= '1' && key <= '9';
+  if (japanese_space_applies(view_scheme(view), key, modifiers, uiless,
+                             !view.at("editing_text").get_ref<const std::string &>().empty()))
+    if (auto converted = japanese_space(session, packet, epoch, view))
+      return converted;
   if ((key == 0x20 && modifiers == 0) ||
       (digit && digit_selects_candidate(
                     mode, view.value("spelling_symbols", std::string{}),
                     static_cast<uint32_t>(packet.wch), modifiers)))
     return dispatch(session, packet, epoch, ReplyPath::Selection, uiless);
   return std::nullopt;
+}
+std::optional<PendingReply>
+ReplyComposer::japanese_space(ServerSession &session,
+                              const FanyImeNamedpipeData &packet, uint64_t epoch,
+                              const nlohmann::json &view) {
+  const auto &candidates = view.at("candidates");
+  // 唯一的候选是 Fallback（source 9）时状态机不接管，空格照常上屏原文。
+  int first_source = -1;
+  if (!candidates.empty()) {
+    const auto source = candidates.front().find("source");
+    if (source != candidates.front().end() && source->is_number_integer())
+      first_source = source->get<int>();
+  }
+  const auto step = japanese_space_step(japanese_conversion_.space(
+      view.at("editing_text").get<std::string>(), candidates.size(), first_source));
+  if (!step)
+    return std::nullopt;
+  // 开始转换不动会话，回执里带的就是当前的 view；步进在会话里执行命令，送达的 view 让候选窗移动高亮。两者都不上屏，TIP 读到导航回执后保留组字。
+  KeyResult result{client_, epoch_, packet.request_id, true,
+                   step->command ? session.command(epoch, *step->command)
+                                 : nlohmann::json{{"handled", true},
+                                                  {"commit", nullptr},
+                                                  {"diagnostic", nullptr},
+                                                  {"view", view}}};
+  return stage(result,
+               step->command ? ReplyPath::NextCandidate : ReplyPath::IgnoredNavigation);
 }
 std::optional<PendingReply> ReplyComposer::toggle_character_set(
     ServerSession &session, const FanyImeNamedpipeData &packet,
@@ -620,7 +654,9 @@ std::optional<PendingReply> ReplyComposer::commit_candidate_translation(
     if (!candidate.value("highlighted", false)) {
       continue;
     }
-    translation = candidate.value("translation", std::string{});
+    // 两种目标语言时释义每种语言一行（U+2028 分行），Ctrl+Enter 只取排在最前、有释义的那一行，分行符不进文档。
+    translation = primary_translation_line(
+        candidate.value("translation", std::string{}));
     found = true;
     break;
   }
@@ -869,6 +905,7 @@ void ReplyComposer::confirm_ui_delivery(uint64_t client, uint64_t epoch,
 }
 void ReplyComposer::cancel() {
   pending_.reset();
+  japanese_conversion_.reset();
   prefix_.clear();
   segment_restore_history_.clear();
   translation_page_active_ = false;

@@ -95,7 +95,9 @@ import { cloudDictionaryCapabilities, isMobileHost } from "./input/mobile-host-c
 import { createMobileHostServices } from "./core/mobile-host-services";
 import {
   createDesktopCandidateSkinCommunity,
+  createDesktopCommunityResources,
   createDesktopPluginCommunity,
+  createDesktopSettingsSync,
 } from "./core/desktop-host-services";
 
 const dictionary: DictionaryClient = {
@@ -255,7 +257,6 @@ const client: SettingsClient = {
   },
   openThirdPartyLicenses: () => invoke("open_third_party_licenses"),
   loadMacosShuangpinKeymap: () => invoke<boolean>("load_macos_shuangpin_keymap"),
-  saveMacosShuangpinKeymap: (enabled) => invoke("save_macos_shuangpin_keymap", { enabled }),
   copyText: (text) => invoke("copy_text", { text }),
   openScreenKeyboard: () => invoke("open_keyboard_panel"),
   openHandwriting: () => invoke("open_handwriting_panel"),
@@ -659,10 +660,8 @@ function DesktopSettings() {
             ...client,
             host,
             dictionary: isMobileHost(host.platform) ? mobileDictionary : dictionary,
-            // Windows and macOS resolve the offline gloss in their native
-            // candidate controllers, so the setting is real on both hosts.
-            // Only macOS draws readings after the gloss so far; other hosts keep the value untouched.
-            candidatePronunciation: host.platform === "macos",
+            // Windows 和 macOS 在各自的原生候选控制器里查离线释义，所以释义设置在两边都生效。读音也是这两个宿主画在释义后面（Windows 只标英文音标：日文罗马音靠系统分词器，Windows 没有对应接口）；其他宿主不动这个值。
+            candidatePronunciation: host.platform === "macos" || host.platform === "windows",
             candidateEnglishGloss:
               host.platform === "linux" ||
               host.platform === "android" ||
@@ -850,9 +849,17 @@ function DesktopSettings() {
                     logout: (all: boolean) => invoke("account_logout", { all }),
                     deleteAccount: () => invoke("account_delete"),
                     clearExpired: () => invoke("account_forget"),
+                    // 设置同步只在 Windows 接到账号会话上；macOS 由输入法自己的账号窗口同步它的原生设置，Linux 还没有接入。
+                    ...(host.platform === "windows"
+                      ? { settingsSync: createDesktopSettingsSync(invoke) }
+                      : {}),
                   } satisfies AccountClient,
                   communityCandidateSkins: createDesktopCandidateSkinCommunity(invoke),
                   communityPlugins: createDesktopPluginCommunity(invoke),
+                  // 社区词包与回复模板同理，只在 Windows 的设置应用里提供。
+                  ...(host.platform === "windows"
+                    ? { communityResources: createDesktopCommunityResources(invoke) }
+                    : {}),
                 }
               : {}),
             ...(host.platform === "ios"
@@ -970,7 +977,10 @@ function DesktopSettings() {
     );
   const cloudDictionary = {
     ...panelClients.cloudDictionary,
-    ...cloudDictionaryCapabilities(settingsClient.host?.platform, panelClients.cloudDictionary.request),
+    ...cloudDictionaryCapabilities(
+      settingsClient.host?.platform,
+      panelClients.cloudDictionary.request,
+    ),
     ...(isMobileHost(settingsClient.host?.platform)
       ? {
           downloadToLocal: (entry: CloudDictionaryEntry) =>
@@ -1086,7 +1096,10 @@ function DesktopCloudDictionarySurface() {
     };
   }, []);
   if (host === undefined) return <StatusMessage role="status">正在连接云词库…</StatusMessage>;
-  const capabilities = cloudDictionaryCapabilities(host?.platform, panelClients.cloudDictionary.request);
+  const capabilities = cloudDictionaryCapabilities(
+    host?.platform,
+    panelClients.cloudDictionary.request,
+  );
   const cloudDictionary = {
     ...panelClients.cloudDictionary,
     ...capabilities,

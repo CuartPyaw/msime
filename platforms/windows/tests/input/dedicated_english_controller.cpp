@@ -102,6 +102,13 @@ int main() {
     ++stale.transport.generations[0];
     assert(!controller.dedicated_english_state(stale));
     assert(!mailbox.snapshot(stale));
+    // 托盘「英文候选模式」在焦点会话上设置 Engine 的英文模式，读回来就是新状态；它不向 TIP 写任何东西，新状态之后由 DedicatedEnglishChanged 推送。过期的租约什么也不动。
+    assert(!controller.set_dedicated_english(stale, true));
+    assert(controller.set_dedicated_english(lease, true));
+    assert(controller.dedicated_english_state(lease) == true);
+    assert(controller.set_dedicated_english(lease, false));
+    assert(controller.dedicated_english_state(lease) == false);
+    assert(transport.writes == 1);
     controller.stop();
     assert(!controller.dedicated_english_state(lease));
   }

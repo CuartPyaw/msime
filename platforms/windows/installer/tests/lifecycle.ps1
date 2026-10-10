@@ -81,9 +81,26 @@ if (-not $initialize.Contains('ResolvePreviousDataDir;')) {
 $postStart = $script.IndexOf('else if CurUninstallStep = usPostUninstall')
 if ($postStart -lt 0) { throw 'Missing installer block: usPostUninstall' }
 $post = $script.Substring($postStart)
-if (-not $post.Contains('if OwnsDataDir(ResolvePreviousDataDir) then') -or
+if (-not $post.Contains('if RemoveUserDataOnUninstall and OwnsDataDir(ResolvePreviousDataDir) then') -or
     -not $post.Contains("DeleteDataDir(ResolvePreviousDataDir, '')") -or $post.Contains('GetDataDir(')) {
-    throw 'usPostUninstall does not remove the data directory captured at uninstall start'
+    throw 'usPostUninstall does not remove the data directory captured at uninstall start, or removes it without the user choosing to'
+}
+
+# ---- 卸载默认保留数据目录 ----
+# 只有 /REMOVEDATA 或交互卸载里用户点了「是」才删；/KEEPDATA 和静默卸载（winget、Scoop、Chocolatey）保留，交互卸载的默认按钮是「否」。决定要在 usUninstall 一开始做，在删除任何东西之前。
+if (-not $uninstall.Contains('DecideUserDataRemoval;')) {
+    throw 'usUninstall does not decide whether to keep the data directory before removing anything'
+}
+$decide = Get-Block 'procedure DecideUserDataRemoval' 'procedure CurUninstallStepChanged'
+$flatDecide = ($decide -replace '\s+', ' ')
+foreach ($required in @(
+        "(not OwnsDataDir(DataDir)) or UninstallSwitchGiven('/KEEPDATA') then RemoveUserDataOnUninstall := False",
+        "else if UninstallSwitchGiven('/REMOVEDATA') then RemoveUserDataOnUninstall := True",
+        'else if UninstallSilent then RemoveUserDataOnUninstall := False',
+        'mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES')) {
+    if (-not $flatDecide.Contains($required)) {
+        throw "DecideUserDataRemoval no longer keeps the data directory by default: missing '$required'"
+    }
 }
 if ($script -notmatch 'ValueName: "DataDir";[^\r\n]*Flags: uninsdeletevalue') {
     throw 'DataDir registry value is no longer removed on uninstall'

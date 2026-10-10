@@ -1047,6 +1047,20 @@ static void TestKeymap(NSUserDefaults *defaults, MSIMEAppearancePreferences *app
     [NSApp sendAction:toggle.action to:toggle.target from:toggle];
     assert(appearance.shuangpinKeymap);
     assert([[[MSIMEAppearancePreferences alloc] initWithDefaults:defaults skinsRoot:appearance.skinsRoot] shuangpinKeymap]);
+    // 共享偏好 shuangpin_keymap_hint 优先于本机 defaults，保存时原样写回；文档没有这一项时退回 defaults，并把那里的选择写进文档。
+    [appearance applySharedInputPreferences:@{@"shuangpin_keymap_hint": @NO}];
+    assert(!appearance.shuangpinKeymap);
+    assert([[appearance sharedPreferencesByMerging:@{}][@"shuangpin_keymap_hint"] isEqual:@NO]);
+    [appearance applySharedInputPreferences:@{}];
+    assert(appearance.shuangpinKeymap);
+    assert([[appearance sharedPreferencesByMerging:@{}][@"shuangpin_keymap_hint"] isEqual:@YES]);
+    // 「恢复默认值」经 SharedOverrideProperties() 用 KVC 清掉文档缓存、再删掉 defaults；载入过文档之后合并写回关，文档里的旧值不会在下次载入时回来。
+    [appearance applySharedInputPreferences:@{@"shuangpin_keymap_hint": @YES}];
+    [appearance setValue:nil forKey:@"sharedShuangpinKeymap"];
+    [defaults removeObjectForKey:@"MSIMEClientShuangpinKeymap"];
+    assert(!appearance.shuangpinKeymap);
+    assert([[appearance sharedPreferencesByMerging:@{}][@"shuangpin_keymap_hint"] isEqual:@NO]);
+    [defaults setBool:YES forKey:@"MSIMEClientShuangpinKeymap"];
     HiddenKeymapPanel *panel = [[HiddenKeymapPanel alloc] init];
     assert(panel.ignoresMouseEvents && panel.floatingPanel);
     for (NSString *profile in @[@"xiaohe", @"ziranma", @"shoudao", @"microsoft"]) {
@@ -4517,6 +4531,56 @@ static void TestRealSessionComposition() {
 
     MSIMERemoveTestPreferenceSuite(defaults, suite);
     assert([NSFileManager.defaultManager removeItemAtPath:root error:nil]);
+}
+
+// 应用例外迁到共享文档：升级前的本地规则在文档还没有这个键时照样生效并被发布；文档带着规则载入后成为权威来源、本地旧键删除；文档清空规则后旧规则不会回来；本窗口写的规则经合并整张写进文档。
+static void TestApplicationInputModeRulesFollowSharedDocument() {
+    NSString *suite = [@"msime.app-rules." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    [defaults setObject:@{@"org.example.legacy": @"english", @"org.example.bad": @"global"} forKey:@"MSIMEClientAppInputModeRules"];
+    MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese"}];
+    [prefs activateInputModeForApplication:@"org.example.legacy"];
+    assert(prefs.englishMode);
+    assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:(@{@"org.example.legacy": @"english"})]);
+    // 升级前的规则还没发布，共享设置页就先写了规则表：旧规则并进来、旧键留着，下一次保存把两边一起写进文档，不会被悄悄丢掉。
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": @{@"org.example.shared": @"english"}}];
+    assert([defaults objectForKey:@"MSIMEClientAppInputModeRules"] != nil);
+    [prefs activateInputModeForApplication:@"org.example.shared"];
+    assert(prefs.englishMode);
+    [prefs activateInputModeForApplication:@"org.example.legacy"];
+    assert(prefs.englishMode);
+    assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:(@{@"org.example.shared": @"english", @"org.example.legacy": @"english"})]);
+    // 文档已经包含旧键里的全部规则：迁移完成，旧键删除，文档是唯一来源。
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": @{@"org.example.shared": @"english"}}];
+    assert([defaults objectForKey:@"MSIMEClientAppInputModeRules"] != nil);
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": @{@"org.example.shared": @"english", @"org.example.legacy": @"english"}}];
+    assert([defaults objectForKey:@"MSIMEClientAppInputModeRules"] == nil);
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": @{@"org.example.shared": @"english"}}];
+    [prefs activateInputModeForApplication:@"org.example.shared"];
+    assert(prefs.englishMode);
+    [prefs activateInputModeForApplication:@"org.example.legacy"];
+    assert(!prefs.englishMode);
+    assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:(@{@"org.example.shared": @"english"})]);
+    // 偏好库收不下的规则不发布：不合法的标识、只差大小写的重复和第 33 条以后的规则都留在本机，整份保存才不会被拒。
+    NSMutableDictionary *crowded = [NSMutableDictionary dictionary];
+    for (int index = 0; index < 40; ++index) crowded[[NSString stringWithFormat:@"org.example.app%02d", index]] = @"chinese";
+    crowded[@"org.example.APP00"] = @"english";
+    crowded[@" org.example.padded"] = @"english";
+    crowded[@"org/example"] = @"english";
+    crowded[[@"org.example." stringByPaddingToLength:65 withString:@"x" startingAtIndex:0]] = @"english";
+    [defaults setObject:crowded forKey:@"MSIMEClientAppInputModeRules"];
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese"}];
+    NSDictionary *published = [prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"];
+    assert(published.count == 32);
+    for (NSString *identifier in published) assert([identifier.lowercaseString hasPrefix:@"org.example.app"]);
+    assert(published[@"org.example.APP00"] == nil || published[@"org.example.app00"] == nil);
+    [defaults removeObjectForKey:@"MSIMEClientAppInputModeRules"];
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese"}];
+    [prefs activateInputModeForApplication:@"org.example.shared"];
+    assert(!prefs.englishMode);
+    assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:@{}]);
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
 
 static void TestInputSourceModeReset() {
@@ -9599,6 +9663,7 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestInputModePolicy(); }
         @autoreleasepool { TestPerApplicationPunctuationAndWidth(); }
         @autoreleasepool { TestEnglishModePunctuationAndWidthOutput(); }
+        @autoreleasepool { TestApplicationInputModeRulesFollowSharedDocument(); }
         @autoreleasepool { TestInputSourceModeReset(); }
         @autoreleasepool { TestRealSessionComposition(); }
         @autoreleasepool { TestModifierTaps(); }

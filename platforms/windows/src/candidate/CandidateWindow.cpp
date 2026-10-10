@@ -10,6 +10,7 @@
 #include "TypingEffectSignal.h"
 #include "WindowShadow.h"
 #include <algorithm>
+#include <commctrl.h>
 #include <iterator>
 #include "../../../../shared/contracts/msime_edition.h"
 
@@ -91,6 +92,20 @@ std::wstring wide(const std::string &text) {
                           static_cast<int>(text.size()), result.data(),
                           count) != count)
     throw std::invalid_argument("Invalid window text");
+  return result;
+}
+// 悬停提示的文字：候选和释义拼起来可能超过 wide() 的 4096 字节上限，提示又不值得为此让候选窗失败，所以单独转换，非法字节换成替换字符。
+std::wstring tooltip_wide(const std::string &text) {
+  if (text.empty() || text.size() > 65536)
+    return {};
+  const int count = MultiByteToWideChar(CP_UTF8, 0, text.data(),
+                                        static_cast<int>(text.size()), nullptr, 0);
+  if (count <= 0)
+    return {};
+  std::wstring result(static_cast<size_t>(count), L'\0');
+  if (MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()),
+                          result.data(), count) != count)
+    return {};
   return result;
 }
 // Text width in device independent pixels. DirectWrite is the same engine the renderer draws with, so the card cannot be sized for a different shaping. `weight` is the weight the text is drawn at: the preedit is semibold.
@@ -264,6 +279,17 @@ CandidateWindow::CandidateWindow(Reader reader, Click click, unsigned font_size,
   if (!window_)
     throw std::runtime_error("Candidate window unavailable");
   TypingEffectSignal::instance().attach(window_);
+  // 悬停提示，与 macOS 每个候选按钮的 toolTip 对应。建不出来不算候选窗失败，只是没有提示。
+  INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES};
+  if (InitCommonControlsEx(&controls))
+    tooltip_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                               TOOLTIPS_CLASSW, nullptr,
+                               WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX, CW_USEDEFAULT,
+                               CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, window_,
+                               nullptr, descriptor.hInstance, nullptr);
+  // 设了最大宽度，提示里的 "\n" 才会换行，过长的一行也会折开。
+  if (tooltip_)
+    SendMessageW(tooltip_, TTM_SETMAXTIPWIDTH, 0, 480);
 }
 CandidateWindow::Apartment::Apartment() {
   const HRESULT entered =
@@ -279,6 +305,8 @@ CandidateWindow::Apartment::~Apartment() {
     CoUninitialize();
 }
 CandidateWindow::~CandidateWindow() {
+  if (tooltip_)
+    DestroyWindow(tooltip_);
   if (window_) {
     TypingEffectSignal::instance().detach(window_);
     DestroyWindow(window_);
@@ -358,10 +386,14 @@ bool CandidateWindow::set_fonts(const CandidateFontSettings &settings) {
 }
 void CandidateWindow::set_layout(CandidateLayoutSettings settings) {
   if (horizontal_ == settings.horizontal && show_preedit_ == settings.show_preedit &&
-      wubi_code_hint_ == settings.wubi_code_hint)
+      wubi_code_hint_ == settings.wubi_code_hint &&
+      show_app_logo_ == settings.show_app_logo &&
+      reserved_gloss_lines_ == settings.reserved_gloss_lines)
     return;
   horizontal_ = settings.horizontal;
   show_preedit_ = settings.show_preedit;
+  show_app_logo_ = settings.show_app_logo;
+  reserved_gloss_lines_ = settings.reserved_gloss_lines;
   // The hint is applied by the reader; remembering it here is what repaints an unchanged generation when it is toggled.
   wubi_code_hint_ = settings.wubi_code_hint;
   invalidate_geometry();
@@ -401,6 +433,9 @@ void CandidateWindow::hide() {
   pressed_page_.reset();
   hovered_.reset();
   wheel_accumulator_ = 0;
+  // 提示是候选窗拥有的弹出窗口，候选窗隐藏时它不会跟着消失，正开着的提示要收起来。
+  if (tooltip_)
+    SendMessageW(tooltip_, TTM_POP, 0, 0);
   ShowWindow(window_, SW_HIDE);
 }
 // Measuring the page reads Engine text, so unusable presentation data reaches
@@ -622,9 +657,11 @@ void CandidateWindow::reposition() {
     }
   }
   value = anchored;
+  // render_serial 也要比：读音和逐词拆解在同一个 Engine generation 上单独到达（CandidateMailbox::readings），只换了快照编号。
   if (shown_ && shown_dpi_ == GetDpiForWindow(window_) &&
       shown_->session == value->session &&
-      shown_->generation == value->generation && shown_->x == value->x &&
+      shown_->generation == value->generation &&
+      shown_->render_serial == value->render_serial && shown_->x == value->x &&
       shown_->y == value->y && shown_->lease.epoch == value->lease.epoch &&
       shown_->lease.token == value->lease.token &&
       same_ticket(shown_->lease.transport, value->lease.transport))
@@ -700,12 +737,14 @@ CandidateBounds CandidateWindow::card_bounds(const CandidatePresentation &value,
       static_cast<double>(available_width) / scale - 2.0 * 16.0;
   input.max_height = static_cast<double>(available_height) / scale / 2.0;
   input.skin_min_width = skin_min_width_;
+  input.logo_visible = show_app_logo_;
+  input.reserved_secondary_lines = reserved_secondary_lines(value);
   if (show_preedit_)
     input.preedit_width = measured_width(
         device_, wide(value.preedit), font_family_,
         static_cast<float>(preedit_font_size_), font_fallback_.Get(),
         DWRITE_FONT_WEIGHT_SEMI_BOLD);
-  // The pager shares the preedit row, which is drawn with or without the preedit because it carries the brand mark.
+  // 翻页和拼音共用首行；只要有 logo 或翻页，拼音隐藏时首行也照样画。
   input.page_width = measured_width(
       device_, pager_label(value), font_family_,
       static_cast<float>(CandidateCardMetrics{}.pager_font),
@@ -783,6 +822,14 @@ CandidateWindow::measure_items(const CandidatePresentation &value) {
                      candidate_secondary_lines(candidate)});
   }
   return items;
+}
+size_t CandidateWindow::reserved_secondary_lines(
+    const CandidatePresentation &value) const {
+  // 韩文汉字列表的每一行都在释义行画 훈음，不管翻译开关怎样，所以再多留一行，译文在它下面。
+  const bool hanja = std::any_of(
+      value.candidates.begin(), value.candidates.end(),
+      [](const PresentationCandidate &candidate) { return !candidate.gloss.empty(); });
+  return reserved_gloss_lines_ + (hanja ? 1u : 0u);
 }
 CandidateWrapMeasure
 CandidateWindow::wrap_measure(const CandidatePresentation &value) {
@@ -875,8 +922,11 @@ void CandidateWindow::paint() {
     throw std::runtime_error("Candidate render target unavailable");
   // DrawText goes through the windows.h macro so the call matches whichever
   // name the Direct2D declaration picked up for this target.
+  // 首行高度取决于有没有 logo 和翻页，必须和 card_bounds 量尺寸时一样算，行的位置和点击区域才对得上。
+  const auto label = pager_label(*value);
   const auto metrics = candidate_card_metrics(font_size_, preedit_font_size_,
-                                              show_preedit_);
+                                              show_preedit_, show_app_logo_,
+                                              !label.empty());
   const auto size = target->GetSize();
   const auto frame = candidate_shadow_frame(
       size.width -
@@ -994,7 +1044,7 @@ void CandidateWindow::paint() {
             1.0f, D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
     }
   }
-  // The Fluent top row: the brand mark, then the preedit in the accent colour at semibold on the left, the page indicator and the previous and next arrows in the secondary colour on the right. The row is there even with the preedit hidden, so the mark always is.
+  // Fluent 风格的首行：左边是水杉 logo（`show_app_logo` 关掉时不画）和强调色半粗体的拼音，右边是次要色的页码和上一页、下一页箭头。只要有 logo 或翻页，拼音隐藏时这一行也在。
   auto box = [&frame](const CandidateRowBounds &bounds) {
     return D2D1_RECT_F{static_cast<float>(frame.card_left + bounds.left),
                        static_cast<float>(frame.card_top + bounds.top),
@@ -1002,11 +1052,11 @@ void CandidateWindow::paint() {
                        static_cast<float>(frame.card_top + bounds.bottom)};
   };
   // Loaded at the size it is drawn at, in real pixels, as the floating toolbar loads it, and skipped rather than substituted if the icon will not load.
-  if (auto *logo = logo_bitmap(static_cast<int>(std::lround(
-          metrics.logo_side * layout_scale(GetDpiForWindow(window_))))))
-    target->DrawBitmap(logo, box(candidate_logo_bounds(metrics)), 1.0f,
-                       D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
-  const auto label = pager_label(*value);
+  if (metrics.logo_visible)
+    if (auto *logo = logo_bitmap(static_cast<int>(std::lround(
+            metrics.logo_side * layout_scale(GetDpiForWindow(window_))))))
+      target->DrawBitmap(logo, box(candidate_logo_bounds(metrics)), 1.0f,
+                         D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
   const std::optional<CandidatePagerLayout> pager = candidate_pager_layout(
       frame.card_width,
       measured_width(device_, label, font_family_,
@@ -1091,8 +1141,12 @@ void CandidateWindow::paint() {
   const float gutter = static_cast<float>(metrics.number_and_bar);
   const size_t count = value->candidates.size();
   // Laid out at the width actually drawn, which the work area may have narrowed below what card_bounds asked for.
-  auto rows = candidate_page_layout(measure_items(*value), frame.card_width,
-                                    metrics, horizontal_, wrap_measure(*value));
+  auto rows = candidate_page_layout(
+      measure_items(*value), frame.card_width, metrics, horizontal_,
+      wrap_measure(*value),
+      horizontal_ ? candidate_reserved_row_height(metrics,
+                                                  reserved_secondary_lines(*value))
+                  : 0.0);
   const float first_line = static_cast<float>(metrics.candidate_row);
   for (size_t i = 0; i < count; ++i) {
     const auto &row = rows[i].bounds;
@@ -1193,8 +1247,53 @@ void CandidateWindow::paint() {
   painted_rows_ = std::move(rows);
   painted_pager_ = pager;
   painted_dpi_ = GetDpiForWindow(window_);
+  sync_tooltips();
   if (rendered_)
     rendered_(*painted_);
+}
+void CandidateWindow::sync_tooltips() {
+  if (!tooltip_ || !painted_)
+    return;
+  // 行在卡片坐标里，换回客户区像素：和 hit() 的换算相反，加上阴影边距和装饰图让出的高度。
+  const double scale = layout_scale(painted_dpi_);
+  std::vector<RECT> rects;
+  if (painted_->pointer_input) {
+    rects.reserve(painted_rows_.size());
+    for (const auto &row : painted_rows_)
+      rects.push_back(
+          {static_cast<LONG>(std::floor((row.bounds.left + shadow_insets_.left) * scale)),
+           static_cast<LONG>(std::floor((row.bounds.top + shadow_insets_.top + decoration_offset_) * scale)),
+           static_cast<LONG>(std::ceil((row.bounds.right + shadow_insets_.left) * scale)),
+           static_cast<LONG>(std::ceil((row.bounds.bottom + shadow_insets_.top + decoration_offset_) * scale))});
+  }
+  const auto same = [](const RECT &a, const RECT &b) {
+    return a.left == b.left && a.top == b.top && a.right == b.right && a.bottom == b.bottom;
+  };
+  if (tooltip_serial_ == painted_->render_serial && rects.size() == tooltip_rects_.size() &&
+      std::equal(rects.begin(), rects.end(), tooltip_rects_.begin(), same))
+    return;
+  TTTOOLINFOW tool{};
+  // V2 的大小在没有 comctl32 v6 清单的进程里也被接受；带 lpReserved 的完整大小会让旧版控件拒绝登记。
+  tool.cbSize = TTTOOLINFOW_V2_SIZE;
+  tool.hwnd = window_;
+  for (size_t id = 0; id < tooltip_rects_.size(); ++id) {
+    tool.uId = id;
+    SendMessageW(tooltip_, TTM_DELTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
+  }
+  tooltip_rects_.clear();
+  tooltip_serial_ = painted_->render_serial;
+  for (size_t index = 0; index < rects.size(); ++index) {
+    tool = {};
+    tool.cbSize = TTTOOLINFOW_V2_SIZE;
+    tool.uFlags = TTF_SUBCLASS;
+    tool.hwnd = window_;
+    tool.uId = index;
+    tool.rect = rects[index];
+    tool.lpszText = LPSTR_TEXTCALLBACKW;
+    if (!SendMessageW(tooltip_, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool)))
+      break;
+    tooltip_rects_.push_back(rects[index]);
+  }
 }
 std::optional<CandidateClick> CandidateWindow::hit(int x, int y) {
   if (!click_ || !painted_ || !painted_->pointer_input || !IsWindowVisible(window_))
@@ -1311,10 +1410,10 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
         const auto &value = *self->painted_;
         if (steps.page_up > 0)
           self->page_(CandidatePage{value.lease, value.session, value.generation,
-                                    true, static_cast<unsigned>(steps.page_up)});
+                                    true, static_cast<unsigned>(steps.page_up), true});
         if (steps.page_down > 0)
           self->page_(CandidatePage{value.lease, value.session, value.generation,
-                                    false, static_cast<unsigned>(steps.page_down)});
+                                    false, static_cast<unsigned>(steps.page_down), true});
         return 0;
       }
       case WM_LBUTTONDOWN:
@@ -1400,6 +1499,21 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
         self->hovered_.reset();
         SetCursor(LoadCursorW(nullptr, wide_cursor(IDC_ARROW)));
         return 0;
+      case WM_NOTIFY: {
+        auto *header = reinterpret_cast<NMHDR *>(lparam);
+        if (header && self->tooltip_ && header->hwndFrom == self->tooltip_ &&
+            header->code == TTN_GETDISPINFOW) {
+          auto *info = reinterpret_cast<NMTTDISPINFOW *>(lparam);
+          const auto index = static_cast<size_t>(header->idFrom);
+          self->tooltip_text_.clear();
+          if (self->painted_ && index < self->painted_->candidates.size())
+            self->tooltip_text_ =
+                tooltip_wide(candidate_tooltip_text(self->painted_->candidates[index]));
+          info->lpszText = self->tooltip_text_.data();
+          return 0;
+        }
+        break;
+      }
       case WM_ERASEBKGND:
         return 1;
       case WM_POWERBROADCAST:

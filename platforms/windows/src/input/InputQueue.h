@@ -54,6 +54,8 @@ public:
   HideCandidateDisposition hide_candidate(const FocusLease &lease);
   std::optional<nlohmann::json> dedicated_english(const FocusLease &lease,
                                                   bool exit);
+  std::optional<nlohmann::json> set_dedicated_english(const FocusLease &lease,
+                                                      bool enabled);
   std::optional<nlohmann::json>
   apply_ai_candidates(const FocusLease &lease, const std::string &query,
                       const std::string &candidates);
@@ -83,7 +85,8 @@ public:
   std::optional<nlohmann::json> page_candidate(const FocusLease &lease,
                                                uint64_t session,
                                                uint64_t generation,
-                                               bool previous, unsigned steps);
+                                               bool previous, unsigned steps,
+                                               bool from_wheel);
   bool ui_delivered(const FocusLease &lease, uint64_t generation);
   std::optional<PendingReply> configured_key(
       const FocusLease &lease, const FanyImeNamedpipeData &packet,

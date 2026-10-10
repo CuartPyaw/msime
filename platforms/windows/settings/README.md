@@ -33,6 +33,14 @@
 
 「候选窗口」页「游戏」组的两张程序列表（`game_compatibility.overlay_processes`、`excluded_processes`）在写入前先按偏好库的规则规范化和校验（`GameProcessList.h`）：去掉首尾空白、ASCII 字母转小写，要求以 `.exe` 结尾、不超过 64 个字符、不带路径和 `\ / : * ? " < > |` 及控制字符，两张表之间不重复、合计不超过 32 条。不合法时在列表下方说明具体原因，不写入文档：保存被拒时窗口只能给出上面那句笼统的说明，用户看不出是哪一项出了问题。这组设置只由 TSF DLL 在每次激活时读取，对已打开的游戏要切换一次输入法才生效，取舍见 [决策笔记](../../../.agents/notes/implemented/feature/2026-10-08-windows-game-candidate-overlay.md)。
 
+## 设置文件、数据目录与许可声明
+
+「维护与诊断」页的「设置文件」组导出和导入设置。「导出…」用系统的保存对话框选位置，`msime_client_export_settings` 读出已保存的偏好并换算成设置文件（`app.msime.client.preferences`，规则在 `crates/client-core/src/settings_document.rs`），再先写临时文件后改名写到所选位置。「导入…」用打开对话框选文件，读入（上限 1 MiB）后交给 `msime_client_import_settings`：它保留本机的语音、AI 辅助和翻译服务配置与密钥、诊断日志和使用统计开关，文件里的方案本版本不提供时保留本机的方案，然后按本窗口读到的修订号比较并交换写回。导入成功或被拒都会重新读取设置；错误码换成说明的规则在 `SettingsDocumentFile.h`，由 `tests/ui/settings_document_file.cpp` 核对。
+
+同一页的「数据目录」行显示状态根并可在资源管理器中打开。移到其他磁盘要重新运行完整安装包：数据目录登记在 HKLM 的 `DataDir`，改它要管理员权限，安装器的「选择数据位置」一步已经负责复制、切换和删除旧目录，本窗口只说明这条路径。
+
+「关于」页的产品名按版本取（`MSIME_EDITION_DISPLAY_NAME`），「许可与隐私」组的「第三方组件许可」用关联程序打开安装目录下的 `THIRD_PARTY_NOTICES.txt`（本窗口所在 `server` 目录的上一级，与安装器的 `DestDir` 一致）。取舍见 [决策笔记](../../../.agents/notes/implemented/feature/2026-10-10-windows-settings-file-and-local-data-parity.md)。
+
 ## 连接 AI 助手
 
 「维护与诊断」页的「连接 AI 助手」即共享设置页的同名区块：通过 `msime_client_mcp_status` 和 `msime_client_mcp_install` 显示与 `msime-client-settings.exe` 同目录的 `msime-mcp.exe`、可复制的 MCP 配置，并把它写入 Claude Desktop 或 Cursor 的配置文件。服务器指向的运行时选项取自 Server 注入的 `MSIME_CLIENT_HOST_OPTIONS`，直接启动时取 Server 状态目录（`resolve_state_directory()`，不是 `preferences_directory`）下的 `runtime-options.json`，也就是 Server 启动时读的那一份；两者都没有时说明输入法尚未初始化，不提供配置。写入逻辑与 Tauri 外壳共用 host-api 的 `mcp_clients`。

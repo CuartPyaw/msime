@@ -39,3 +39,30 @@ test("builds candidate translation bindings for preference changes and provider 
   ]);
   expect(providers).toEqual(["account"]);
 });
+
+test("offers the secondary candidate language on Windows, whose card draws one gloss line per language", () => {
+  const options = {
+    candidateTranslations: true,
+    translationTargetLanguage: "en",
+    translationSecondaryLanguage: null,
+    candidateGlossLanguagesEnabled: true,
+    visibleTranslationLanguages: [["en", "英语"]],
+    visibleSecondaryLanguages: [["", "不显示第二种语言"]],
+    android: false,
+    ios: false,
+    macos: false,
+    harmony: false,
+    linux: false,
+    translationAccount: false,
+    onPreferencesChange: () => undefined,
+    onDeviceMissingLanguages: [],
+    translationProvider: "none",
+    setTranslationProvider: () => undefined,
+  } as const;
+  expect(
+    createCandidateTranslationSettings({ ...options, windows: true }).showSecondaryLanguage,
+  ).toBe(true);
+  expect(
+    createCandidateTranslationSettings({ ...options, linux: true }).showSecondaryLanguage,
+  ).toBe(false);
+});
