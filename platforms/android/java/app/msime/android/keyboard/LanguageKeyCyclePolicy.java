@@ -8,6 +8,8 @@ import java.util.List;
  *
  * <p>默认（「中英键轮换其他语言」关着）和原来一样只在中文和英文之间来回。打开后按「中 → 英 → 已启用的其他语言键盘（按启用顺序）→ 中」轮换，和高德输入法的中英日依次切换一致；没有启用任何其他语言键盘时仍只切中英。
  *
+ * <p>轮换按语言走，不按入口走：日语 9 键和 26 键都启用时只轮到其中一个，和中文入口同一种键盘（9 键或 26 键）的优先，没有就取启用顺序里的第一个。
+ *
  * <p>当前位置按状态判断：英文直输开着算「英」，不管它是从哪个方案切过去的；否则当前方案是其他语言就算那一种，其余算「中」。其他语言之后不会再回到「英」，所以轮换总能回到中文。回到中文时，从中文方案切到英文的直接关掉英文；从其他语言回来的切回进入其他语言之前用的那个中文入口。
  */
 public final class LanguageKeyCyclePolicy {
@@ -34,14 +36,18 @@ public final class LanguageKeyCyclePolicy {
      */
     public static Target next(boolean cycle, KeyboardScheme selected, boolean english,
             List<KeyboardScheme> available, KeyboardScheme chineseReturn) {
-        List<KeyboardScheme> others = otherLanguages(available);
+        List<KeyboardScheme> others = otherLanguages(available,
+            chineseReturn == null ? null : chineseReturn.touchKeyboardLayout());
         if (!cycle || others.isEmpty()) {
             return new Target(english ? Kind.CHINESE_TOGGLE : Kind.ENGLISH, null);
         }
         boolean inOther = selected != null && selected.otherLanguage();
         if (english) return new Target(Kind.SCHEME, others.get(0));
         if (!inOther) return new Target(Kind.ENGLISH, null);
-        int index = others.indexOf(selected);
+        int index = -1;
+        for (int candidate = 0; candidate < others.size(); candidate++) {
+            if (others.get(candidate).language().equals(selected.language())) index = candidate;
+        }
         if (index >= 0 && index + 1 < others.size()) return new Target(Kind.SCHEME, others.get(index + 1));
         return new Target(Kind.SCHEME, chineseReturn);
     }
@@ -50,7 +56,7 @@ public final class LanguageKeyCyclePolicy {
     public static String label(boolean cycle, KeyboardScheme selected, boolean english,
             List<KeyboardScheme> available) {
         if (english) return "英";
-        if (cycle && selected != null && selected.otherLanguage() && !otherLanguages(available).isEmpty())
+        if (cycle && selected != null && selected.otherLanguage() && !otherLanguages(available, null).isEmpty())
             return selected.glyph();
         return "中";
     }
@@ -74,7 +80,7 @@ public final class LanguageKeyCyclePolicy {
     public static String stateDescription(boolean cycle, KeyboardScheme selected, boolean english,
             List<KeyboardScheme> available) {
         if (english) return "英文输入";
-        if (cycle && selected != null && selected.otherLanguage() && !otherLanguages(available).isEmpty())
+        if (cycle && selected != null && selected.otherLanguage() && !otherLanguages(available, null).isEmpty())
             return selected.title();
         return "中文输入";
     }
@@ -95,11 +101,19 @@ public final class LanguageKeyCyclePolicy {
         return first != null ? first : fallback;
     }
 
-    private static List<KeyboardScheme> otherLanguages(List<KeyboardScheme> available) {
+    /** 每种其他语言一个入口，按语言第一次出现的启用顺序；同一种语言有几个入口时取触屏布局是 `layout` 的那个，没有就取第一个。 */
+    private static List<KeyboardScheme> otherLanguages(List<KeyboardScheme> available, String layout) {
         List<KeyboardScheme> others = new ArrayList<>(available == null ? 0 : available.size());
         if (available == null) return others;
         for (KeyboardScheme scheme : available) {
-            if (scheme.otherLanguage()) others.add(scheme);
+            if (!scheme.otherLanguage()) continue;
+            int existing = -1;
+            for (int index = 0; index < others.size(); index++) {
+                if (others.get(index).language().equals(scheme.language())) existing = index;
+            }
+            if (existing < 0) others.add(scheme);
+            else if (scheme.touchKeyboardLayout().equals(layout)
+                    && !others.get(existing).touchKeyboardLayout().equals(layout)) others.set(existing, scheme);
         }
         return others;
     }

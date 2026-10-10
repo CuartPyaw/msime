@@ -47,6 +47,24 @@ public final class LanguageKeyCyclePolicySmoke {
         check(is(LanguageKeyCyclePolicy.next(true, KeyboardScheme.JAPANESE, true, withOthers, back), Kind.SCHEME,
             KeyboardScheme.JAPANESE), "English entered from Japanese continues the ring");
 
+        // 按语言轮换：日语 9 键和 26 键都启用时只轮到一个，和中文入口同一种键盘的优先。
+        List<KeyboardScheme> bothJapanese = List.of(KeyboardScheme.QUANPIN, KeyboardScheme.QUANPIN_NINE_KEY,
+            KeyboardScheme.JAPANESE_NINE_KEY, KeyboardScheme.JAPANESE, KeyboardScheme.KOREAN);
+        check(is(LanguageKeyCyclePolicy.next(true, KeyboardScheme.QUANPIN_NINE_KEY, true, bothJapanese,
+            KeyboardScheme.QUANPIN_NINE_KEY), Kind.SCHEME, KeyboardScheme.JAPANESE_NINE_KEY),
+            "a nine-key Chinese user goes to Japanese nine-key");
+        check(is(LanguageKeyCyclePolicy.next(true, KeyboardScheme.QUANPIN, true, bothJapanese, KeyboardScheme.QUANPIN),
+            Kind.SCHEME, KeyboardScheme.JAPANESE), "a 26-key Chinese user goes to Japanese 26-key");
+        check(is(LanguageKeyCyclePolicy.next(true, KeyboardScheme.JAPANESE_NINE_KEY, false, bothJapanese,
+            KeyboardScheme.QUANPIN_NINE_KEY), Kind.SCHEME, KeyboardScheme.KOREAN),
+            "Japanese is one stop, then Korean");
+        check(is(LanguageKeyCyclePolicy.next(true, KeyboardScheme.JAPANESE, false, bothJapanese,
+            KeyboardScheme.QUANPIN_NINE_KEY), Kind.SCHEME, KeyboardScheme.KOREAN),
+            "either Japanese layout counts as the Japanese stop");
+        check(is(LanguageKeyCyclePolicy.next(true, KeyboardScheme.JAPANESE_NINE_KEY, false,
+            List.of(KeyboardScheme.QUANPIN, KeyboardScheme.JAPANESE_NINE_KEY), KeyboardScheme.QUANPIN), Kind.SCHEME,
+            KeyboardScheme.QUANPIN), "the only Japanese layout is used even if it does not match");
+
         // 键面与读屏。
         check(LanguageKeyCyclePolicy.label(true, back, false, withOthers).equals("中"), "Chinese face");
         check(LanguageKeyCyclePolicy.label(true, back, true, withOthers).equals("英"), "English face");

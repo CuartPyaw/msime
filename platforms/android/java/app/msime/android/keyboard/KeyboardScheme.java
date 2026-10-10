@@ -329,6 +329,11 @@ public enum KeyboardScheme {
         return this != HANDWRITING && !isChineseScheme(engineScheme);
     }
 
+    /** 这个入口属于哪种语言：就是它的 Engine 方案（日语 9 键和日语 26 键都是 `japanese`）。手写没有自己的语言，返回 null。 */
+    public String language() {
+        return this == HANDWRITING ? null : engineScheme;
+    }
+
     private static boolean isChineseScheme(String value) {
         return "quanpin".equals(value) || "shuangpin".equals(value) || "wubi".equals(value)
             || "cantonese".equals(value) || "zhuyin".equals(value) || "stroke".equals(value);
