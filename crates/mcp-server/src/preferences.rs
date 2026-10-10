@@ -226,9 +226,9 @@ pub struct PreferencesView {
     pub candidate_follow_cursor: bool,
     /// Select candidates with the number row.
     pub number_row_selection: bool,
-    /// Show a badge when switching between Chinese and English (macOS).
+    /// 切换中英文时显示「中」或「英」的提示（macOS、Windows、Linux 和 HarmonyOS）。
     pub input_mode_hud: bool,
-    /// Show the app logo at the left end of the candidate window and the floating toolbar (macOS).
+    /// 在候选窗和悬浮工具栏左端显示水杉 logo（macOS 和 Windows；其他宿主始终显示，没有这个开关）。
     pub show_app_logo: bool,
     pub fuzzy_pinyin: bool,
     /// The mode a newly focused text field starts in.

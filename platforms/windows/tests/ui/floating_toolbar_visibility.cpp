@@ -62,5 +62,23 @@ int main() {
     for (uint64_t now = 10000; now < 40000; now += 50)
       CHECK(timer.idle_hidden(now, true));
   }
+  {
+    // 维护钩子看不到的按键（屏幕键盘注入的按键、发往提权窗口的按键）经过了 Server 时，计数变了就让空闲隐藏的工具栏回来并重新计时。
+    using msime::windows::ServerKeyActivity;
+    FloatingToolbarIdleTimer timer;
+    CHECK(!timer.idle_hidden(0, true));
+    CHECK(timer.idle_hidden(10000, true));
+    const uint64_t before = ServerKeyActivity::instance().count();
+    timer.note_key_activity(before, 10050);
+    CHECK(timer.idle_hidden(10050, true));
+    ServerKeyActivity::instance().note();
+    timer.note_key_activity(ServerKeyActivity::instance().count(), 20000);
+    CHECK(!timer.idle_hidden(20000, true));
+    // 计数没再变，轮询本身不续期。
+    timer.note_key_activity(ServerKeyActivity::instance().count(), 29999);
+    CHECK(!timer.idle_hidden(29999, true));
+    timer.note_key_activity(ServerKeyActivity::instance().count(), 30000);
+    CHECK(timer.idle_hidden(30000, true));
+  }
   return failures == 0 ? 0 : 1;
 }

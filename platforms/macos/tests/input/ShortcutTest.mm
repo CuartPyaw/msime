@@ -1047,13 +1047,19 @@ static void TestKeymap(NSUserDefaults *defaults, MSIMEAppearancePreferences *app
     [NSApp sendAction:toggle.action to:toggle.target from:toggle];
     assert(appearance.shuangpinKeymap);
     assert([[[MSIMEAppearancePreferences alloc] initWithDefaults:defaults skinsRoot:appearance.skinsRoot] shuangpinKeymap]);
-    // 共享偏好 shuangpin_keymap_hint 优先于本机 defaults，保存时原样写回；文档没有这一项时退回 defaults，并把那里的选择写进文档。
-    [appearance applySharedInputPreferences:@{@"shuangpin_keymap_hint": @NO}];
-    assert(!appearance.shuangpinKeymap);
-    assert([[appearance sharedPreferencesByMerging:@{}][@"shuangpin_keymap_hint"] isEqual:@NO]);
+    // 文档还没有 shuangpin_keymap_hint 时退回 defaults 里升级前的选择，并把它写进文档。
     [appearance applySharedInputPreferences:@{}];
     assert(appearance.shuangpinKeymap);
     assert([[appearance sharedPreferencesByMerging:@{}][@"shuangpin_keymap_hint"] isEqual:@YES]);
+    // 文档带着这一项载入后它优先于 defaults，保存时原样写回，本机旧键随即删除。
+    [appearance applySharedInputPreferences:@{@"shuangpin_keymap_hint": @NO}];
+    assert(!appearance.shuangpinKeymap);
+    assert([defaults objectForKey:@"MSIMEClientShuangpinKeymap"] == nil);
+    assert([[appearance sharedPreferencesByMerging:@{}][@"shuangpin_keymap_hint"] isEqual:@NO]);
+    // 之后文档又没有这一项（共享设置页的恢复默认设置、导入不带这一项的设置文件）就是关，升级前的旧选择不会复活。
+    [appearance applySharedInputPreferences:@{}];
+    assert(!appearance.shuangpinKeymap);
+    assert([[appearance sharedPreferencesByMerging:@{}][@"shuangpin_keymap_hint"] isEqual:@NO]);
     // 「恢复默认值」经 SharedOverrideProperties() 用 KVC 清掉文档缓存、再删掉 defaults；载入过文档之后合并写回关，文档里的旧值不会在下次载入时回来。
     [appearance applySharedInputPreferences:@{@"shuangpin_keymap_hint": @YES}];
     [appearance setValue:nil forKey:@"sharedShuangpinKeymap"];
@@ -4539,13 +4545,17 @@ static void TestApplicationInputModeRulesFollowSharedDocument() {
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
     [defaults setObject:@{@"org.example.legacy": @"english", @"org.example.bad": @"global"} forKey:@"MSIMEClientAppInputModeRules"];
     MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    assert(!prefs.applicationInputModeRulesAwaitPublication);
     [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese"}];
     [prefs activateInputModeForApplication:@"org.example.legacy"];
     assert(prefs.englishMode);
+    // 文档还没有规则表、本机有升级前的规则：输入法载入后要立即保存一次把它们发布出去，共享设置页才看得到。
+    assert(prefs.applicationInputModeRulesAwaitPublication);
     assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:(@{@"org.example.legacy": @"english"})]);
     // 升级前的规则还没发布，共享设置页就先写了规则表：旧规则并进来、旧键留着，下一次保存把两边一起写进文档，不会被悄悄丢掉。
     [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": @{@"org.example.shared": @"english"}}];
     assert([defaults objectForKey:@"MSIMEClientAppInputModeRules"] != nil);
+    assert(prefs.applicationInputModeRulesAwaitPublication);
     [prefs activateInputModeForApplication:@"org.example.shared"];
     assert(prefs.englishMode);
     [prefs activateInputModeForApplication:@"org.example.legacy"];
@@ -4556,6 +4566,7 @@ static void TestApplicationInputModeRulesFollowSharedDocument() {
     assert([defaults objectForKey:@"MSIMEClientAppInputModeRules"] != nil);
     [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": @{@"org.example.shared": @"english", @"org.example.legacy": @"english"}}];
     assert([defaults objectForKey:@"MSIMEClientAppInputModeRules"] == nil);
+    assert(!prefs.applicationInputModeRulesAwaitPublication);
     [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": @{@"org.example.shared": @"english"}}];
     [prefs activateInputModeForApplication:@"org.example.shared"];
     assert(prefs.englishMode);
@@ -4575,8 +4586,29 @@ static void TestApplicationInputModeRulesFollowSharedDocument() {
     assert(published.count == 32);
     for (NSString *identifier in published) assert([identifier.lowercaseString hasPrefix:@"org.example.app"]);
     assert(published[@"org.example.APP00"] == nil || published[@"org.example.app00"] == nil);
+    // 文档载入了发布出去的 32 条之后：已发布的从旧键里删掉，与已发布的只差大小写的那条是同一个 bundle id，以文档为准也删掉；收不下的（不合法的标识、第 33 条以后）留在旧键里，只在本机生效，不发布，也不再要求保存。
+    NSString *longIdentifier = [@"org.example." stringByPaddingToLength:65 withString:@"x" startingAtIndex:0];
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": published}];
+    assert(!prefs.applicationInputModeRulesAwaitPublication);
+    NSDictionary *leftover = [defaults dictionaryForKey:@"MSIMEClientAppInputModeRules"];
+    assert(leftover.count == crowded.count - 33);
+    assert(leftover[@"org.example.app00"] == nil && leftover[@"org.example.APP00"] == nil);
+    for (NSString *identifier in published) assert(leftover[identifier] == nil);
+    assert([leftover[longIdentifier] isEqual:@"english"] && [leftover[@"org/example"] isEqual:@"english"]);
+    [prefs activateInputModeForApplication:longIdentifier];
+    assert(prefs.englishMode);
+    [prefs activateInputModeForApplication:@"org/example"];
+    assert(prefs.englishMode);
+    assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:published]);
+    // 文档空出位置后，收得下的旧规则并进来、等下一次保存发布。
+    NSMutableDictionary *roomy = [published mutableCopy];
+    [roomy removeObjectForKey:roomy.allKeys.firstObject];
+    [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese", @"app_input_mode_rules": roomy}];
+    assert(prefs.applicationInputModeRulesAwaitPublication);
+    assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] count] == 32);
     [defaults removeObjectForKey:@"MSIMEClientAppInputModeRules"];
     [prefs applySharedInputPreferences:@{@"default_ime_mode": @"chinese"}];
+    assert(!prefs.applicationInputModeRulesAwaitPublication);
     [prefs activateInputModeForApplication:@"org.example.shared"];
     assert(!prefs.englishMode);
     assert([[prefs sharedPreferencesByMerging:@{}][@"app_input_mode_rules"] isEqual:@{}]);

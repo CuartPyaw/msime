@@ -39,6 +39,14 @@ int main() {
     REQUIRE(!voice_target_in_foreground(kTarget, kServer, kServer, true));
     REQUIRE(!voice_target_in_foreground(kTarget, 0, kServer, true));
 
+    // 投递时前台对得上还不够，焦点租约也必须仍是当前焦点：同一窗口里换了输入框，前台核对看不出来。
+    REQUIRE(voice_delivery_target_current(true, true));
+    REQUIRE(!voice_delivery_target_current(true, false));
+    REQUIRE(!voice_delivery_target_current(false, true));
+    REQUIRE(!voice_delivery_target_current(false, false));
+    // 事务锁忙时 TSF 路线不验租约就返回，退路要靠这一条拦住换了输入框的情况。
+    REQUIRE(!voice_tsf_refusal_falls_back(false, voice_delivery_target_current(true, false)));
+
     // TSF 被拒：焦点租约失效时整段丢弃，哪怕前台看起来还是同一个进程（焦点去了同一应用的另一个输入框）；锁忙或写失败时，前台仍是目标才退回 SendInput。
     REQUIRE(!voice_tsf_refusal_falls_back(true, true));
     REQUIRE(!voice_tsf_refusal_falls_back(true, false));

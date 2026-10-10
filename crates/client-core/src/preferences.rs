@@ -875,7 +875,7 @@ pub struct Preferences {
     pub shuangpin_preedit_uses_raw: bool,
     /// 「输入时显示双拼键位提示」：双拼组字时在候选窗旁显示当前方案的键位图，高亮刚按下的键，上屏后隐藏。macOS 和 Windows 画它。
     ///
-    /// 没写过时为 `None`，不写进文档：这个开关以前只存在 macOS 本机的 defaults 里（`MSIMEClientShuangpinKeymap`），macOS 在文档没有这一项时仍读那里的旧选择，再由下一次保存写进文档；其他宿主按关处理。
+    /// 没写过时为 `None`，不写进文档：这个开关以前只存在 macOS 本机的 defaults 里（`MSIMEClientShuangpinKeymap`），macOS 在文档从没带过这一项时仍读那里的旧选择，再由下一次保存写进文档；文档带着这一项载入过一次之后 macOS 删掉那个旧键，此后缺这一项在所有宿主上都是关。
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub shuangpin_keymap_hint: Option<bool>,
     /// The Vietnamese input method and tone placement.

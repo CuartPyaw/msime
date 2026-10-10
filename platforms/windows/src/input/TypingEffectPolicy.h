@@ -51,7 +51,7 @@ inline TypingEffect decode_typing_effect(uint32_t packed) {
   return effect;
 }
 
-// The parts of msime_client_typing_effect_settings the card flash uses: the intensity, the flash length (the pack's duration_ms, else the host's own 150 ms) and the flash colour (the pack's first colour, else the theme accent). The pack's whole colour list and its sparks per key travel apart, as TypingEffectPalette, for the caret overlay.
+// 卡片闪光用到的 msime_client_typing_effect_settings 部分：强度、闪光时长（特效包的 duration_ms，没有时用宿主自己的 150 ms）和闪光颜色（特效包的第一个颜色，没有时用主题强调色）。特效包的整张颜色表和每键火花数另走 TypingEffectPalette，给光标浮层用。
 struct TypingEffectSettings {
   uint32_t intensity = 50;
   uint32_t flash_millis = typing_effect_flash_millis;
@@ -108,7 +108,7 @@ inline std::optional<TypingEffectSettings> unpack_typing_effect_settings(uint64_
   return resolve_typing_effect_settings(static_cast<uint32_t>(packed & 0xFFu), static_cast<uint32_t>((packed >> 8) & 0xFFFu), color);
 }
 
-// Opacity of the card flash `elapsed` milliseconds after the key, 0 once it has faded or when nothing is drawn. The stronger styles and a new tier flash brighter. Whether the card flashes at all for a style is typing_effect_card_flashes (TypingEffectOverlayPolicy.h): the sparks style flashes only when the caret overlay that draws its sparks is unavailable. effect_intensity 50 is the nominal strength, 100 doubles it. `flash_millis` is how long the flash takes to fade, an effect pack's duration_ms.
+// 按键后 `elapsed` 毫秒时卡片闪光的不透明度，淡完或不画时为 0。越强的样式和新的档位闪得越亮。某种样式到底闪不闪卡片由 typing_effect_card_flashes（TypingEffectOverlayPolicy.h）决定：火花样式只在画火花的光标浮层不可用时才闪卡片。effect_intensity 50 是标准强度，100 加倍。`flash_millis` 是闪光淡完的时长，即特效包的 duration_ms。
 inline float typing_effect_flash_alpha(const TypingEffect &effect, uint32_t intensity, uint64_t elapsed,
                                        uint32_t flash_millis = typing_effect_flash_millis) {
   if (effect.style == TypingEffectStyle::off || intensity == 0 || flash_millis == 0 || elapsed >= flash_millis)

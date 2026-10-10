@@ -1812,7 +1812,7 @@ int wmain(int argc, wchar_t **argv) {
       toggle_popup(utility_popup, scheme_popup, anchor);
     });
     toolbar.set_hide_action([&] { (void)tray_command(TrayMenuCommand::HideFloatingToolbar); });
-    // 空闲隐藏：按键（下面的维护钩子报告）、在工具栏上按鼠标都重新计时。
+    // 空闲隐藏：按键（下面的维护钩子报告，加上 Server 经管道收到的按键）、在工具栏上按鼠标都重新计时。
     FloatingToolbarIdleTimer toolbar_idle;
     toolbar.set_activity_action([&] { toolbar_idle.note_input(GetTickCount64()); });
     // The Server is the Caps Lock authority: the TIP only sampled GetKeyState
@@ -2306,6 +2306,8 @@ int wmain(int argc, wchar_t **argv) {
       // 工具栏的弹出菜单开着时用户正在用它，不算空闲。
       if (scheme_menu.visible() || utility_menu.visible())
         toolbar_idle.note_input(GetTickCount64());
+      // 钩子看不到的按键（屏幕键盘等注入的按键、发往提权窗口的按键、钩子没装上）只要经过了 Server，也让工具栏回来。
+      toolbar_idle.note_key_activity(ServerKeyActivity::instance().count(), GetTickCount64());
       const bool toolbar_idle_hidden =
           toolbar_idle.idle_hidden(GetTickCount64(), toolbar_visible && ime_now_active);
       toolbar.refresh(show_toolbar && !toolbar_idle_hidden);

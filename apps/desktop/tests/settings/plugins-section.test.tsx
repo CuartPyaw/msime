@@ -1628,7 +1628,7 @@ test("effect packs are offered where the host draws a style, not on Linux", () =
   expect(capabilities("harmony").showTypingEffectStyles).toBe(true);
   expect(capabilities("harmony").showTypingEffectPacks).toBe(true);
   expect(capabilities("linux").showTypingEffectPacks).toBe(false);
-  // HarmonyOS draws every style as a flash of the candidate card, so the style text must not promise sparks there. Windows draws the sparks at the caret, as macOS does.
+  // HarmonyOS 把每种样式都画成候选卡片闪一下，样式说明不能许诺火花；Windows 和 macOS 一样在光标处画火花。
   expect(capabilities("windows").typingEffectsFlashOnly).toBe(false);
   expect(capabilities("harmony").typingEffectsFlashOnly).toBe(true);
   expect(capabilities("macos").typingEffectsFlashOnly).toBe(false);

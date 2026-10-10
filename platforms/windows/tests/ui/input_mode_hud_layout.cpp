@@ -19,6 +19,9 @@ int main() {
   try {
     require(std::wstring(input_mode_hud_text(true)) == L"中");
     require(std::wstring(input_mode_hud_text(false)) == L"英");
+    // 读屏播报与 macOS 逐字相同。
+    require(std::wstring(input_mode_hud_announcement(true)) == L"中文输入");
+    require(std::wstring(input_mode_hud_announcement(false)) == L"英文输入");
 
     // 默认 24 号字：和工具栏一样高，logo、一个字和两侧留白。
     const auto metrics = input_mode_hud_metrics(24.0, true);

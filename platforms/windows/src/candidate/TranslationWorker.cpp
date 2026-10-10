@@ -516,11 +516,8 @@ void flatten_single_target(const std::string &query_bytes,
           flatten_translation_line(value.at("translation").get<std::string>());
   result.translations = values.dump();
 }
-// 日文行的罗马字由本线程上的 IFELanguage 读出（JapaneseReader.h）：每个工作线程一个，在这个线程上创建、使用，由 TranslationWorker::run 返回前关闭，COM 套间跟着线程。
-JapaneseReader &japanese_reader() {
-  thread_local JapaneseReader reader;
-  return reader;
-}
+// 日文行的罗马字由本线程上的 IFELanguage 读出（JapaneseReader.h）：TranslationWorker::run 在工作线程的栈上持有一个读音器，经这个指针交给本线程上的读音查询，run 返回时它随栈析构关闭，COM 套间跟着线程。不在工作线程上（指针为空）时不读罗马字。这里不放 thread_local 的读音器对象本身：它的析构要等线程退出回调，那时持着加载器锁，不能 CoUninitialize；MinGW 构建的 thread_local 析构在 Wine 下还会跳到空地址崩溃（windows-translation-worker 测试）。
+thread_local JapaneseReader *active_japanese_reader = nullptr;
 // 这一页候选的读音和整句逐词拆解，和 macOS 的 synchronizePronunciation、synchronizeGlossBreakdowns 一样：读音只在打开「显示读音」时问，英文释义行（英文候选则是它自己）整行发给共享读音表，日文释义行的第一个词交给本机的微软日语输入法读成罗马字；拆解只在离线英文释义打开时问，2 到 32 个汉字的候选发给共享拆解表。两张表都装在资源目录旁边，没装时共享层回答空列表，不是错误。都在本线程上读本机文件，不联网。
 CandidateReadings candidate_readings(const std::string &query_bytes,
                                      const std::string &translations,
@@ -585,7 +582,9 @@ CandidateReadings candidate_readings(const std::string &query_bytes,
       return found == answered.end() ? std::string{} : found->second;
     };
     const auto japanese = [&](const std::string &term) {
-      return cancelled() ? std::string{} : japanese_reader().romaji(term);
+      if (cancelled() || !active_japanese_reader)
+        return std::string{};
+      return active_japanese_reader->romaji(term);
     };
     for (const auto &[text, translation] : page) {
       const auto lines =
@@ -1140,10 +1139,12 @@ TranslationWorker::translate(const FocusLease &lease, const std::string &query_b
 }
 
 void TranslationWorker::run() noexcept {
-  // 线程函数返回前关掉日文读音用的 IFELanguage 和本线程的 COM：留给 thread_local 的析构，就会在持着加载器锁的线程退出回调里 CoUninitialize。
-  struct CloseJapaneseReader {
-    ~CloseJapaneseReader() { japanese_reader().close(); }
-  } close_japanese_reader;
+  // 日文读音用的 IFELanguage 和本线程的 COM 由这个栈上的读音器持有，run 返回时先清空指针，再由读音器的析构关闭它们，都在线程函数里，不在线程退出回调里（见 active_japanese_reader）。
+  JapaneseReader japanese_reader;
+  active_japanese_reader = &japanese_reader;
+  struct ClearActiveJapaneseReader {
+    ~ClearActiveJapaneseReader() { active_japanese_reader = nullptr; }
+  } clear_active_japanese_reader;
   for (;;) {
     Request request;
     {

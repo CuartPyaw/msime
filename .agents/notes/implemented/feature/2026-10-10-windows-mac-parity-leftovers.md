@@ -18,7 +18,7 @@ TIP 原本分不出双拼和五笔：`InputModeChanged` 帧给全拼、双拼、
 
 **日文释义行的罗马字来自微软日语输入法。** `src/candidate/JapaneseReader.cpp` 在翻译工作线程上用 IFELanguage（ProgID `MSIME.Japan`）的 `GetJMorphResult(FELANG_REQ_REV, …)` 分词，并取每个词的平假名读音。`src/candidate/JapaneseRomaji.h` 把读音按平文式转成罗马字，词与词之间一个空格。助词 は、へ、を 和 こんにちは、こんばんは 按发音读。有一个词读不出来，整行就不标，和 macOS 的 `MSIMEJapaneseRomaji` 一样。
 
-接口声明照抄 Windows SDK 的 `msime.h`，因为 MinGW 不带这个头文件。该头文件整个用 `#pragma pack(1)`，布局由 `static_assert` 钉住。COM 在工作线程上按单线程套间初始化，线程已经是多线程套间时沿用。`TranslationWorker` 用一个 `thread_local JapaneseReader`，所以创建、使用、关闭都在同一线程上；结果按词缓存，最多 1024 条。关闭由 `TranslationWorker::run` 返回前显式调 `JapaneseReader::close()` 完成，不交给 `thread_local` 的析构：那个析构在线程退出回调里持着加载器锁运行（MSVC 和 MinGW 都是），在那里 `CoUninitialize` 或让 COM 卸载日语输入法的 DLL，可能让 Server 退出时卡在等翻译线程上。
+接口声明照抄 Windows SDK 的 `msime.h`，因为 MinGW 不带这个头文件。该头文件整个用 `#pragma pack(1)`，布局由 `static_assert` 钉住。COM 在工作线程上按单线程套间初始化，线程已经是多线程套间时沿用。`TranslationWorker::run` 在工作线程的栈上持有一个 `JapaneseReader`，经一个 `thread_local` 指针交给本线程的读音查询，所以创建、使用、关闭都在同一线程上；结果按词缓存，最多 1024 条。关闭由读音器在 `run` 返回时的栈析构完成，不用 `thread_local` 对象：那种析构在线程退出回调里持着加载器锁运行（MSVC 和 MinGW 都是），在那里 `CoUninitialize` 或让 COM 卸载日语输入法的 DLL，可能让 Server 退出时卡在等翻译线程上。最初的写法是 `thread_local JapaneseReader` 加 `run` 返回前显式 `close()`，门禁在 Wine 下跑 `windows-translation-worker` 时它在线程退出时跳到空地址崩溃（MinGW 构建的 `thread_local` 析构），改成栈上实例后通过。
 
 系统里没有这个组件时不报错：纯假名的释义仍按假名直接读，含汉字的行不标读音。`CandidateGlossReadings.h` 的 `gloss_pronunciation_lines` 多一个可选的 `japanese` 读法；不传时行为和以前一样。共享设置页「显示读音」不再按宿主区分说明（`expression-page.tsx` 不再传 `candidatePronunciationRomaji={!windowsPlatform}`），原生设置窗口的同一行也改成「英文释义给音标，日文释义给罗马音」。
 

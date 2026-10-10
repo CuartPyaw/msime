@@ -22,9 +22,11 @@ inline std::wstring app_rule_ascii_lowercase(std::wstring_view value) {
   return result;
 }
 
-// 用户填的程序名：去掉首尾空白（含不换行空格和全角空格）；粘贴了完整路径时只取文件名；再转 ASCII 小写。
+// 用户填的程序名：去掉首尾空白；粘贴了完整路径时只取文件名；再转 ASCII 小写。空白取 Unicode White_Space 全集（与 Rust 的 str::trim 相同，含不换行空格、全角空格、U+2000–U+200A 这些从网页或聊天里粘贴常带的空格），偏好库按 `id.trim() != id` 拒绝的标识在这里都会被去掉，不会落到那句笼统的保存失败提示上。
 inline std::wstring normalize_app_input_mode_rule(std::wstring_view raw) {
-  constexpr std::wstring_view blanks = L" \t\r\n\v\f\u00A0\u3000";
+  constexpr std::wstring_view blanks = L" \t\n\v\f\r\x0085\u00A0\u1680"
+                                       L"\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200A"
+                                       L"\u2028\u2029\u202F\u205F\u3000";
   auto trim = [&](std::wstring_view value) {
     const auto first = value.find_first_not_of(blanks);
     if (first == std::wstring_view::npos)

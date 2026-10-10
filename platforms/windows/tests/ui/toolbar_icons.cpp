@@ -85,9 +85,7 @@ int main() {
       require(seen.insert(entry.codepoint).second);
     }
 
-    // Hide has no upstream counterpart and no glyph, so it stays text. An id
-    // outside the table - including the retired about id 9 - is a question
-    // mark rather than a blank.
+    // 隐藏按钮在来源里没有对应，也没有字形，所以保持文字。表外的 id（包括已经退役的「关于」id 9）画成问号，而不是空白。
     require(toolbar_icon(kToolbarHide, std::nullopt).codepoint == 0);
     require(toolbar_icon(9, std::nullopt).codepoint == 0);
     require(std::wcscmp(toolbar_icon(9, std::nullopt).fallback, L"?") == 0);

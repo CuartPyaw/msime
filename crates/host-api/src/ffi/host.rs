@@ -211,7 +211,7 @@ struct AccountAccessTokenRequest {
 
 /// 输入法进程取账号服务的访问令牌（[`msime_client_core::account::shared_access_token`]）：设置应用登录的账号优先，没有登录时用本机匿名账号。`request` 是 UTF-8 JSON `{"directory": "<绝对路径>", "rejected_token": "<可选，服务端刚以 401 拒绝的令牌>"}`，`directory` 是设置应用和输入法共用的账号目录，Windows 上是 `%LOCALAPPDATA%\<本版本的用户目录>\account`，与 [`msime_client_ensure_anonymous_account`] 的目录相同。成功时 value 是 `{"access_token", "user_id", "anonymous"}`，失败时 error 是账号错误码（例如没有任何会话时的 `account_unauthorized`）。响应里有凭据：不要写进日志，用完交给 `msime_client_string_free`。刷新令牌时会阻塞网络，调用方放在输入线程以外。
 /// # Safety
-/// `request` points to `length` readable UTF-8 bytes. Null is rejected.
+/// `request` 指向 `length` 个可读的 UTF-8 字节，空指针被拒绝。
 #[no_mangle]
 pub unsafe extern "C" fn msime_client_account_access_token(
     request: *const u8,
@@ -221,7 +221,7 @@ pub unsafe extern "C" fn msime_client_account_access_token(
         if request.is_null() || length == 0 || length > 16_384 {
             return Err("account_invalid".into());
         }
-        // SAFETY: guaranteed by the caller contract.
+        // SAFETY: 由调用方契约保证。
         let bytes = unsafe { std::slice::from_raw_parts(request, length) };
         let request: AccountAccessTokenRequest =
             serde_json::from_slice(bytes).map_err(|_| "account_invalid")?;
@@ -524,8 +524,8 @@ pub unsafe extern "C" fn msime_client_restore_default_preferences(
 
 /// 「导出设置」：读出偏好目录里的当前偏好，返回设置文件的全文（字符串，见 `msime_client_core::settings_document`）。语音、AI 辅助和翻译服务的配置与密钥、诊断日志和使用统计开关不写进文件。宿主负责让用户选位置并写盘。
 /// # Safety
-/// `directory` must point to `length` readable bytes. Null is rejected.
-/// The returned response must be released with `msime_client_string_free`.
+/// `directory` 必须指向 `length` 个可读字节，空指针被拒绝。
+/// 返回的响应必须交给 `msime_client_string_free` 释放。
 #[no_mangle]
 pub unsafe extern "C" fn msime_client_export_settings(
     directory: *const u8,
@@ -535,7 +535,7 @@ pub unsafe extern "C" fn msime_client_export_settings(
         if directory.is_null() || length > 16384 {
             return Err("invalid preferences directory buffer".into());
         }
-        // SAFETY: guaranteed by the documented caller contract.
+        // SAFETY: 由上面写明的调用方契约保证。
         let bytes = unsafe { std::slice::from_raw_parts(directory, length) };
         let directory = super::parse_absolute_path(
             bytes,
@@ -553,8 +553,8 @@ pub unsafe extern "C" fn msime_client_export_settings(
 
 /// 「导入设置」：把用户选的设置文件换算成偏好（本机的服务配置与密钥、诊断日志和使用统计开关保留，按本目录所属的版本收窄输入方案），再按 `expected_revision` 比较并交换写回，返回新的快照。失败时的错误是 `settings_document_invalid`（不是设置文件）、`settings_document_macos`（macOS 原生设置窗口导出的文件）、`settings_document_unsupported`（更新版本的文件或读不懂的设置）、`settings_conflict`（设置已在别处更新）之一，或者存储错误的说明；失败时什么也不写。
 /// # Safety
-/// `directory` must point to `directory_length` readable bytes and `document` to `document_length` readable bytes. Null is rejected.
-/// The returned response must be released with `msime_client_string_free`.
+/// `directory` 必须指向 `directory_length` 个可读字节，`document` 必须指向 `document_length` 个可读字节，空指针被拒绝。
+/// 返回的响应必须交给 `msime_client_string_free` 释放。
 #[no_mangle]
 pub unsafe extern "C" fn msime_client_import_settings(
     directory: *const u8,
@@ -575,14 +575,14 @@ pub unsafe extern "C" fn msime_client_import_settings(
                     .into(),
             );
         }
-        // SAFETY: guaranteed by the documented caller contract.
+        // SAFETY: 由上面写明的调用方契约保证。
         let directory_bytes = unsafe { std::slice::from_raw_parts(directory, directory_length) };
         let directory = super::parse_absolute_path(
             directory_bytes,
             "invalid preferences directory encoding",
             "preferences directory must be absolute",
         )?;
-        // SAFETY: guaranteed by the documented caller contract.
+        // SAFETY: 由上面写明的调用方契约保证。
         let document = unsafe { std::slice::from_raw_parts(document, document_length) };
         let store = PreferencesStore::new(directory);
         let current = store.load().map_err(|e| e.to_string())?;

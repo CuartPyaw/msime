@@ -1,4 +1,5 @@
 #include "FocusedSession.h"
+#include "FloatingToolbarVisibilityPolicy.h"
 #include "InputSchemeTraits.h"
 #include "KeySoundPolicy.h"
 #include "TypingEffectPolicy.h"
@@ -575,6 +576,8 @@ std::optional<PendingReply> FocusedSession::configured_key(
     return std::nullopt;
   std::optional<PendingReply> result;
   gate_.with_active(lease, [&] {
+    // 不论输入法收不收这个键（英文模式也算），都是用户在打字：空闲隐藏的工具栏据此回来。
+    ServerKeyActivity::instance().note();
     result = composer_->configured_key(session_, packet, lease.epoch, style,
                                        bindings, std::move(local_text),
                                        word_binding);
@@ -607,6 +610,7 @@ bool FocusedSession::passthrough_key(uint64_t token, uint32_t key_class) {
     return false;
   bool sounded = false;
   gate_.with_active(*lease_, [&] {
+    ServerKeyActivity::instance().note();
     // 英文模式不出声，和 Server 处理的键一样。交给应用的键没有自动重复：TIP 已经把它们滤掉了。
     if (!session_.input_enabled())
       return;

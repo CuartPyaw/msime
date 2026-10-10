@@ -5,11 +5,11 @@
 namespace msime::windows {
 // 日文释义行的罗马字读音，在翻译工作线程上用。分词和每个词的假名读音来自微软日语输入法的 IFELanguage（ProgID MSIME.Japan，Windows 自带的日语输入法注册它），由 JapaneseRomaji.h 转成罗马字。系统里没有这个组件（没装日语输入法）时不报错：只由假名组成的释义照样按假名读，含汉字的不标读音，和 macOS 读不全时一样。
 //
-// 第一次用时在本线程上初始化 COM（单线程套间；线程已经是多线程套间时沿用）并打开 IFELanguage，close() 关闭并反初始化，所以创建、使用和关闭都必须在同一个线程上，TranslationWorker 用一个 thread_local 实例保证这一点。
+// 第一次用时在本线程上初始化 COM（单线程套间；线程已经是多线程套间时沿用）并打开 IFELanguage，close() 关闭并反初始化，所以创建、使用和关闭都必须在同一个线程上，TranslationWorker::run 在工作线程的栈上持有一个实例保证这一点。
 class JapaneseReader {
 public:
   JapaneseReader() = default;
-  // 兜底调用 close()。不要指望它：thread_local 的析构在线程退出回调里持着加载器锁运行（MSVC 和 MinGW 都是），那里不能 CoUninitialize，也不能让 COM 卸载日语输入法的 DLL，所以线程函数返回前要自己调 close()。
+  // 调用 close()。实例要放在线程函数的栈上，让析构在线程函数返回前运行；不要做成 thread_local：那样析构在线程退出回调里持着加载器锁运行（MSVC 和 MinGW 都是），那里不能 CoUninitialize，也不能让 COM 卸载日语输入法的 DLL。
   ~JapaneseReader();
   JapaneseReader(const JapaneseReader &) = delete;
   JapaneseReader &operator=(const JapaneseReader &) = delete;

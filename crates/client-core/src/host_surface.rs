@@ -643,7 +643,7 @@ impl HostCapabilities {
             key_sound: platform.is_desktop() || platform == HostPlatform::Android,
             plugin_triggers: platform.is_desktop(),
             music: platform.is_desktop(),
-            // macOS draws the sparks, the card flash and the combo badge (TypingEffectPanel.mm), Windows the same in a caret overlay beside its candidate window (TypingEffectOverlay.cpp, the card flash and the Power Mode shake in CandidateWindow.cpp), both Linux hosts the combo count in the candidate aux line (KeySound.h), and HarmonyOS the flash and the combo badge on its KeyboardView. Linux draws no style, only the count; the settings page hides the style controls there itself (`showTypingEffectStyles`). HarmonyOS still narrows this per form factor in its own settings projection; Android and iOS wire none.
+            // macOS 画火花、卡片闪光和连击徽标（TypingEffectPanel.mm）；Windows 画同样的东西，火花在候选窗旁的光标浮层里（TypingEffectOverlay.cpp），卡片闪光和 Power Mode 的抖动在 CandidateWindow.cpp；两个 Linux 宿主在候选栏的辅助行里显示连击数（KeySound.h）；HarmonyOS 在 KeyboardView 上画闪光和连击徽标。Linux 不画任何样式，只显示计数，设置页自己在那里藏起样式控件（`showTypingEffectStyles`）。HarmonyOS 仍在自己的设置投影里按设备形态收窄；Android 和 iOS 都没有接入。
             typing_effects: platform.is_desktop() || platform == HostPlatform::Harmony,
             os_version: None,
             arch: None,

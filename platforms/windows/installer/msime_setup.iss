@@ -1356,6 +1356,17 @@ begin
   end;
 end;
 
+{ 选了删除数据时，一并删掉不在数据目录里的本用户数据：%LOCALAPPDATA%\<本版本的用户目录>\account 存着设置应用的登录会话（含刷新令牌）和本机匿名账号的密钥，%LOCALAPPDATA%\<Tauri 标识> 是设置应用自己的目录（旧版本的登录会话、词库快照暂存和 WebView2 数据）。用户目录里的其余内容（使用统计的安装 id 与事件队列）不动，用户目录空了才删。与数据目录一样只在本次卸载的 Windows 用户下。 }
+procedure DeleteUserProfileData;
+var
+  UserDataDir: String;
+begin
+  UserDataDir := ExpandConstant('{localappdata}\{#MyEditionUserDataDir}');
+  TryDeleteTree(UserDataDir + '\account');
+  RemoveDir(UserDataDir);
+  TryDeleteTree(ExpandConstant('{localappdata}\{#MyEditionTauriIdentifier}'));
+end;
+
 { 卸载程序的命令行里有没有 Name 这个开关（不分大小写）。 }
 function UninstallSwitchGiven(const Name: String): Boolean;
 var
@@ -1367,7 +1378,7 @@ begin
       Result := True;
 end;
 
-{ 卸载默认保留词库、学习记录和设置，重新安装后接着用，与 macOS 设置里卸载的默认一致（packages/ui/src/settings/uninstall-section.tsx）。/REMOVEDATA 连数据目录一起删，/KEEPDATA 保留，两个都给时保留。静默卸载（winget、Scoop、Chocolatey 都用 /VERYSILENT）不带开关时保留，不能停在看不见的对话框上；交互卸载不带开关时问一次，默认按钮是「否」。数据目录不归本安装器管（OwnsDataDir 为假）时本来就不删，也就不问。服务密钥在数据目录的 preferences.json 里，随数据目录一起留下或删除。 }
+{ 卸载默认保留词库、学习记录和设置，重新安装后接着用，与 macOS 设置里卸载的默认一致（packages/ui/src/settings/uninstall-section.tsx）。/REMOVEDATA 连数据目录一起删，/KEEPDATA 保留，两个都给时保留。静默卸载（winget、Scoop、Chocolatey 都用 /VERYSILENT）不带开关时保留，不能停在看不见的对话框上；交互卸载不带开关时问一次，默认按钮是「否」。数据目录不归本安装器管（OwnsDataDir 为假）时本来就不删，也就不问。服务密钥在数据目录的 preferences.json 里，随数据目录一起留下或删除；本机登录的账号不在数据目录里，选了删除时由 DeleteUserProfileData 一并删掉。 }
 procedure DecideUserDataRemoval;
 var
   DataDir: String;
@@ -1384,7 +1395,7 @@ begin
       '是否同时删除词库、学习记录和设置？' + #13#10#13#10 +
       '选择「否」保留数据目录，重新安装后可以继续使用：' + #13#10 +
       '   ' + DataDir + #13#10#13#10 +
-      '选择「是」将永久删除其中自己加的词、学习记录、设置、皮肤、剪贴板历史，以及语音、翻译和 AI 服务的密钥。',
+      '选择「是」将永久删除其中自己加的词、学习记录、设置、皮肤、剪贴板历史，以及语音、翻译和 AI 服务的密钥，并退出本机登录的水杉账号。',
       mbConfirmation, MB_YESNO or MB_DEFBUTTON2, IDNO) = IDYES;
   if RemoveUserDataOnUninstall then
     Log('Removing the data directory ' + DataDir + ' on uninstall.')
@@ -1420,5 +1431,7 @@ begin
     { 用 InitializeUninstall 缓存的路径：此时注册表里的 DataDir 已被删除。只有用户选了删除（DecideUserDataRemoval）才删。}
     if RemoveUserDataOnUninstall and OwnsDataDir(ResolvePreviousDataDir) then
       DeleteDataDir(ResolvePreviousDataDir, '');
+    if RemoveUserDataOnUninstall then
+      DeleteUserProfileData;
   end;
 end;

@@ -2,6 +2,8 @@
 #include "ServerResources.h"
 #include "ToolbarCoordinates.h"
 #include "WindowShadow.h"
+#include <oleauto.h>
+#include <uiautomation.h>
 #include <cmath>
 #include <cwchar>
 #include <stdexcept>
@@ -22,6 +24,36 @@ struct DpiScope {
   ~DpiScope() { SetThreadDpiAwarenessContext(previous); }
 };
 long scaled(double value, double unit) { return static_cast<long>(std::lround(value * unit)); }
+
+// UiaRaiseNotificationEvent 的两个枚举值（NotificationKind_ActionCompleted、NotificationProcessing_MostRecent）。按数值写在这里，不依赖 SDK 头文件按 NTDDI_VERSION 是否声明它们。
+constexpr int kNotificationKindActionCompleted = 2;
+constexpr int kNotificationProcessingMostRecent = 3;
+
+// 把这次切换念给读屏软件，对应 macOS InputModeHUDPanel 的 NSAccessibilityAnnouncementRequestedNotification。UiaRaiseNotificationEvent 从 Windows 10 1709 起才有，而 Server 的目标版本是 1703，所以运行时从已加载的 uiautomationcore.dll 里取，取不到就不播报；直接导入会让 1703 上的 Server 整个起不来。没有读屏软件在听时什么也不做。提供者用系统给这个窗口的宿主提供者，徽标没有自己的元素树。
+void announce_input_mode(HWND window, bool chinese) noexcept {
+  if (!UiaClientsAreListening())
+    return;
+  using RaiseNotification = HRESULT(WINAPI *)(IRawElementProviderSimple *, int, int, BSTR, BSTR);
+  static const RaiseNotification raise = []() -> RaiseNotification {
+    const HMODULE core = GetModuleHandleW(L"uiautomationcore.dll");
+    // 经 void* 转换：GetProcAddress 返回通用的 FARPROC，直接转成真实签名会被 -Wcast-function-type 拒绝。
+    return core ? reinterpret_cast<RaiseNotification>(
+                      reinterpret_cast<void *>(GetProcAddress(core, "UiaRaiseNotificationEvent")))
+                : nullptr;
+  }();
+  if (!raise)
+    return;
+  IRawElementProviderSimple *provider = nullptr;
+  if (FAILED(UiaHostProviderFromHwnd(window, &provider)) || !provider)
+    return;
+  BSTR text = SysAllocString(input_mode_hud_announcement(chinese));
+  BSTR activity = SysAllocString(L"MSIME.InputModeHud");
+  if (text && activity)
+    (void)raise(provider, kNotificationKindActionCompleted, kNotificationProcessingMostRecent, text, activity);
+  SysFreeString(text);
+  SysFreeString(activity);
+  provider->Release();
+}
 } // namespace
 
 InputModeHudWindow::InputModeHudWindow() {
@@ -166,6 +198,7 @@ void InputModeHudWindow::show(bool chinese, std::optional<HudRect> caret, HWND f
     InvalidateRect(window_, nullptr, FALSE);
     if (!SetTimer(window_, kHideTimer, input_mode_hud_visible_ms, nullptr))
       throw std::runtime_error("Input mode HUD timer unavailable");
+    announce_input_mode(window_, chinese);
   } catch (...) {
     fail(failure_at_stage("show", static_cast<uint32_t>(GetLastError())));
   }

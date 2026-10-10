@@ -86,6 +86,28 @@ if (-not $post.Contains('if RemoveUserDataOnUninstall and OwnsDataDir(ResolvePre
     throw 'usPostUninstall does not remove the data directory captured at uninstall start, or removes it without the user choosing to'
 }
 
+# 登录会话和匿名账号的密钥在 %LOCALAPPDATA%\<用户目录>\account，设置应用自己的目录在 %LOCALAPPDATA%\<Tauri 标识>，都不在数据目录里。选了删除数据时它们也要删，否则「永久删除」之后刷新令牌还留在磁盘上；没选时一个都不碰。
+if (-not ($post -replace '\s+', ' ').Contains('if RemoveUserDataOnUninstall then DeleteUserProfileData;')) {
+    throw 'Removing the data on uninstall leaves the account session and the settings app directory behind'
+}
+$profileData = Get-Block 'procedure DeleteUserProfileData' 'function UninstallSwitchGiven'
+foreach ($required in @(
+        "UserDataDir := ExpandConstant('{localappdata}\{#MyEditionUserDataDir}');",
+        "TryDeleteTree(UserDataDir + '\account');",
+        'RemoveDir(UserDataDir);',
+        "TryDeleteTree(ExpandConstant('{localappdata}\{#MyEditionTauriIdentifier}'));")) {
+    if (-not $profileData.Contains($required)) {
+        throw "DeleteUserProfileData does not remove the per-user account and settings app data: missing '$required'"
+    }
+}
+if ($profileData.Contains("TryDeleteTree(UserDataDir);")) {
+    throw 'DeleteUserProfileData deletes the whole user directory, including the usage statistics queue it does not own'
+}
+$editions = Get-Content -LiteralPath (Join-Path $PSScriptRoot '../editions.iss') -Raw -Encoding utf8
+if ($editions -notmatch '#define MyEditionUserDataDir "[^"]+"' -or $editions -notmatch '#define MyEditionTauriIdentifier "[^"]+"') {
+    throw 'editions.iss does not define the per-user directories the uninstaller removes'
+}
+
 # ---- 卸载默认保留数据目录 ----
 # 只有 /REMOVEDATA 或交互卸载里用户点了「是」才删；/KEEPDATA 和静默卸载（winget、Scoop、Chocolatey）保留，交互卸载的默认按钮是「否」。决定要在 usUninstall 一开始做，在删除任何东西之前。
 if (-not $uninstall.Contains('DecideUserDataRemoval;')) {

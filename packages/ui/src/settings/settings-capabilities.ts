@@ -79,7 +79,7 @@ export function settingsCapabilities({
   const showTypingEffectStyles = showTypingEffects && !linux;
   // An effect pack only sets a drawn style's parameters, so it is offered wherever a style is.
   const showTypingEffectPacks = showTypingEffectStyles;
-  // HarmonyOS has no particle overlay: every style is a flash of the candidate card, brighter for sparks and Power Mode, so the style descriptions must not promise sparks there. Windows draws the sparks at the caret as macOS does.
+  // HarmonyOS 没有粒子浮层：每种样式都是候选卡片闪一下，火花和 Power Mode 闪得更亮，所以那里的样式说明不能许诺火花。Windows 和 macOS 一样在光标处画火花。
   const typingEffectsFlashOnly = showTypingEffectStyles && harmony;
   const showWordbookPacks = host ? host.wordbook_packs : false;
   const showSymbolSetPacks = host ? host.symbol_set_packs : false;

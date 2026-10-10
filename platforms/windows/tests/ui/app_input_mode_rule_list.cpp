@@ -19,6 +19,12 @@ int main() {
         "a pasted path keeps only the file name");
   check(normalize_app_input_mode_rule(L"\u3000微信.exe\u00A0") == L"微信.exe", "full-width and no-break spaces are trimmed");
   check(normalize_app_input_mode_rule(L"Ä.EXE") == L"Ä.exe", "non-ASCII letters keep their case");
+  // 偏好库用 Rust 的 str::trim 判首尾空白，这里去掉的必须是同一个 White_Space 集合，否则名字过了本地校验仍会在保存时被拒。
+  check(normalize_app_input_mode_rule(L"\u2002code.exe\u2009") == L"code.exe", "en space and thin space are trimmed");
+  check(normalize_app_input_mode_rule(L"\u202Fcode.exe\u205F\u1680") == L"code.exe",
+        "narrow no-break, math and ogham spaces are trimmed");
+  check(normalize_app_input_mode_rule(L"\u2028code.exe\u2029\x0085") == L"code.exe", "line and paragraph separators are trimmed");
+  check(normalize_app_input_mode_rule(L"C:\\Tools\\\u2003Code.exe") == L"code.exe", "the file name after a path is trimmed too");
 
   const std::vector<std::wstring> none;
   check(validate_app_input_mode_rule(L"", none) == AppInputModeRuleError::Empty, "empty");

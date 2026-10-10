@@ -10,6 +10,9 @@ namespace msime::windows {
 // 「英」是英文模式，「中」是中文模式，与 macOS 的 MSIMEInputModeHUDText 相同。
 inline const wchar_t *input_mode_hud_text(bool chinese) { return chinese ? L"中" : L"英"; }
 
+// 徽标出现时给读屏软件的播报，与 macOS 的 NSAccessibilityAnnouncementRequestedNotification 念的相同。
+inline const wchar_t *input_mode_hud_announcement(bool chinese) { return chinese ? L"中文输入" : L"英文输入"; }
+
 // 完全显示的时长，与 macOS 的 kVisibleDuration 相同。
 inline constexpr unsigned input_mode_hud_visible_ms = 600;
 

@@ -26,6 +26,7 @@ Status: implemented
 - **第二种语言仍用 `" / "` 拼在一行** — 不用改会话里的格式，Ctrl+Enter 也不用改。但 macOS 已经按行显示，后续的按列上屏（Alt/Ctrl+数字、Tab）需要知道哪一段是哪种语言；`" / "` 也会出现在释义原文里，无法可靠地拆回来。
 - **读音单开一个工作线程，按候选窗的当前页去问** — 和 macOS 的 `_pronunciationQueue` 形状最像，翻译关掉时拆解也能单独请求。但 Windows 的翻译查询本来就带着目标语言、资源目录和读音开关，翻译线程拿到释义的同一时刻正好能算读音，单开线程要再复制一套去抖、取代和缓存失效；macOS 的拆解也只在离线英文释义打开时请求，这条前提相同。
 - **日文罗马字用 IFELanguage（MS-IME 的 GetPhonetic）** — Windows 上最接近 macOS 系统分词器的接口。但它依赖日文 IME 是否安装、在 Server 进程里要起 COM 并处理失败，读出的是假名还要再转罗马字；这次只标英文音标，日文行不标，半截读音不显示的规则与 macOS 相同。
+- **用操作系统的本机翻译模型补齐离线词典没覆盖的候选释义** — macOS 用 Apple 的 Translation 框架（`BackendOnDeviceGloss.swift`），只用用户已下载的语言对，设置页还提示哪些语言可下载。Windows 没有可与之相比的公开本机机器翻译接口，没有系统服务可接，所以不移植：共享设置页在 Windows 上不提供 `SettingsClient.onDeviceTranslation`，那条下载提示也就不出现。离线释义靠随包的单字与词释义表，在线释义靠翻译服务和「水杉账号」。
 - **候选窗自己实现 UIA 提供者给每行加读屏名称** — macOS 每个候选都有 accessibilityLabel。Windows 的读屏已经能通过 TSF 的 `ITfCandidateListUIElement` 读到候选，缺的只是翻页箭头和页码；一套 `IRawElementProviderFragment` 树在没有 Windows 真机的情况下验证不了，这次不做；后来在 [自绘窗口的 UI Automation 读屏](2026-10-10-windows-server-window-ui-automation.md) 里做了。
 
 ## Consequences

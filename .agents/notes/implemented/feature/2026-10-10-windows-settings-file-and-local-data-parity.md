@@ -26,7 +26,7 @@ macOS 与 Windows 在「本机数据」这一组功能上不一致，审计（de
 
 ### 卸载默认保留数据
 
-- `msime_setup.iss` 的 `DecideUserDataRemoval` 在 `usUninstall` 一开始决定 `RemoveUserDataOnUninstall`：数据目录不归本安装器管，或带 `/KEEPDATA`，保留；带 `/REMOVEDATA` 删除；静默卸载不带开关时保留；交互卸载问一次，默认按钮是「否」。`usPostUninstall` 只在 `RemoveUserDataOnUninstall` 为真且 `OwnsDataDir` 时调用 `DeleteDataDir`，所有权与嵌套目录的规则不变。
+- `msime_setup.iss` 的 `DecideUserDataRemoval` 在 `usUninstall` 一开始决定 `RemoveUserDataOnUninstall`：数据目录不归本安装器管，或带 `/KEEPDATA`，保留；带 `/REMOVEDATA` 删除；静默卸载不带开关时保留；交互卸载问一次，默认按钮是「否」。`usPostUninstall` 只在 `RemoveUserDataOnUninstall` 为真且 `OwnsDataDir` 时调用 `DeleteDataDir`，所有权与嵌套目录的规则不变。选了删除时还调 `DeleteUserProfileData`，删掉不在数据目录里的本用户数据：`%LOCALAPPDATA%\<用户目录>\account`（设置应用的登录会话含刷新令牌、本机匿名账号的密钥）和 `%LOCALAPPDATA%\<Tauri 标识>`（旧版本的登录会话、词库快照暂存、WebView2 数据）；用户目录里的使用统计不动，目录空了才删。两个目录名由 `edition_windows.py` 生成进 `editions.iss`（`MyEditionUserDataDir`、`MyEditionTauriIdentifier`）。对话框的「是」因此写明会退出本机登录的账号。
 - 包管理器全都静默卸载，所以都保留数据；它们的说明（Scoop notes、nuspec、winget InstallationNotes、`packaging/README.md`）改成保留并写明 `/REMOVEDATA`。`install-smoke.ps1` 和 `coexistence-smoke.ps1` 卸载时带 `/REMOVEDATA`，继续核对删除路径和「只删自己的目录」。
 
 ### 关于页、第三方许可、语音模型目录
@@ -58,7 +58,7 @@ macOS 与 Windows 在「本机数据」这一组功能上不一致，审计（de
 - `cargo test -p msime-client-core settings_document`：导出不含任何凭据和本机部分、往返保留共享设置与本机部分、手写进文件的本机部分被忽略、非设置文件与 macOS 文件分开报错、新版本或坏文档整份拒绝、本版本不提供的方案保留本机方案、导入的模糊音规则不被首次打开的种子覆盖。
 - `cargo test -p msime-host-api exported_settings_import`：冲突时不写、非设置文件报错、导入后本机密钥保留。
 - `platforms/windows/tests/ui/settings_document_file.cpp`（CTest `windows-settings-document-file`）：错误码说明、许可文件位置、写入替换与读取上限。
-- `platforms/windows/installer/tests/lifecycle.ps1`：`usUninstall` 先决定是否删数据，`DecideUserDataRemoval` 默认保留、静默保留、`/REMOVEDATA` 删除、对话框默认「否」，`usPostUninstall` 只在选了删除时删。
+- `platforms/windows/installer/tests/lifecycle.ps1`：`usUninstall` 先决定是否删数据，`DecideUserDataRemoval` 默认保留、静默保留、`/REMOVEDATA` 删除、对话框默认「否」，`usPostUninstall` 只在选了删除时删，且连同本用户的 account 目录和 Tauri 目录一起删、不整删用户目录。
 - `apps/desktop/tests/settings/about-third-party-licenses.test.tsx`：Windows 关于页有「第三方组件许可」，Linux 没有；`voice-model-picker.test.tsx` 覆盖选择目录写回路径。
 - `python3 scripts/test-windows-package-managers.py`。
 

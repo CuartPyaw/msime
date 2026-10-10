@@ -40,7 +40,7 @@ bool installed_font(const std::wstring &family) {
   return found;
 }
 constexpr wchar_t class_name[] = L"MSIME.Client.Preview.Candidates" MSIME_EDITION_NAME_SUFFIX;
-// The typing flash and the Power Mode shake repaint at about 30 frames a second while they last, then the timer is killed; the combo timer fires once, when the count it shows goes stale.
+// 打字闪光和 Power Mode 抖动持续期间约每秒重画 30 帧，结束后停掉定时器；连击定时器只在显示的计数过期时触发一次。
 constexpr UINT_PTR typing_flash_timer = 0x4501;
 constexpr UINT_PTR typing_combo_timer = 0x4502;
 constexpr UINT typing_flash_frame_millis = 30;

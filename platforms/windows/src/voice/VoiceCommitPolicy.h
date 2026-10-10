@@ -25,7 +25,13 @@ constexpr bool voice_target_in_foreground(uint32_t target, uint32_t foreground,
   return start_window_foreground || foreground == target;
 }
 
-// TSF 路线没送达时是否退回 SendInput。focus_rejected 表示焦点租约已经失效（焦点去了别的输入框或别的窗口），这时文字一律丢弃；只有事务锁忙或管道写失败、而前台仍是录音时那个进程时才退回，避免整段识别结果打进无关窗口。
+// 投递那一刻目标是否仍然有效：前台仍是录音目标（voice_target_in_foreground），而且开始录音时的焦点租约仍是当前焦点。前台核对只看进程和窗口，同一窗口里点了另一个输入框它看不出来；控制循环约 50 ms 才验一次租约，识别或润色恰好在这之间结束时，没有这一条文字会落进新的输入框。对应 macOS 投递前 MSIMEVoiceCommitRoute::current() 核对输入上下文没变。
+constexpr bool voice_delivery_target_current(bool target_in_foreground,
+                                             bool lease_current) {
+  return target_in_foreground && lease_current;
+}
+
+// TSF 路线没送达时是否退回 SendInput。focus_rejected 表示 TSF 路线报告焦点租约已经失效（焦点去了别的输入框或别的窗口），这时文字一律丢弃；只有事务锁忙或管道写失败、而目标仍然有效（voice_delivery_target_current，含租约仍是当前焦点）时才退回，避免整段识别结果打进无关窗口或同一窗口的另一个输入框。
 constexpr bool voice_tsf_refusal_falls_back(bool focus_rejected,
                                             bool target_in_foreground) {
   return !focus_rejected && target_in_foreground;

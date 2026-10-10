@@ -215,6 +215,40 @@
 
 **设置页有几处措辞与控件刻意与来源不同**：「始终使用英文标点」与这边的「中文标点」绑同一个 `chinese_punctuation` 但极性相反，只改名不反转控件即是错标；剪贴板管理来源写「关闭后立即清空」，这边写「保存关闭设置后清空」，因为这边的清空发生在偏好保存时；候选窗字体一项各宿主都只显示「主字体」（Windows 另有「候选窗英文字体」），不再提供来源的「中文补充字体」排序列表：补充字体由字体预设写入；Windows 渲染器不读 `candidate_font_family`，所以在 Windows 上选主字体时同时把它排到补充字体最前（`candidateMainFontPatch`）。
 
+## 对齐 macOS 宿主（2026-10-10）
+
+上面各节以来源 MSIME-Windows 为基准。这一批换了基准：拿本仓 macOS 宿主逐项对照 Windows，按输入按键、候选窗、工具栏与菜单、语音、面板、账号与云、偏好与能力位、数据与运维、文档与更新日志九个方面列出差距，去重后约一百项，再由一轮复核补上漏掉的日语空格「変換」、输入法未启用提示和本机翻译释义三项。每一项的决定与理由在 `.agents/notes/implemented/feature/2026-10-10-windows-*.md`，这里只记结论。
+
+**Windows 现在与 macOS 一致的部分。**
+
+- 中英文切换：切换后光标旁的「中」「英」徽标（`input_mode_hud`，同时向读屏软件播报「中文输入」「英文输入」）；应用例外 `app_input_mode_rules` 升为共享偏好，Windows 按进程基名、macOS 按 bundle id，同一张表；Alt+Shift+H 切换全半角。
+- 组字：双拼键位提示浮窗（`shuangpin_keymap_hint` 升为共享偏好）、双拼预编辑设置项、成对标点补全覆盖「」和全角｛｝及符号候选、横排候选时 ←/→ 移动高亮、日语方案的空格「変換」与回车上屏停在的候选。
+- 候选窗：‹ › 箭头不再受滚轮开关牵连，滚轮开关即时生效；`show_app_logo`；第二种释义语言每种一行；横排预留释义高度；英文 IPA 与日文罗马字读音（罗马字来自微软日语输入法的 IFELanguage）；整句逐词拆解；悬停提示；Alt/Ctrl+数字与 Tab 按列上屏释义；「水杉账号」候选释义。
+- 悬浮工具栏与托盘：切换输入方案、手写、语音三个可选按钮；设置按钮右键的实用菜单（含隐藏工具栏）；语言按钮按方案画「双」「五」；悬停提示；logo 关掉时换成握把；10 秒无键盘输入自动隐藏（钩子看不到的注入按键和发往提权窗口的按键，只要经过 Server 也会唤醒）；拖动位置跨重启保留；共享应用不在时表情退回系统字符面板（Win+.）、屏幕键盘退回 `osk.exe`。托盘补上繁体输出、英文候选模式、带当前编辑器的云剪贴板、主题子菜单、标点锁定时禁用中文标点，并能用键盘操作。任务栏语言栏图标按方案画一个字。候选窗、工具栏和托盘卡片有 UI Automation 元素树，读屏能读能执行。
+- 打字特效：光标处的火花浮层、Power Mode 抖动、特效包的多色与粒子数、候选窗不在时的特效；交给应用的键也出按键音、计入连击。
+- 语音：「系统识别」（SAPI 进程内听写，免 Key、免下载、音频不出本机）；润色超时 30 秒；录音中失焦即取消，投递前核对前台目标并重新验焦点租约；`ctrl_v` 写剪贴板时带不进历史、不上云的标记（原生热键与共享语音面板两条路都带）；计入打字统计；无语音、麦克风权限、设备不可用各有提示；识别中点 ✓ 收起浮层；提示音退回系统声音；静音跟随默认输出设备。
+- 面板与数据：剪贴板历史跳过密码管理器标记过的内容；表情、手写、剪贴板面板上屏计入打字统计；host-api 自愈失败写进 `server.log`；设置文件导出导入；卸载默认保留数据（选了删除时连同本机登录的账号会话一起删）；关于页按版本显示产品名与第三方许可；本地语音模型目录可选。
+- 账号与云：设置应用的账号会话与输入法共用 `%LOCALAPPDATA%\<用户目录>\account`；云词库的全部功能（含完整备份、恢复与「应用到本机」）、社区词包与回复模板、`input.*` 设置同步。
+
+**刻意与 macOS 不同的地方。**
+
+- Shift+空格不切中英文：Windows 上它历来是全半角键，Excel 用它选整行、浏览器用它向上翻页，跟着默认开的 `switch_language_shift` 一起开会误伤；留给产品决定。
+- 徽标到时直接隐藏，不做 0.18 秒淡出；藏文在工具栏和语言栏画「藏」而不是「ཀ」。
+- 英文候选模式在 TIP 英文状态下不可用；托盘切方案要先翻到「输入方案」页，比 macOS 多点一次。
+- 回复模板只能收藏、评分、举报、发布，不能用于输入：桌面没有「高情商回复」键盘。
+- 外部语音识别服务接入点（`voice_provider_socket`）不移植：Windows Server 自己录音、识别、持有凭据，没有 IBus/Fcitx 那样的需要。
+- 本机翻译模型补齐候选释义不移植：macOS 用 Apple 的 Translation 框架，Windows 没有可比的公开本机机器翻译接口，共享设置页在 Windows 上不提供 `SettingsClient.onDeviceTranslation`，下载语言的提示也不出现。
+- 输入法没有加入当前用户的键盘列表时，提示由 WinUI 设置窗口的横幅给出（`EnumEnabledLayoutOrTip` 检测，「去添加」调 `InstallLayoutOrTip`），共享设置页不重复做 macOS 的输入源启动提示。
+
+**还没做的。**
+
+- 候选右键菜单的「取消置顶」：Engine 的置顶不能撤回，Windows 的数字键又按 Engine 的顺序选词，照搬 macOS 的宿主重排会让画出来的第 1 位和按 1 选中的不是同一个词；要先定共享机制（[遗留项](../.agents/notes/implemented/feature/2026-10-10-windows-mac-parity-leftovers.md)）。
+- 应用内搬迁数据目录：状态根是 HKLM 的 `DataDir`，改它要一个提权的辅助进程，还要能在安装器之外安全停掉 TSF 与 Server。
+- 设置应用的账号页不显示本机匿名账号，登录后也不弃用它。
+- TIP 进程内 host-api 的自愈失败仍写 stderr，不进 `server.log`。
+- 按方案注册多个 TSF 语言配置文件（让系统输入切换里每个方案一项）。
+- 真机验证：这一批在 macOS 上只做过 MinGW 语法检查和主机上的纯策略用例（`scripts/test-windows-native-run.py`）；徽标与特效的观感、读屏实际播报、Alt+数字是否到达按键接收器、SAPI 识别器的可用性、WinUI 设置窗口的新控件（只能用 MSBuild 编译）都还要在 Windows 上确认。
+
 ## Windows 进程与协议边界
 
 **两个目标，边界写死在构建里。** TSF tip 是进程内 DLL（`platforms/windows/tsf/`，`OUTPUT_NAME MetasequoiaImeTsf`，经 `IME/MetasequoiaIME.def` 导出四个未修饰 COM 入口，链 Rust `msime-host-api` 的导入库）；Server 是独立的窗口子系统可执行文件（`src/entrypoints/server_main.cpp`，`OUTPUT_NAME MetasequoiaImeServer`）。另有 `MetasequoiaImeWatchdog`（对应安装器的登录任务）与 `msime-client-prepare`（准备 `runtime-options.json`）。

@@ -127,10 +127,11 @@ std::string polish_prompt(const VoiceInputConfig &config) {
   return polish_prompt_for(slots);
 }
 
-// 一次录音的投递目标：焦点租约所属的 TSF 客户端进程，以及开始录音时的前台窗口（前台是 Server 自己的窗口时为空）。
+// 一次录音的投递目标：焦点租约所属的 TSF 客户端进程，开始录音时的前台窗口（前台是 Server 自己的窗口时为空），以及核对开始录音时的焦点租约仍是当前焦点的回调（为空时不核对）。
 struct CommitTarget {
   uint32_t process = 0;
   HWND window = nullptr;
+  std::function<bool()> lease_current;
 };
 
 // 开始录音时的前台窗口。从托盘菜单或浮动工具栏开始时前台可能是 Server 自己，这时不记窗口，只按进程核对。
@@ -143,15 +144,18 @@ HWND recording_start_window() {
   return process != 0 && process != GetCurrentProcessId() ? window : nullptr;
 }
 
-// 前台是否仍是录音目标：前台进程是 TSF 客户端进程，或前台窗口仍是开始录音时那一个。
+// 目标此刻是否仍然有效：前台进程是 TSF 客户端进程或前台窗口仍是开始录音时那一个，而且焦点租约仍是当前焦点（同一窗口里换了输入框时前台核对看不出来）。先看前台，前台不对就不去拿焦点闸门的锁。
 bool target_in_foreground(const CommitTarget &target) {
   DWORD foreground = 0;
   const HWND window = GetForegroundWindow();
   if (window)
     (void)GetWindowThreadProcessId(window, &foreground);
-  return voice_target_in_foreground(target.process, foreground,
-                                    GetCurrentProcessId(),
-                                    target.window && window == target.window);
+  const bool foreground_matches = voice_target_in_foreground(
+      target.process, foreground, GetCurrentProcessId(),
+      target.window && window == target.window);
+  return voice_delivery_target_current(
+      foreground_matches,
+      foreground_matches && (!target.lease_current || target.lease_current()));
 }
 
 // 逐个 UTF-16 单元模拟输入，每 16 个单元前确认一次目标仍在前台，前台换了就停下，和 macOS 按块投递时反复检查 current() 一样。返回是否送出了文字；已经送出一部分时也算送出，不能再走别的路线重复上屏。
@@ -1018,8 +1022,10 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
     release_doubao();
     return;
   }
-  // 模拟按键和粘贴只能投给前台窗口，目标是焦点租约所属的 TSF 客户端进程或开始录音时的前台窗口；前台已经换成别处时文字直接丢弃，和 macOS 的 stale 一样不写进别的应用。
-  const CommitTarget target{client_pid(lease.transport), start_window};
+  // 模拟按键和粘贴只能投给前台窗口，目标是焦点租约所属的 TSF 客户端进程或开始录音时的前台窗口；前台已经换成别处、或者焦点租约已经失效（换了输入框）时文字直接丢弃，和 macOS 的 stale 一样不写进别的应用或别的输入框。每次核对都重新验租约，不等控制循环下一轮的 maintain()。
+  const CommitTarget target{client_pid(lease.transport), start_window, [this, &lease] {
+                              return !focus_validator_ || focus_validator_(lease);
+                            }};
   bool delivered = false;
   session_.with_current(session, [&] {
     deliver_voice_result(review, final_text, [&] {
@@ -1049,7 +1055,7 @@ void VoiceInputSession::finish(std::vector<float> samples, FocusLease lease,
         if (stream_inline)
           (void)sender_(lease, FanyImeWorkerReplyType::CancelVoiceComposition,
                         L"", generation);
-        // 租约失效说明焦点已经去了别的输入框或窗口，整段文字丢弃；事务锁忙、编码失败或管道写失败时，录音目标仍在前台才退回 SendInput，免得丢掉整段录音。
+        // 租约失效说明焦点已经去了别的输入框或窗口，整段文字丢弃；事务锁忙、编码失败或管道写失败时，录音目标仍在前台、焦点租约也仍是当前焦点才退回 SendInput，免得丢掉整段录音。锁忙时 TSF 路线没验租约就返回了，这里的租约核对（会等正在进行的焦点事务结束）拦住点击别的输入框造成的那一种。
         if (voice_tsf_refusal_falls_back(
                 encoded && result == VoiceCompositionResult::Rejected,
                 target_in_foreground(target)))

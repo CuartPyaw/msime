@@ -21,11 +21,14 @@ Windows Server 的原生语音（热键或托盘启动，`platforms/windows/src/
 
 - **失焦取消**：`VoiceInputSession` 构造时多注入一个 `FocusValidator`（Server 传 `server.focus_current`）。`maintain()` 在原生语音录音中、或停止后 `finish()` 仍在识别和润色时（`finishing_session_` 等于当前代次），每轮核对开始录音时的焦点租约；租约失效就 `cancel_session(false)`，录音不转写，进行中的识别和润色请求被取消。面板的审阅录音不走这里，`VoiceControllerDispatch::maintain()` 本来就按租约收回。空闲时不验租约，免得每轮都去拿焦点闸门的锁。
 - **投递目标**：前台进程是焦点租约的 TSF 客户端进程 `client_pid(lease.transport)`（PipeTicket 的高 32 位，管道握手时已核对过对端 pid），或者前台窗口仍是开始录音时记下的那一个，都算目标在前台。只比进程不够：UWP 应用的前台窗口属于 ApplicationFrameHost，传统控制台窗口报告的是控制台程序而 TSF 跑在 conhost 里，这些应用里 `sendinput` / `ctrl_v` 的语音会被整段丢掉。开始录音时前台若是 Server 自己（从托盘菜单或浮动工具栏开始），就不记窗口，只按进程核对。`sendinput` 每 16 个 UTF-16 单元前核对一次，不在代理对中间停下；`ctrl_v` 在写剪贴板前、粘贴前各核对一次。前台既不是目标进程也不是录音时的窗口，或者是 Server 自己时，文字丢弃，和 macOS 的 stale 一样不提示。
-- **TSF 被拒后的退路**：`send_voice_composition` 返回 `Rejected`（租约失效）时整段丢弃，哪怕前台还是同一个进程（焦点去了同一应用的另一个输入框）。事务锁忙、编码失败或管道写失败时，目标仍在前台才退回 `SendInput`，保住整段录音。
+- **投递时再验租约**：前台核对只看进程和窗口，同一窗口里点了另一个输入框它看不出来，而 `maintain()` 约 50 ms 才验一次租约。所以每次前台核对（`sendinput` 每 16 个单元、`ctrl_v` 的两次、TSF 退路）都同时用 `FocusValidator` 核对开始录音时的焦点租约仍是当前焦点（`voice_delivery_target_current`），失效就丢弃，与 macOS 投递前核对输入上下文一致。`focus_current` 会等正在进行的焦点事务结束，点击造成的焦点切换因此不会被事务锁忙掩盖。
+- **TSF 被拒后的退路**：`send_voice_composition` 返回 `Rejected`（租约失效）时整段丢弃，哪怕前台还是同一个进程（焦点去了同一应用的另一个输入框）。事务锁忙、编码失败或管道写失败时（锁忙时 TSF 路线没验租约就返回），目标仍在前台、租约也仍是当前焦点才退回 `SendInput`，保住整段录音。
 
 ### 剪贴板排除标记
 
 `copy_text_to_clipboard` 在 `CF_UNICODETEXT` 之外放三个注册格式，值都是 DWORD 0：`ExcludeClipboardContentFromMonitorProcessing`、`CanIncludeInClipboardHistory`、`CanUploadToCloudClipboard`。任一标记放不上就清空剪贴板、改走 `SendInput`，不让识别文本裸着进剪贴板。水杉自己的 `ClipboardMonitor` 认这几个格式，见 [Windows 剪贴板采集跳过敏感内容](2026-10-10-windows-clipboard-privacy-panel-statistics-host-diagnostics.md)。
+
+共享语音面板的 `ctrl_v`（`crates/host-windows` 的 `paste_voice_text`）走同一条规则：写剪贴板时在 `CF_UNICODETEXT` 之前放上同一份名单（`clipboard_privacy::VOICE_CLIPBOARD_MARKERS`），任一标记放不上就清空剪贴板、不发 Ctrl+V，文字留在面板里。剪贴板历史面板的复制和粘贴是用户自己的内容，不带标记。
 
 ### 打字统计
 
@@ -58,7 +61,8 @@ Windows Server 的原生语音（热键或托盘启动，`platforms/windows/src/
 
 ## Verification
 
-- `platforms/windows/tests/voice/voice_commit_policy.cpp`（`windows-voice-commit-policy`）：提交路线、前台目标核对（含目标为 0 或 Server 自己，以及前台窗口仍是录音开始时那一个但属于别的进程）、TSF 被拒后只在非焦点失效且前台匹配时退回、失焦取消只针对进行中的原生语音、剪贴板标记的格式名和值。
+- `platforms/windows/tests/voice/voice_commit_policy.cpp`（`windows-voice-commit-policy`）：提交路线、前台目标核对（含目标为 0 或 Server 自己，以及前台窗口仍是录音开始时那一个但属于别的进程）、投递时租约失效即不投、TSF 被拒后只在非焦点失效且目标仍有效时退回、失焦取消只针对进行中的原生语音、剪贴板标记的格式名和值。
+- `crates/host-windows/tests/clipboard_privacy_policy.rs`：面板语音的标记名单与 `VoiceCommitPolicy.h` 的 `voice_clipboard_markers` 逐项相同且值都是 0。
 - `platforms/windows/tests/voice/voice_session_policy.cpp`：启动失败原因到文案的映射、无语音文案、润色超时。
 - `platforms/windows/tests/voice/audio_capture.cpp`：格式不对的设备 id 报 `DeviceUnavailable`，没有回调报 `Failed`。
 - `VoiceInputSession.cpp`、`AudioCapture.cpp`、`SystemAudioMuter.cpp`、`CuePlayer.cpp` 用 `x86_64-w64-mingw32-g++ -fsyntax-only` 检查过；真机上的权限提示、焦点切换、默认设备切换和剪贴板历史行为未验证。

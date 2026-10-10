@@ -16,7 +16,7 @@ macOS 的悬浮工具栏有切换输入方案、手写、语音三个可选按�
 
 语言按钮在中文模式下按运行中的方案画「双」「五」（`ToolbarLanguageState::scheme`）。悬停提示用 comctl32 的 tooltip 控件，每个按钮一个区域，文字由 `toolbar_tooltip` 现算，与 macOS 的 toolTip 相同，语言按钮带方案名（`toolbar_scheme_title`，如「小鹤双拼 · 切换到英文输入」）。`show_app_logo` 关掉时 logo 槽按 macOS 的比例收窄（图标 24 时 10 DIP），画两列三行圆点，仍是拖动区。
 
-空闲隐藏由 `FloatingToolbarIdleTimer`（`FloatingToolbarVisibilityPolicy.h`）决定：每次真实按键（维护快捷键的低级键盘钩子新增的 `KeySink`，不含本进程注入的按键）、在工具栏上按下鼠标、拖动工具栏松手（系统的移动循环占着 UI 线程，拖动期间计时没有机会重置，松手时补记一次）、弹出菜单开着，都让工具栏回来并重新计时；开关打开或输入法重新激活也算一次输入；全屏切换、偏好刷新和普通焦点切换不唤醒。生产 Server 把拖动后的位置写进状态目录的 `floating_toolbar_position.json`（`FloatingToolbarPosition.h`），启动时读回，越界由原有的放置逻辑夹回工作区；预览实例照旧写自己的配置文件。位置只属于这台机器的显示器布局，不进同步到云端的共享偏好。
+空闲隐藏由 `FloatingToolbarIdleTimer`（`FloatingToolbarVisibilityPolicy.h`）决定：每次真实按键（维护快捷键的低级键盘钩子新增的 `KeySink`，不含注入的按键）、Server 经 TSF 管道收到的按键（`ServerKeyActivity`：焦点会话处理的键和 Aux 管道的 KeySound 各加一次计数，界面线程每轮比较计数，变了就算一次输入；钩子看不到屏幕键盘和 SendInput 类键鼠共享工具注入的按键、看不到发往提权窗口的按键，也可能没装上，这些按键只要经过了 Server 照样唤醒工具栏）、在工具栏上按下鼠标、拖动工具栏松手（系统的移动循环占着 UI 线程，拖动期间计时没有机会重置，松手时补记一次）、弹出菜单开着，都让工具栏回来并重新计时；开关打开或输入法重新激活也算一次输入；全屏切换、偏好刷新和普通焦点切换不唤醒。生产 Server 把拖动后的位置写进状态目录的 `floating_toolbar_position.json`（`FloatingToolbarPosition.h`），启动时读回，越界由原有的放置逻辑夹回工作区；预览实例照旧写自己的配置文件。位置只属于这台机器的显示器布局，不进同步到云端的共享偏好。
 
 WinUI 设置窗口的「工具栏组件」加入切换输入方案、手写识别板（不提供手写的版本不显示）和语音输入；`HostCapabilities::for_platform(Windows)` 的三个能力位翻成 true，手写仍由 `narrow_to_edition` 按版本收窄。
 
@@ -34,6 +34,7 @@ WinUI 设置窗口的「工具栏组件」加入切换输入方案、手写识�
 - **代价与已知上限**：
   - 老用户的共享偏好里 `input_scheme` 缺省为开、`show_app_logo` 缺省为关，升级后工具栏多出方案按钮、logo 换成握把，与 macOS 新装时一样；想要原样的用户在设置里改回。
   - 空闲 10 秒自动隐藏是 Windows 上的新行为，与 macOS 一致但没有单独的开关；用户反馈不需要时要重访，可能加一个偏好。
+  - Server 只看得到 TIP 交给它的键：中文模式下组字的字母都经过它；TIP 自己放行给应用的键（英文模式的字母、没有组字时的空格、回车、数字）只在按键音或打字特效开着时经 Aux 管道报 KeySound。两样都关着、这些键又是注入的或发往提权窗口时，钩子和 Server 都看不到，唤不醒工具栏；切回中文打一个字就会唤醒。
   - 系统表情面板靠合成 Win+.，Windows 没有给 Win32 进程的公开接口；系统改了这个快捷键就失效。
   - 提示只是 tooltip 控件；读屏读到的按钮名字（与提示同一段文字）由 UI Automation 提供者给出，见 [自绘窗口的 UI Automation 读屏](2026-10-10-windows-server-window-ui-automation.md)。
   - 任务栏语言栏图标按方案画一个字，Ctrl+Shift+Win+K 也退回 `osk.exe`，见 [遗留项](2026-10-10-windows-mac-parity-leftovers.md)；按方案注册多个 TSF 语言配置文件没有做。
@@ -41,4 +42,4 @@ WinUI 设置窗口的「工具栏组件」加入切换输入方案、手写识�
 
 ## Verification
 
-`platforms/windows/tests/ui/` 下的 `floating_toolbar_reload.cpp`（按钮组、默认值、版本收窄）、`floating_toolbar_visibility.cpp`（空闲计时）、`toolbar_icons.cpp`（新按钮字形、双/五徽标）、`toolbar_tooltips.cpp`、`toolbar_menus.cpp`（方案菜单与托盘一致、实用菜单的行与可用性、菜单位置）、`floating_toolbar_position.cpp`、`toolbar_layout.cpp`（握把尺寸）、`toolbar_coordinates.cpp`（卡片命中）；`crates/client-core/src/host_surface/tests.rs` 断言 Windows 的三个能力位并随版本收窄手写。真机行为（Win+. 面板出现在当前输入框、tooltip 在不抢焦点的窗口上显示、菜单收起手感）要在 Windows 上确认。
+`platforms/windows/tests/ui/` 下的 `floating_toolbar_reload.cpp`（按钮组、默认值、版本收窄）、`floating_toolbar_visibility.cpp`（空闲计时，含 Server 收到按键时唤醒）、`toolbar_icons.cpp`（新按钮字形、双/五徽标）、`toolbar_tooltips.cpp`、`toolbar_menus.cpp`（方案菜单与托盘一致、实用菜单的行与可用性、菜单位置）、`floating_toolbar_position.cpp`、`toolbar_layout.cpp`（握把尺寸）、`toolbar_coordinates.cpp`（卡片命中）；`crates/client-core/src/host_surface/tests.rs` 断言 Windows 的三个能力位并随版本收窄手写。真机行为（Win+. 面板出现在当前输入框、tooltip 在不抢焦点的窗口上显示、菜单收起手感）要在 Windows 上确认。
