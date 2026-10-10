@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-先处理关闭数据库、空跨度和零限额，再借用规范化音节完成完整性检查、表名规划与最终键拼接。只有一个跨度，因此直接把最终键交给既有单键 `batch_rows`，保持同一 `IN (?)` SQL、限额、行字段、稳定排序、不按词值去重、返回所有权及非空页的 `reserve_exact(span_limit)` 聚合容量。
+先处理关闭数据库、空跨度和零限额，再借用规范化音节完成完整性检查、表名规划与最终键拼接。只有一个跨度，因此直接把最终键交给既有单键 `batch_rows`，保持同一 `IN (?)` SQL、限额、行字段、稳定排序、不按词值去重、返回所有权以及当时非空页的 `reserve_exact(span_limit)` 聚合容量。后续[首个页复用](2026-10-10-pinyin-aggregate-page-reuse.md)接管该唯一页，保留本片全部键规划及空页行为，只省去独立聚合分配并修复无界命中的容量溢出。
 
 容量先按规范化音节字节与分隔符计算，再一次分配最终键；依据 [String::with_capacity 官方契约](https://doc.rust-lang.org/std/string/struct.String.html#method.with_capacity) 和 [标准库 join 实现](https://doc.rust-lang.org/src/alloc/str.rs.html)，只承诺避免临时容器，不把请求容量解释为物理内存或 RSS。
 
@@ -34,4 +34,4 @@ Status: implemented
 
 ## Consequences
 
-借用规划会重新遍历固定规范化映射以检查完整性、计算长度及写入，尚不声明实际宿主时延改善。只绕过单跨度的通用分组，不改变其他切分批次或查询缓存；无界非空聚合限额的既有预留风险保留。
+借用规划会重新遍历固定规范化映射以检查完整性、计算长度及写入，尚不声明实际宿主时延改善。只绕过单跨度的通用分组，不改变其他切分批次或查询缓存；此片留下的无界非空聚合预留风险由[首个页复用](2026-10-10-pinyin-aggregate-page-reuse.md)处理；冻结旧规划正文不变，当前非空命中的分配断言精确增加一次节省，空页预算不变。
