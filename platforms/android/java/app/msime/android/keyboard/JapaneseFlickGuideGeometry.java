@@ -38,7 +38,7 @@ public final class JapaneseFlickGuideGeometry {
     }
 
     private static float clamp(float start, float length, float limit) {
-        return Math.max(0f, Math.min(start, limit - length));
+        return BoundsPolicy.bounded(start, 0f, limit - length);
     }
 
     private static int checked(int direction) {
