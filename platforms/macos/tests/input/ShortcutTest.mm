@@ -3603,6 +3603,50 @@ static void TestPreferenceReadDoesNotDeallocControllerOffMain() {
     assert(toolbar.completions == 0);
 }
 
+// 打开设置应用的完成回调由 NSWorkspace 在并发队列上调用并释放。它持有的回退块若强引用控制器，IMK 在设置应用启动期间放掉控制器时，最后一次释放就落在那条队列上。这里把 NSWorkspace 换成只收下完成回调的桩，再在后台队列上放掉它。
+static void TestDesktopLaunchDoesNotDeallocControllerOffMain() {
+    Method locate = class_getInstanceMethod(NSWorkspace.class, @selector(URLForApplicationWithBundleIdentifier:));
+    Method open = class_getInstanceMethod(NSWorkspace.class, @selector(openApplicationAtURL:configuration:completionHandler:));
+    __block id pendingHandler = nil;
+    IMP originalLocate = method_setImplementation(locate, imp_implementationWithBlock(^NSURL *(id workspace, NSString *identifier) {
+        (void)workspace; (void)identifier;
+        return [NSURL fileURLWithPath:@"/Applications/synthetic.app"];
+    }));
+    IMP originalOpen = method_setImplementation(open, imp_implementationWithBlock(^(id workspace, NSURL *url, id configuration, id handler) {
+        (void)workspace; (void)url; (void)configuration;
+        // 调用方传进来的是栈上的块，按 id 收下只会 retain 不会拷贝，要显式 copy。
+        pendingHandler = [handler copy];
+    }));
+    void (^launches[])(MSIMEInputController *) = {
+        ^(MSIMEInputController *controller) { [controller showDictionary:nil]; },
+        ^(MSIMEInputController *controller) { [controller restartCurrentInputMethod]; },
+    };
+    for (auto launch : launches) {
+        ThreadRecordingToolbar *toolbar = [ThreadRecordingToolbar new];
+        @autoreleasepool {
+            MSIMEInputController *controller = [MSIMEInputController alloc];
+            [controller setValue:toolbar forKey:@"toolbar"];
+            launch(controller);
+        }
+        assert(pendingHandler);
+        // 设置应用还在启动，主线程这一侧已经放掉控制器，再转一圈主队列，让主线程上自动释放的引用都先放掉。
+        DrainMainQueue();
+        dispatch_semaphore_t released = dispatch_semaphore_create(0);
+        dispatch_async(dispatch_get_global_queue(QOS_CLASS_UTILITY, 0), ^{
+            pendingHandler = nil;
+            dispatch_semaphore_signal(released);
+        });
+        assert(dispatch_semaphore_wait(released, dispatch_time(DISPATCH_TIME_NOW, 5 * NSEC_PER_SEC)) == 0);
+        NSDate *deadline = [NSDate dateWithTimeIntervalSinceNow:2];
+        while (toolbar.deactivations == 0 && deadline.timeIntervalSinceNow > 0)
+            [NSRunLoop.currentRunLoop runUntilDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+        assert(toolbar.deactivations == 1);
+        assert(!toolbar.deactivatedOffMain);
+    }
+    method_setImplementation(locate, originalLocate);
+    method_setImplementation(open, originalOpen);
+}
+
 @interface ReloadCountingController : ModeController
 @property(nonatomic) NSUInteger reloads;
 @end
@@ -9664,6 +9708,7 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestMusicIsClaimedOnceTheSessionOpens(); }
         @autoreleasepool { TestPreferenceClientGeneration(); }
         @autoreleasepool { TestPreferenceReadDoesNotDeallocControllerOffMain(); }
+        @autoreleasepool { TestDesktopLaunchDoesNotDeallocControllerOffMain(); }
         @autoreleasepool { TestSavedPreferencesReachTheFocusedController(); }
         @autoreleasepool { TestModeSwitchReachesTheSessionBeforeTheNextKey(); }
         @autoreleasepool { TestFreshProcessActsOnTheSharedSchemeNotTheStaleLocalOne(); }

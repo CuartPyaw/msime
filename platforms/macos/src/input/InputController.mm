@@ -3272,11 +3272,18 @@ static __weak MSIMEInputController *MSIMEFocusedController;
         [self showSharedTextTool:@"cloud-clipboard" options:[self runtimeOptions] bridge:nil];
         return;
     }
+    // 打开设置应用的完成回调在 NSWorkspace 的并发队列上执行并释放，这里的块随它一起被持有：只捕获弱引用，控制器的最后一次释放才不会落在那条队列上（见 reloadPreferences）。
+    __weak MSIMEInputController *weakSelf = self;
     MSIMEOpenDesktopCloudClipboard(MSIMERuntimeOptionsPath(), NSWorkspace.sharedWorkspace, ^{
-        if (!MSIMEOpenBackendClipboard(NSClassFromString(@"MSIMEBackendAccountWindow"))) [self showAccount:sender];
+        if (!MSIMEOpenBackendClipboard(NSClassFromString(@"MSIMEBackendAccountWindow"))) [weakSelf showAccount:sender];
     });
 }
-- (void)showCloudDictionary:(id)sender { (void)sender; MSIMEOpenDesktopCloudDictionary(MSIMERuntimeOptionsPath(), NSWorkspace.sharedWorkspace, ^{ [self showAccount:nil]; }); }
+- (void)showCloudDictionary:(id)sender {
+    (void)sender;
+    // 只捕获弱引用，理由同 showCloudClipboard:。
+    __weak MSIMEInputController *weakSelf = self;
+    MSIMEOpenDesktopCloudDictionary(MSIMERuntimeOptionsPath(), NSWorkspace.sharedWorkspace, ^{ [weakSelf showAccount:nil]; });
+}
 - (void)showHandwriting:(id)sender {
     (void)sender;
     if (!MSIMEEditionOffersHandwriting()) return;
@@ -4258,7 +4265,20 @@ static __weak MSIMEInputController *MSIMEFocusedController;
         [[MSIMEPreferencesWindowController sharedController] showAndActivateWithPageIdentifier:@"appearance"];
     });
 }
-- (void)showDictionary:(id)sender { (void)sender; MSIMEOpenDesktopRoute(@"settings:dictionary", NSWorkspace.sharedWorkspace, ^{ if (!self->_session) [self prepareSession]; if (!self->_session) return; self->_dictionaryWindow = [[MSIMEDictionaryWindowController alloc] initWithOptions:self->_session.hostOptions]; [self->_dictionaryWindow showWindow:nil]; MSIMEPresentWindow(self->_dictionaryWindow.window); }); }
+- (void)showDictionary:(id)sender {
+    (void)sender;
+    // 只捕获弱引用，理由同 showCloudClipboard:；回退在主线程执行，在那里再取强引用。
+    __weak MSIMEInputController *weakSelf = self;
+    MSIMEOpenDesktopRoute(@"settings:dictionary", NSWorkspace.sharedWorkspace, ^{
+        MSIMEInputController *controller = weakSelf;
+        if (!controller) return;
+        if (!controller->_session) [controller prepareSession];
+        if (!controller->_session) return;
+        controller->_dictionaryWindow = [[MSIMEDictionaryWindowController alloc] initWithOptions:controller->_session.hostOptions];
+        [controller->_dictionaryWindow showWindow:nil];
+        MSIMEPresentWindow(controller->_dictionaryWindow.window);
+    });
+}
 - (void)prepareDictionary:(id)sender {
     (void)sender;
     if (_session && _activeClient) {
@@ -5057,13 +5077,15 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
 }
 
 - (void)restartCurrentInputMethod {
+    // 完成块也被 NSWorkspace 并发队列上的回调持有，那边可能最后才释放它：只捕获弱引用，理由同 showCloudClipboard:。
+    __weak MSIMEInputController *weakSelf = self;
     MSIMELaunchInputSourceReregistration(NSBundle.mainBundle.bundleURL, NSWorkspace.sharedWorkspace,
         ^(BOOL launched) {
             if (!launched) {
                 NSBeep();
                 return;
             }
-            [self flushKeyPressesWaitingUntilWritten:YES];
+            [weakSelf flushKeyPressesWaitingUntilWritten:YES];
             [NSApp terminate:nil];
         });
 }
