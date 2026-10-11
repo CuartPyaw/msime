@@ -193,7 +193,7 @@ final class KeyboardSheets {
             LinearLayout.LayoutParams params = Ui.rowGapParams(context);
             row.addView(state, params);
         }
-        ImageView chevron = Ui.chevron(context);
+        ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
         chevronParams.setMarginStart(Ui.dp(context, 6));
         row.addView(chevron, chevronParams);
@@ -354,7 +354,7 @@ final class KeyboardSheets {
             row.addView(trailing, valueParams);
         }
         if (action != null) {
-            ImageView chevron = Ui.chevron(context);
+            ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
             chevronParams.setMarginStart(Ui.dp(context, 6));
             row.addView(chevron, chevronParams);

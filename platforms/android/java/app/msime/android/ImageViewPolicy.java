@@ -66,6 +66,12 @@ public final class ImageViewPolicy {
         return button;
     }
 
+    /** Create the muted, accessibility-hidden chevron used by navigable rows. */
+    public static ImageView chevron(Context context, @ColorInt int tint) {
+        ImageView view = decorative(context, app.msime.android.R.drawable.ms_w1_a2_chevron, tint);
+        return view;
+    }
+
     private static void hideFromAccessibility(View view) {
         view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
     }

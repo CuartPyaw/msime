@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.DrawablePolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
@@ -76,7 +77,7 @@ public final class GroupCard {
             @Nullable Runnable action) {
         Row row = new Row(this, title, subtitle, false);
         row.value = trailingValue(row, value);
-        ImageView chevron = Ui.chevron(context);
+        ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams params = Ui.squareParams(context, Ui.CHEVRON_SIZE);
         params.setMarginStart(Ui.dp(context, 6));
         row.view.addView(chevron, params);
