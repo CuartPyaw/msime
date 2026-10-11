@@ -360,17 +360,6 @@ public final class Ui {
         return view;
     }
 
-    /** 只在文字修改完成后回调，省去不需要的另外两个 `TextWatcher` 方法。 */
-    public static void afterTextChanged(TextView view, Consumer<Editable> listener) {
-        view.addTextChangedListener(new TextWatcher() {
-            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
-
-            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {}
-
-            @Override public void afterTextChanged(Editable text) { listener.accept(text); }
-        });
-    }
-
     /** Create the standard accent-coloured group heading. */
     public static TextView groupHeading(Context context, CharSequence text) {
         return headingLabel(context, text, TEXT_GROUP_TITLE, 500, ThemeColorPolicy.accent(context));

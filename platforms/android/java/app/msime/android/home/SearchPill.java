@@ -68,6 +68,6 @@ public final class SearchPill extends LinearLayout {
 
     /** 每次输入变化回调去掉首尾空白后的查询。 */
     public void setOnQueryChange(Consumer<String> listener) {
-        Ui.afterTextChanged(field, ignored -> listener.accept(query()));
+        ViewPolicy.afterTextChanged(field, ignored -> listener.accept(query()));
     }
 }

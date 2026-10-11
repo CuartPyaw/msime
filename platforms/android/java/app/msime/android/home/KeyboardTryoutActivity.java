@@ -140,7 +140,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
             else ViewPolicy.hide(dismiss);
         });
 
-        Ui.afterTextChanged(field, text -> {
+        ViewPolicy.afterTextChanged(field, text -> {
             if (text.length() > DRAFT_LIMIT) text.delete(DRAFT_LIMIT, text.length());
             // 请求进行中按钮是「停止」，继续编辑或清空草稿都不能禁用取消操作。默认就能和 AI 对话：有字就能发，目录还没加载完时发出的那句等目录到了再发。
             ViewPolicy.setEnabled(sendAi, sending || text.length() > 0);

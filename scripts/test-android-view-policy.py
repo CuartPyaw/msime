@@ -49,6 +49,7 @@ def main() -> None:
         "public static Drawable ripple(Context context, int fill, float radiusPx)",
         "public static Drawable pillRipple(Context context, int fill)",
         "public static void style(TextView view, int sizeSp, int weight, int color)",
+        "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
     missing = [snippet for snippet in required if snippet not in view_policy]
     if missing:
@@ -83,11 +84,16 @@ def main() -> None:
         raise AssertionError("Ui 按钮没有直接调用共享文本最小宽度策略")
     if "public static void setEnabledLook(" in ui:
         raise AssertionError("Ui 仍保留无调用方的启用状态转发方法")
+    if "public static void afterTextChanged(TextView view, Consumer<Editable> listener)" in ui:
+        raise AssertionError("Ui 仍保留 afterTextChanged 转发方法")
     if "public static void style(TextView view, int sizeSp, int weight, int color)" in ui:
         raise AssertionError("Ui 仍保留文本样式转发方法")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.afterTextChanged(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享文字变更策略")
     if "public static void makeClickable(" in ui:
         raise AssertionError("Ui 仍保留 makeClickable 转发方法")
     for path in HOME.glob("*.java"):
