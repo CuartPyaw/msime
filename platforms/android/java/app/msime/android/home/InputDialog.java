@@ -183,7 +183,7 @@ public final class InputDialog {
     }
 
     private TextView button(CharSequence label, int weight, int color) {
-        return Ui.textButton(context, label, Ui.TEXT_DIALOG_TITLE, weight, color, ViewPolicy.ripple(context), 0);
+        return ViewPolicy.textButton(context, label, Ui.TEXT_DIALOG_TITLE, weight, color, ViewPolicy.ripple(context), 0);
     }
 
     /** 分隔线：横的在按钮上方，竖的在两个按钮之间。 */

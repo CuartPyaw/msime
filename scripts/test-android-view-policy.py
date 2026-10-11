@@ -57,6 +57,7 @@ def main() -> None:
         "public static TextView liveStatus(Context context, int sizeSp, int color)",
         "public static EditText styledInput(Context context, int sizeSp, int weight, int color)",
         "public static TextView styledLabel(Context context, CharSequence text, int sizeSp,",
+        "public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -111,6 +112,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.styledLabel(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享样式标签工厂")
+    if "public static TextView textButton(" in ui:
+        raise AssertionError("Ui 仍保留 textButton 转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.textButton(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享文本按钮工厂")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")

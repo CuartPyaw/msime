@@ -118,6 +118,24 @@ public final class ViewPolicy {
         return view;
     }
 
+    /** Create a centered, clickable text button with caller-supplied background and ink. */
+    public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,
+                                      int ink, Drawable background, float minHeightDp) {
+        return textButton(context, label, sizeSp, weight, ink, background, minHeightDp, null);
+    }
+
+    /** Create a centered text button and bind its action. */
+    public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,
+                                      int ink, Drawable background, float minHeightDp,
+                                      Runnable action) {
+        TextView button = centeredLabel(context, label, sizeSp, weight, ink);
+        setBackground(button, background);
+        setTextMinHeight(button, DimensionPolicy.pixels(context, minHeightDp));
+        setInteractive(button, true);
+        bindOptionalClick(button, action);
+        return button;
+    }
+
     /** Apply a minimum height to a generic view. */
     public static void setMinimumHeight(View view, int height) {
         view.setMinimumHeight(height);
