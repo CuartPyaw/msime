@@ -70,6 +70,7 @@ public final class CommunityFragment extends Fragment {
     @Nullable private CommunityRequest.Category category;
     private boolean loading;
     private boolean hasMore;
+    private long requestGeneration;
     // 预览按用户自己的布局画。读不到就按 26 键，那是默认值。
     private boolean nineKey;
 
@@ -250,6 +251,7 @@ public final class CommunityFragment extends Fragment {
         if (view == null) return;
         // Only paging defers to a request already in flight. A new tab or a new search must go out even mid-load, or switching tabs while the first page is arriving does nothing at all; the reply that was already on its way is discarded below by the same check.
         if (loading && !fresh) return;
+        long request = ++requestGeneration;
         loading = true;
         if (fresh) {
             hasMore = false;
@@ -272,8 +274,8 @@ public final class CommunityFragment extends Fragment {
                 return new LoadedPage(page, before, java.util.Objects.equals(before, after));
             },
             loaded -> {
-                // The tab, the search or the category may have moved on while this page was in flight. A stale answer must not write over what the user is now looking at, and must not clear the flag belonging to the request that replaced it.
-                if (segment != kind || requested != section || !term.equals(search)
+                // 同一筛选条件也可能连续请求；旧结果不能填入新列表或清掉新请求的加载状态。
+                if (request != requestGeneration || segment != kind || requested != section || !term.equals(search)
                         || filter != requestCategory()) {
                     return;
                 }
