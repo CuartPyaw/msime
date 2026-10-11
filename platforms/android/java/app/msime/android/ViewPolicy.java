@@ -256,6 +256,11 @@ public final class ViewPolicy {
         view.setPadding(horizontal, 0, horizontal, 0);
     }
 
+    /** Apply equal horizontal padding expressed in density-independent pixels. */
+    public static void setHorizontalPaddingDp(Context context, View view, float horizontalDp) {
+        setHorizontalPadding(view, DimensionPolicy.pixels(context, horizontalDp));
+    }
+
     /** Clear all view padding. */
     public static void clearPadding(View view) {
         view.setPadding(0, 0, 0, 0);

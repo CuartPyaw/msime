@@ -336,7 +336,7 @@ final class LoginSheet {
         GradientDrawable face = DrawablePolicy.outlined(ThemeColorPolicy.rowBackground(activity), DimensionPolicy.pixels(activity, 12),
             DimensionPolicy.atLeastOnePixel(activity, 1), ThemeColorPolicy.hairline(activity));
         ViewPolicy.setBackground(field, face);
-        Ui.setHorizontalPaddingDp(field, activity, 14);
+        ViewPolicy.setHorizontalPaddingDp(activity, field, 14);
         Ui.setTextMinHeightDp(field, activity, 50);
         ViewPolicy.setCenteredVertically(field);
         field.setContentDescription(hint);

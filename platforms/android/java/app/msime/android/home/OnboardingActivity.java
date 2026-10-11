@@ -296,7 +296,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         for (int index = 0; index < samples.length; index++) {
             LinearLayout cell = LayoutPolicy.column(this);
             ViewPolicy.setCenteredHorizontally(cell);
-            Ui.setHorizontalPaddingDp(cell, this, 10);
+            ViewPolicy.setHorizontalPaddingDp(this, cell, 10);
             TextView word = ViewPolicy.label(this, samples[index][0], 19, index == 0 ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.text(this));
             if (index == 0) ViewPolicy.setTypefaceStyle(word, 600);
             cell.addView(word);
@@ -512,7 +512,7 @@ public final class OnboardingActivity extends AppCompatActivity {
 
         if (!done) {
             TextView button = ViewPolicy.centeredLabel(this, action, 15, ThemeColorPolicy.accent(this));
-            Ui.setHorizontalPaddingDp(button, this, 8);
+            ViewPolicy.setHorizontalPaddingDp(this, button, 8);
             ViewPolicy.setBackground(button, ViewPolicy.ripple(this));
             ViewPolicy.bindClick(button, fix);
             row.addView(button, LayoutPolicy.linearParamsPx(

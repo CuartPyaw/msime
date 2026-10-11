@@ -120,7 +120,7 @@ public final class InputDialog {
         GradientDrawable field = DrawablePolicy.outlined(ThemeColorPolicy.rowBackground(context), DimensionPolicy.pixels(context, 10),
             DimensionPolicy.atLeastOnePixel(context, 1), ThemeColorPolicy.hairline(context));
         ViewPolicy.setBackground(input, field);
-        Ui.setHorizontalPaddingDp(input, context, 12);
+        ViewPolicy.setHorizontalPaddingDp(context, input, 12);
         ViewPolicy.afterTextChanged(input, ignored -> refresh());
         input.setOnEditorActionListener((view, actionId, event) -> {
             int index = inputs.indexOf(input);
