@@ -118,7 +118,7 @@ final class LoginSheet {
 
         LinearLayout header = LayoutPolicy.row(activity);
         ViewPolicy.setCenteredVertically(header);
-        TextView title = Ui.headingLabel(activity, "link".equals(purpose) ? "添加登录方式" : "登录水杉",
+        TextView title = ViewPolicy.headingLabel(activity, "link".equals(purpose) ? "添加登录方式" : "登录水杉",
             22, 700, ThemeColorPolicy.text(activity));
         header.addView(title, LayoutPolicy.weightedWrapParams(1f));
         ImageView close = ImageViewPolicy.iconButton(activity,

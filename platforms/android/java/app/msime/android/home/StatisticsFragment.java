@@ -432,7 +432,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
         Ui.setHorizontalPaddingDp(row, context, 4);
-        TextView heading = Ui.headingLabel(context, title, 13, ThemeColorPolicy.subText(context));
+        TextView heading = ViewPolicy.headingLabel(context, title, 13, ThemeColorPolicy.subText(context));
         row.addView(heading, LayoutPolicy.weightedWrapParams(1f));
         if (trailing != null) row.addView(ViewPolicy.label(context, trailing, 13, ThemeColorPolicy.subText(context)));
         LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();

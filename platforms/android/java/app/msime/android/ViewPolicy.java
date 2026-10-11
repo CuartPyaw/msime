@@ -69,6 +69,23 @@ public final class ViewPolicy {
         return view;
     }
 
+    /** Create a text label carrying accessibility heading semantics. */
+    public static TextView headingLabel(Context context, CharSequence text, float sizeSp,
+                                        int color) {
+        TextView view = label(context, text, sizeSp, color);
+        view.setAccessibilityHeading(true);
+        return view;
+    }
+
+    /** Create a styled text label carrying accessibility heading semantics. */
+    public static TextView headingLabel(Context context, CharSequence text, int sizeSp,
+                                        int weight, int color) {
+        TextView view = newTextView(context, text);
+        style(view, sizeSp, weight, color);
+        view.setAccessibilityHeading(true);
+        return view;
+    }
+
     /** Apply a minimum height to a generic view. */
     public static void setMinimumHeight(View view, int height) {
         view.setMinimumHeight(height);

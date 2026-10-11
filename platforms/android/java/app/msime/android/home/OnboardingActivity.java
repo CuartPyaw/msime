@@ -468,7 +468,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         kick.setLetterSpacing(0.04f);
         column.addView(kick, LayoutPolicy.matchWidthWrapParams(this, 14 + 6));
 
-        TextView heading = Ui.headingLabel(this, title, 32, ThemeColorPolicy.text(this));
+        TextView heading = ViewPolicy.headingLabel(this, title, 32, ThemeColorPolicy.text(this));
         ViewPolicy.setLineSpacing(heading, 0, 1.1f);
         column.addView(heading, LayoutPolicy.matchWidthWrapParams(this, 14));
 

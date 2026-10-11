@@ -23,7 +23,7 @@ public final class SheetHeaderView {
         int horizontal = DimensionPolicy.pixels(context, 16);
         ViewPolicy.setPadding(header, horizontal, 0, horizontal, DimensionPolicy.pixels(context, 12));
 
-        TextView heading = Ui.headingLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,
+        TextView heading = ViewPolicy.headingLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,
             ThemeColorPolicy.subText(context));
         ViewPolicy.setCentered(heading);
         header.addView(heading);
