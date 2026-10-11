@@ -242,7 +242,7 @@ public final class GroupCard {
             view.setOrientation(LinearLayout.HORIZONTAL);
             ViewPolicy.setCenteredVertically(view);
             Ui.setRowMinimumHeight(view, owner.context);
-            Ui.setRowPadding(view, owner.context);
+            ViewPolicy.setRowPadding(owner.context, view);
 
             LinearLayout texts = LayoutPolicy.column(context);
             title = ViewPolicy.styledLabel(context, titleText, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));

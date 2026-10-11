@@ -268,6 +268,11 @@ public final class ViewPolicy {
             DimensionPolicy.pixels(context, rightDp), DimensionPolicy.pixels(context, bottomDp));
     }
 
+    /** Apply the standard detail-row horizontal and vertical insets. */
+    public static void setRowPadding(Context context, View view) {
+        setSymmetricPaddingDp(context, view, 16, 8);
+    }
+
     /** Clear all view padding. */
     public static void clearPadding(View view) {
         view.setPadding(0, 0, 0, 0);

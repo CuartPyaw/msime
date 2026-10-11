@@ -289,7 +289,7 @@ final class KeyboardSheets {
         LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
         Ui.setRowMinimumHeight(row, context);
-        Ui.setRowPadding(row, context);
+        ViewPolicy.setRowPadding(context, row);
         return row;
     }
 
@@ -336,7 +336,7 @@ final class KeyboardSheets {
         ViewPolicy.setCenteredVertically(row);
         Ui.setMinimumHeightDp(row, context,
             subtitle == null ? Ui.COMPACT_ROW_MIN_HEIGHT : Ui.ROW_MIN_HEIGHT);
-        Ui.setRowPadding(row, context);
+        ViewPolicy.setRowPadding(context, row);
 
         ImageView glyph = ImageViewPolicy.decorative(context, icon, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams glyphParams = LayoutPolicy.squareParams(context, 22);

@@ -166,13 +166,6 @@ public final class Ui {
 
     // ---- 读取 ----
 
-    /** Apply the standard detail-row horizontal and vertical insets to a view. */
-    public static void setRowPadding(View view, Context context) {
-        int horizontal = DimensionPolicy.pixels(context, ROW_PADDING_H);
-        int vertical = DimensionPolicy.pixels(context, ROW_PADDING_V);
-        ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
-    }
-
     /** Apply the standard minimum height for a detail row. */
     public static void setRowMinimumHeight(View view, Context context) {
         setMinimumHeightDp(view, context, ROW_MIN_HEIGHT);

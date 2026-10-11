@@ -136,7 +136,7 @@ public final class CloudClipboardPage extends DetailPage {
         LinearLayout retention = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(retention);
         Ui.setRowMinimumHeight(retention, context);
-        Ui.setRowPadding(retention, context);
+        ViewPolicy.setRowPadding(context, retention);
         TextView label = ViewPolicy.styledLabel(context, "保留时长", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
         retention.addView(label, LayoutPolicy.weightedWrapParams(1f));
         SegmentedControl segments = new SegmentedControl(context);
