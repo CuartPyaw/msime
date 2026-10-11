@@ -421,12 +421,6 @@ public final class Ui {
         return button;
     }
 
-    /** 去掉名称首尾空白后返回第一个 Unicode 码点；名称为空时返回后备值。 */
-    public static String trimmedInitial(CharSequence name, String fallback) {
-        String trimmed = TextPolicy.trimmed(name == null ? null : name.toString());
-        return TextPolicy.initial(trimmed, fallback);
-    }
-
     private static void bindClick(View view, Runnable action) {
         ViewPolicy.setInteractive(view, true);
         ViewPolicy.bindOptionalClick(view, action);
