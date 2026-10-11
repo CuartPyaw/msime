@@ -98,6 +98,7 @@
 #include <stdexcept>
 #include <future>
 #include <chrono>
+#include <condition_variable>
 #include <cmath>
 #include <spawn.h>
 #include <unistd.h>
@@ -138,12 +139,58 @@ using Json = nlohmann::json;
 class FcitxEngine;
 class FcitxMaintenanceAction;
 
-// Unlike std::async, dropping the future never waits: close() and ~FcitxState run on the Fcitx5 loop and must not block on a provider. Workers copy their inputs; one still running at unload shares the statistics thread's risk.
+// Context teardown drops futures without waiting so the Fcitx5 loop never blocks on a provider.
+// The addon still has to keep every worker inside the loaded module until unload, so the addon
+// waits for this tracker in ~FcitxEngine before Fcitx5 can dlclose the plugin.
+class DetachedJobTracker {
+public:
+  template <class F> std::shared_future<Json> start(F work) {
+    {
+      std::lock_guard lock(mutex_);
+      ++active_;
+    }
+    try {
+      std::packaged_task<Json()> task(
+          [this, work = std::move(work)]() mutable -> Json {
+            try {
+              auto result = work();
+              finish();
+              return result;
+            } catch (...) {
+              finish();
+              throw;
+            }
+          });
+      auto future = task.get_future().share();
+      std::thread(std::move(task)).detach();
+      return future;
+    } catch (...) {
+      finish();
+      throw;
+    }
+  }
+
+  void wait_idle() {
+    std::unique_lock lock(mutex_);
+    idle_.wait(lock, [this] { return active_ == 0; });
+  }
+
+private:
+  void finish() {
+    std::lock_guard lock(mutex_);
+    if (--active_ == 0)
+      idle_.notify_all();
+  }
+
+  std::mutex mutex_;
+  std::condition_variable idle_;
+  size_t active_ = 0;
+};
+
+DetachedJobTracker fcitx_detached_jobs;
+
 template <class F> std::shared_future<Json> detachedJob(F work) {
-  std::packaged_task<Json()> task(std::move(work));
-  auto future = task.get_future().share();
-  std::thread(std::move(task)).detach();
-  return future;
+  return fcitx_detached_jobs.start(std::move(work));
 }
 
 struct PendingPreferenceSave {
@@ -6082,7 +6129,10 @@ public:
     startTelemetry();
 #endif
   }
-  // The theme worker runs addon code on a schedule rather than on user action, so it is the detached job most likely to be in flight when Fcitx5 unloads the addon. Waiting for it here (its portal call gives up after 1 s) keeps that code from running after the library is gone; the other detached jobs keep the risk their comment accepts.
+  // Every detached worker runs addon code. Wait for the complete tracker before Fcitx5 can unload
+  // the shared object; otherwise a provider reply that outlives this object can jump into unmapped
+  // plugin code. Any provider shutdown delay is paid here, after input contexts
+  // have stopped accepting events, instead of risking execution after dlclose.
   // The key press counts get the same care: every context's pending batch is written here, synchronously, and so is any a context still flushes when the factory destroys it; batches already handed to a thread (contexts Fcitx5 destroyed before unloading the addon) are waited for. A store write takes milliseconds; the bound only keeps a wedged store from holding the exit.
   ~FcitxEngine() override {
     fcitx_key_presses_shutting_down = true;
@@ -6095,6 +6145,7 @@ public:
 #ifdef MSIME_FCITX5_TELEMETRY
     stopTelemetry();
 #endif
+    fcitx_detached_jobs.wait_idle();
   }
 #ifdef MSIME_FCITX5_TELEMETRY
   // Usage reporting (see platforms/common/Telemetry.h): one session per addon lifetime in this Fcitx5 process, in a directory of its own so it never shares a session marker with an IBus host of the same user. Crash capture only writes the record and then hands the signal to whatever handler Fcitx5 installed before. Nothing touches the network on the loop: the session starts and the queue is sent on a worker, again every 30 minutes, and the switch is read from the shared preferences on every round.
