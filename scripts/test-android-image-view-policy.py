@@ -32,6 +32,8 @@ def main() -> int:
         errors.append(f"{UI}: 不应保留图片着色转发方法")
     if "public static ImageView decorativeIcon(" in ui:
         errors.append(f"{UI}: 不应保留 decorativeIcon 转发工厂")
+    if "public static ImageView iconButton(" in ui:
+        errors.append(f"{UI}: 不应保留 iconButton 转发工厂")
 
     feedback = FEEDBACK.read_text(encoding="utf-8")
     if "Ui.setImageTint(" in feedback:
@@ -41,12 +43,16 @@ def main() -> int:
 
     if "public static ImageView decorative(Context context" not in policy:
         errors.append(f"{POLICY}: 缺少 decorative 工厂")
+    if policy.count("public static ImageView iconButton(Context context") != 2:
+        errors.append(f"{POLICY}: 缺少两种 iconButton 工厂")
     for path in ANDROID.rglob("*.java"):
         source = path.read_text(encoding="utf-8")
         if path != POLICY and "setImageTintList(ColorStateList.valueOf" in source:
             errors.append(f"{path}: 应复用 ImageViewPolicy.setTint")
         if path != UI and "Ui.decorativeIcon(" in source:
             errors.append(f"{path}: 不应调用已删除的 Ui.decorativeIcon")
+        if path != UI and "Ui.iconButton(" in source:
+            errors.append(f"{path}: 不应调用已删除的 Ui.iconButton")
 
     if errors:
         print("\n".join(errors), file=sys.stderr)
