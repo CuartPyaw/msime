@@ -243,16 +243,6 @@ public final class Ui {
         ViewPolicy.hideFromAccessibility(view);
     }
 
-    /** Create a theme-coloured one-pixel divider in either orientation. */
-    public static View divider(Context context, boolean horizontal) {
-        View view = ViewPolicy.newColorView(context, ThemeColorPolicy.hairline(context));
-        int thin = DimensionPolicy.atLeastOnePixel(context, 0.5f);
-        view.setLayoutParams(horizontal
-            ? LayoutPolicy.matchWidthHeightPx(thin)
-            : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
-        return view;
-    }
-
     /** Create the page-coloured separation band used between sheet options and the cancel row. */
     public static View sheetSeparator(Context context) {
         View view = new View(context);
