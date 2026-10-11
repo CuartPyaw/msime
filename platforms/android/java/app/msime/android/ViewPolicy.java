@@ -16,6 +16,7 @@ import android.text.TextUtils;
 import android.text.Editable;
 import android.text.TextWatcher;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.util.function.Consumer;
@@ -99,6 +100,13 @@ public final class ViewPolicy {
         TextView view = newTextView(context, "");
         style(view, sizeSp, 400, color);
         setPoliteLiveRegion(view);
+        return view;
+    }
+
+    /** Create an editable field with the shared size, weight, and colour policy. */
+    public static EditText styledInput(Context context, int sizeSp, int weight, int color) {
+        EditText view = new EditText(context);
+        style(view, sizeSp, weight, color);
         return view;
     }
 

@@ -110,7 +110,7 @@ public final class ClipboardEditPage extends DetailPage {
             case MISSING -> card.note(ClipboardHistoryPolicy.editMessage(ClipboardHistoryPolicy.EditResult.NOT_FOUND));
             case FAILED -> card.note("剪贴板历史读取失败，请稍后重试");
             case READY -> {
-                EditText input = Ui.styledInput(context, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
+                EditText input = ViewPolicy.styledInput(context, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
                 input.setHint("剪贴板记录的文字");
                 input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
                 ViewPolicy.setTopStart(input);

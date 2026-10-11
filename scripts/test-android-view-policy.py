@@ -55,6 +55,7 @@ def main() -> None:
         "public static TextView headingLabel(Context context, CharSequence text, float sizeSp,",
         "public static TextView centeredSingleLineLabel(Context context, CharSequence text, int sizeSp,",
         "public static TextView liveStatus(Context context, int sizeSp, int color)",
+        "public static EditText styledInput(Context context, int sizeSp, int weight, int color)",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -102,7 +103,7 @@ def main() -> None:
         raise AssertionError("Ui 仍保留文本样式转发方法")
     if re.search(r"(?<![.\w])style\(", ui):
         raise AssertionError("Ui 仍调用已移除的文本样式方法")
-    if ui.count("ViewPolicy.style(") != 3:
+    if ui.count("ViewPolicy.style(") != 2:
         raise AssertionError("Ui 文本工厂没有直接调用共享样式方法")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
@@ -132,6 +133,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.liveStatus(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享 live status 工厂")
+    if "public static EditText styledInput(" in ui:
+        raise AssertionError("Ui 仍保留 styledInput 转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.styledInput(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享编辑框工厂")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.afterTextChanged(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文字变更策略")

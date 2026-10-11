@@ -111,7 +111,7 @@ public final class InputDialog {
      * @param inputType `InputType` 的组合；0 表示普通单行文字
      */
     public EditText addField(CharSequence hint, @Nullable CharSequence initial, int inputType) {
-        EditText input = Ui.styledInput(context, 15, 400, ThemeColorPolicy.text(context));
+        EditText input = ViewPolicy.styledInput(context, 15, 400, ThemeColorPolicy.text(context));
         input.setHint(hint);
         input.setText(initial);
         ViewPolicy.setSingleLine(input);

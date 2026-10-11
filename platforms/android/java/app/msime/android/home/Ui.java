@@ -17,7 +17,6 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ImageView;
-import android.widget.EditText;
 import android.widget.TextView;
 import app.msime.android.ColorPolicy;
 import app.msime.android.ImageViewPolicy;
@@ -271,13 +270,6 @@ public final class Ui {
         view.setText(text);
         ViewPolicy.style(view, sizeSp, 400, color);
         ViewPolicy.setSingleLineEllipsized(view);
-        return view;
-    }
-
-    /** Create an editable field with the shared size, weight, and colour policy. */
-    public static EditText styledInput(Context context, int sizeSp, int weight, @ColorInt int color) {
-        EditText view = new EditText(context);
-        ViewPolicy.style(view, sizeSp, weight, color);
         return view;
     }
 
