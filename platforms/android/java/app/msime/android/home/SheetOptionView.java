@@ -28,7 +28,7 @@ final class SheetOptionView {
     static View create(Context context, CharSequence label, boolean selected, boolean nested,
             int color, boolean bold, Runnable action) {
         FrameLayout row = new FrameLayout(context);
-        Ui.setMinimumHeightDp(row, context, Ui.SHEET_OPTION_HEIGHT);
+        ViewPolicy.setMinimumHeightDp(context, row, Ui.SHEET_OPTION_HEIGHT);
         ViewPolicy.makeClickable(row, context, action);
 
         TextView text = ViewPolicy.centeredLabel(context, nested ? label + " ›" : label,

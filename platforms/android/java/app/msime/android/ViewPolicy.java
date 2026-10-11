@@ -278,6 +278,11 @@ public final class ViewPolicy {
         setMinimumHeight(view, DimensionPolicy.pixels(context, 64));
     }
 
+    /** Apply a caller-selected minimum height expressed in density-independent pixels. */
+    public static void setMinimumHeightDp(Context context, View view, float heightDp) {
+        setMinimumHeight(view, DimensionPolicy.pixels(context, heightDp));
+    }
+
     /** Clear all view padding. */
     public static void clearPadding(View view) {
         view.setPadding(0, 0, 0, 0);

@@ -32,7 +32,7 @@ public final class SearchPill extends LinearLayout {
         super(context, attrs);
         setOrientation(HORIZONTAL);
         ViewPolicy.setCenteredVertically(this);
-        Ui.setMinimumHeightDp(this, context, Ui.SEARCH_HEIGHT);
+        ViewPolicy.setMinimumHeightDp(context, this, Ui.SEARCH_HEIGHT);
         ViewPolicy.setHorizontalPaddingDp(context, this, 18);
         setBackground(DrawablePolicy.pill(ThemeColorPolicy.card(context)));
 
