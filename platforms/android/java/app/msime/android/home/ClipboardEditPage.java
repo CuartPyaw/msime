@@ -66,6 +66,8 @@ public final class ClipboardEditPage extends DetailPage {
     @Override public void onDestroyView() {
         column = null;
         save = null;
+        // HostTask drops a save result bound to the old view; allow the rebuilt editor to retry.
+        saving = false;
         super.onDestroyView();
     }
 
