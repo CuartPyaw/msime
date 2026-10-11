@@ -1,5 +1,7 @@
 package app.msime.android;
 
+import app.msime.android.ThemeColorPolicy;
+
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Paint;
