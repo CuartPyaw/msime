@@ -8,28 +8,26 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 HOME = ROOT / "platforms/android/java/app/msime/android/home"
-UI = HOME / "Ui.java"
+POLICY = ROOT / "platforms/android/java/app/msime/android/ViewPolicy.java"
 
 
 def main() -> int:
     errors = []
-    ui = UI.read_text(encoding="utf-8")
+    policy = POLICY.read_text(encoding="utf-8")
     required = (
         "public static TextView centeredLabel(Context context, CharSequence text, float sizeSp,",
-        "TextView centered = label(context, text, sizeSp, color);",
-        "public static TextView centeredLabel(Context context, CharSequence text, int sizeSp, int weight,",
-        "TextView centered = styledLabel(context, text, sizeSp, weight, color);",
-        "TextView button = centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);",
-        "TextView button = centeredLabel(context, label, sizeSp, weight, ink);",
+        "TextView view = label(context, text, sizeSp, color);",
+        "public static TextView centeredLabel(Context context, CharSequence text, int sizeSp,\n                                         int weight, int color)",
+        "TextView view = newTextView(context, text);",
+        "setCentered(view);",
     )
     for snippet in required:
-        if snippet not in ui:
-            errors.append(f"{UI}: 居中标签工厂缺少：{snippet}")
+        if snippet not in policy:
+            errors.append(f"{POLICY}: 居中标签工厂缺少：{snippet}")
 
     consumers = {
         "CloudClipboardPage.java": 1,
         "InputDialog.java": 1,
-        "LexiconPage.java": 1,
         "MsToast.java": 1,
         "OnboardingActivity.java": 2,
         "ProfilePage.java": 1,
@@ -39,14 +37,14 @@ def main() -> int:
         "SkinsPage.java": 4,
     }
     duplicated = re.compile(
-        r"Ui\.(?:styledLabel|label)\([^;]{0,300};\s*ViewPolicy\.setCentered\(", re.DOTALL
+        r"ViewPolicy\.(?:styledLabel|label)\([^;]{0,300};\s*ViewPolicy\.setCentered\(", re.DOTALL
     )
     for name, minimum in consumers.items():
         path = HOME / name
         source = path.read_text(encoding="utf-8")
-        centered = source.count("Ui.centeredLabel(") + source.count("Ui.centeredSingleLineLabel(")
+        centered = source.count("ViewPolicy.centeredLabel(") + source.count("ViewPolicy.centeredSingleLineLabel(")
         if centered < minimum:
-            errors.append(f"{path}: 至少 {minimum} 处文本未复用 Ui 居中标签工厂")
+            errors.append(f"{path}: 至少 {minimum} 处文本未复用 ViewPolicy 居中标签工厂")
         if duplicated.search(source):
             errors.append(f"{path}: 仍在标签构造后重复设置居中")
 
