@@ -83,6 +83,11 @@ public final class DeveloperPage extends DetailPage {
         column = null;
         cloudAccountId = "";
         cloudSessionId = "";
+        // Work results are fenced to the old view and will be dropped after recreation. Do not
+        // leave the rebuilt page permanently disabled, and never retain a full access token past
+        // the view that displayed it.
+        busy = false;
+        freshToken = null;
         super.onDestroyView();
     }
 
