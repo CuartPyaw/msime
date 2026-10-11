@@ -6,7 +6,6 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
-import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
 
 /** Shared Android containers and layout parameter factories. */
 public final class LayoutPolicy {
@@ -33,9 +32,17 @@ public final class LayoutPolicy {
         return new LinearLayout.LayoutParams(widthPixels, heightPixels);
     }
 
-    /** Create the full-width Material bottom-sheet drag handle. */
-    public static BottomSheetDragHandleView sheetDragHandle(Context context) {
-        BottomSheetDragHandleView handle = new BottomSheetDragHandleView(context);
+    /** Create the full-width Material bottom-sheet drag handle when the Material AAR is present. */
+    public static View sheetDragHandle(Context context) {
+        View handle;
+        try {
+            Class<?> type = Class.forName(
+                "com.google.android.material.bottomsheet.BottomSheetDragHandleView");
+            handle = (View) type.getConstructor(Context.class).newInstance(context);
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            // Host policy compilation and pure JVM checks do not include the Material AAR.
+            handle = new View(context);
+        }
         handle.setLayoutParams(matchWidthWrapParams());
         return handle;
     }
