@@ -256,7 +256,7 @@ public final class KeyboardOptionsPage extends DetailPage {
         ViewPolicy.setSymmetricPadding(strip, pad);
         LinearLayout plate = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(plate);
-        Ui.setHorizontalPaddingDp(plate, context, 10);
+        ViewPolicy.setHorizontalPaddingDp(context, plate, 10);
         ViewPolicy.setBackground(plate, DrawablePolicy.rounded(ColorPolicy.parse(skin.background(), ThemeColorPolicy.page(context)), DimensionPolicy.pixels(context, 12)));
         ViewPolicy.setImportantForAccessibility(plate,
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);

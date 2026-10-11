@@ -62,6 +62,7 @@ def main() -> None:
         "public static TextView trailingValue(Context context, CharSequence text, int sizeSp, int color)",
         "public static void hideFromAccessibility(View view)",
         "public static void setSymmetricPaddingDp(Context context, View view, float horizontalDp,",
+        "public static void setHorizontalPaddingDp(Context context, View view, float horizontalDp)",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -146,6 +147,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.setSymmetricPaddingPx(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享对称像素内边距策略")
+    if "public static void setHorizontalPaddingDp(" in ui:
+        raise AssertionError("Ui 仍保留水平 dp 内边距转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.setHorizontalPaddingDp(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享水平 dp 内边距策略")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")

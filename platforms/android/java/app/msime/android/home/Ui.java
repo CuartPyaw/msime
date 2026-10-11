@@ -195,12 +195,6 @@ public final class Ui {
         ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
     }
 
-    /** Apply equal horizontal dp padding with no vertical padding. */
-    public static void setHorizontalPaddingDp(View view, Context context, float horizontalDp) {
-        int horizontal = DimensionPolicy.pixels(context, horizontalDp);
-        ViewPolicy.setPadding(view, horizontal, 0, horizontal, 0);
-    }
-
     /** Apply four-sided padding expressed in density-independent pixels. */
     public static void setPaddingDp(View view, Context context, float leftDp, float topDp,
                                     float rightDp, float bottomDp) {

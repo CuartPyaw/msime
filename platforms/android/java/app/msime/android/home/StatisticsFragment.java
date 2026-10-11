@@ -431,7 +431,7 @@ public final class StatisticsFragment extends HomeTabFragment {
             @Nullable String trailing) {
         LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
-        Ui.setHorizontalPaddingDp(row, context, 4);
+        ViewPolicy.setHorizontalPaddingDp(context, row, 4);
         TextView heading = ViewPolicy.headingLabel(context, title, 13, ThemeColorPolicy.subText(context));
         row.addView(heading, LayoutPolicy.weightedWrapParams(1f));
         if (trailing != null) row.addView(ViewPolicy.label(context, trailing, 13, ThemeColorPolicy.subText(context)));

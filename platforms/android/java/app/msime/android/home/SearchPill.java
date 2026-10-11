@@ -33,7 +33,7 @@ public final class SearchPill extends LinearLayout {
         setOrientation(HORIZONTAL);
         ViewPolicy.setCenteredVertically(this);
         Ui.setMinimumHeightDp(this, context, Ui.SEARCH_HEIGHT);
-        Ui.setHorizontalPaddingDp(this, context, 18);
+        ViewPolicy.setHorizontalPaddingDp(context, this, 18);
         setBackground(DrawablePolicy.pill(ThemeColorPolicy.card(context)));
 
         ImageView glyph = ImageViewPolicy.decorative(context, R.drawable.ic_search, ThemeColorPolicy.subText(context));

@@ -280,7 +280,7 @@ final class KeyboardSheets {
             primary ? ThemeColorPolicy.onAccent(context) : ThemeColorPolicy.text(context),
             ViewPolicy.ripple(context, primary ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, 16)),
             Ui.ACTION_BUTTON_MIN_HEIGHT, action);
-        Ui.setHorizontalPaddingDp(button, context, 16);
+        ViewPolicy.setHorizontalPaddingDp(context, button, 16);
         button.setAccessibilityDelegate(buttonDelegate(label));
         return button;
     }
