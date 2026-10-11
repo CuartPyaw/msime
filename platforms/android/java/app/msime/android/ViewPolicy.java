@@ -136,6 +136,31 @@ public final class ViewPolicy {
         return button;
     }
 
+    /** Create a filled accent pill button with caller-selected dimensions. */
+    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
+                                      int fill, int ink, float horizontalPaddingDp,
+                                      float verticalPaddingDp, float minHeightDp, float minWidthDp) {
+        return pillButton(context, label, sizeSp, weight, fill, ink, horizontalPaddingDp,
+            verticalPaddingDp, minHeightDp, minWidthDp, null);
+    }
+
+    /** Create a filled pill button and bind its optional action. */
+    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
+                                      int fill, int ink, float horizontalPaddingDp,
+                                      float verticalPaddingDp, float minHeightDp, float minWidthDp,
+                                      Runnable action) {
+        TextView button = centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);
+        setBackground(button, pillRipple(context, fill));
+        int horizontal = DimensionPolicy.pixels(context, horizontalPaddingDp);
+        int vertical = DimensionPolicy.pixels(context, verticalPaddingDp);
+        setPadding(button, horizontal, vertical, horizontal, vertical);
+        setTextMinHeight(button, DimensionPolicy.pixels(context, minHeightDp));
+        if (minWidthDp > 0) setTextMinWidth(button, DimensionPolicy.pixels(context, minWidthDp));
+        setInteractive(button, true);
+        bindOptionalClick(button, action);
+        return button;
+    }
+
     /** Apply a minimum height to a generic view. */
     public static void setMinimumHeight(View view, int height) {
         view.setMinimumHeight(height);

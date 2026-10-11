@@ -86,7 +86,8 @@ public final class DownloadPage extends DetailPage {
         textParams.setMarginStart(DimensionPolicy.pixels(context, 14));
         card.addView(texts, textParams);
 
-        TextView copy = Ui.pillButton(context, "复制链接", Ui.TEXT_BUTTON_SMALL, 600, ThemeColorPolicy.onAccent(context),
+        TextView copy = ViewPolicy.pillButton(context, "复制链接", Ui.TEXT_BUTTON_SMALL, 600, ThemeColorPolicy.accent(context),
+            ThemeColorPolicy.onAccent(context),
             14, 6, Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, () -> copyLink(context));
         copy.setContentDescription("复制下载页链接");
         LinearLayout.LayoutParams copyParams = LayoutPolicy.wrapParams();
