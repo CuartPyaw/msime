@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Future;
 import org.json.JSONObject;
 
 /**
@@ -66,6 +67,7 @@ public final class FeedbackPage extends DetailPage {
     private final List<byte[]> screenshots = new ArrayList<>(FeedbackApi.MAX_SCREENSHOTS);
     private boolean sending;
     private boolean sent;
+    @Nullable private Future<?> submitTask;
 
     @Nullable private EditText detail;
     @Nullable private TextView counter;
@@ -162,6 +164,13 @@ public final class FeedbackPage extends DetailPage {
     }
 
     @Override public void onDestroyView() {
+        if (submitTask != null) {
+            submitTask.cancel(true);
+            submitTask = null;
+        }
+        // The submission result is fenced to this view; reset its transient state so a rebuilt
+        // page does not keep the submit button disabled after the old callback is dropped.
+        sending = false;
         detail = null;
         counter = null;
         submit = null;
@@ -301,9 +310,10 @@ public final class FeedbackPage extends DetailPage {
         boolean withDiagnostics = diagnostics;
         List<FeedbackApi.Screenshot> shots = new ArrayList<>(screenshots.size());
         for (byte[] bytes : screenshots) shots.add(new FeedbackApi.Screenshot("image/jpeg", bytes));
-        AboutPage.network(this, () -> new FeedbackApi(new CloudApi(application)).submit(kind, text,
+        submitTask = AboutPage.network(this, () -> new FeedbackApi(new CloudApi(application)).submit(kind, text,
             UpdateJobService.currentVersion(application), AppEdition.current().id(),
             withDiagnostics ? collectDiagnostics(application) : null, shots), outcome -> {
+            submitTask = null;
             sending = false;
             if (outcome.error() != null) {
                 refresh();
