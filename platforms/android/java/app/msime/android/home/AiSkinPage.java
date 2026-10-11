@@ -294,7 +294,7 @@ public final class AiSkinPage extends DetailPage {
         LinearLayout header = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(header);
         LinearLayout heading = LayoutPolicy.column(context);
-        title = Ui.singleLineLabel(context, "", 17, 600, ThemeColorPolicy.text(context));
+        title = ViewPolicy.singleLineLabel(context, "", 17, 600, ThemeColorPolicy.text(context));
         heading.addView(title);
         subtitle = Ui.styledLabel(context, "", 13, 400, ThemeColorPolicy.subText(context));
         heading.addView(subtitle);
@@ -373,7 +373,7 @@ public final class AiSkinPage extends DetailPage {
         Ui.setPaddingDp(chips, context, 12, 4, 12, 12);
         List<TextView> chipViews = new ArrayList<>(SUGGESTIONS.length);
         for (String suggestion : SUGGESTIONS) {
-            TextView chip = Ui.singleLineLabel(context, suggestion, 13, 400, ThemeColorPolicy.text(context));
+            TextView chip = ViewPolicy.singleLineLabel(context, suggestion, 13, 400, ThemeColorPolicy.text(context));
             Ui.setSymmetricPaddingDp(chip, context, 12, 6);
             ViewPolicy.setInteractive(chip, true);
             ViewPolicy.bindClick(chip, () -> {

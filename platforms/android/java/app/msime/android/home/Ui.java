@@ -252,14 +252,6 @@ public final class Ui {
         return view;
     }
 
-    /** 创建带字重的单行标签。 */
-    public static TextView singleLineLabel(Context context, CharSequence text, int sizeSp, int weight,
-                                           @ColorInt int color) {
-        TextView singleLine = styledLabel(context, text, sizeSp, weight, color);
-        ViewPolicy.setSingleLine(singleLine);
-        return singleLine;
-    }
-
     /** 创建双轴居中的普通标签。 */
     public static TextView centeredLabel(Context context, CharSequence text, float sizeSp,
                                          @ColorInt int color) {
