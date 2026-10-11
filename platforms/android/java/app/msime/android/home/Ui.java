@@ -166,11 +166,6 @@ public final class Ui {
 
     // ---- 读取 ----
 
-    /** Apply the standard minimum height for a detail row. */
-    public static void setRowMinimumHeight(View view, Context context) {
-        setMinimumHeightDp(view, context, ROW_MIN_HEIGHT);
-    }
-
     /** Set a view's minimum height from a density-independent value. */
     public static void setMinimumHeightDp(View view, Context context, float heightDp) {
         ViewPolicy.setMinimumHeight(view, DimensionPolicy.pixels(context, heightDp));

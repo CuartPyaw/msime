@@ -273,6 +273,11 @@ public final class ViewPolicy {
         setSymmetricPaddingDp(context, view, 16, 8);
     }
 
+    /** Apply the standard detail-row minimum height. */
+    public static void setRowMinimumHeight(Context context, View view) {
+        setMinimumHeight(view, DimensionPolicy.pixels(context, 64));
+    }
+
     /** Clear all view padding. */
     public static void clearPadding(View view) {
         view.setPadding(0, 0, 0, 0);
