@@ -3028,6 +3028,24 @@ int main(int argc, char **argv) {
       preferences["translation_target_language"] = "en";
     });
     require(key(FcitxKey_n) && key(FcitxKey_i), "translation composition");
+    // 模拟定时器重复收到同一份云候选或 AI 候选，已显示的译文不能被清掉。
+    const uint8_t repeatedSource = ai ? 1 : 0;
+    const auto deliverRepeatedOnline = [&] {
+      const auto query = response(msime_client_online_query(state->session_)).dump();
+      state->online_query_ = query;
+      state->online_due_ = state->ai_due_ =
+          std::chrono::steady_clock::now() + std::chrono::hours(1);
+      state->online_job_session_ = state->session_;
+      auto &slot = state->online_slots_[repeatedSource];
+      slot.query = query;
+      slot.epoch = state->online_epoch_;
+      std::promise<Json> reply;
+      slot.job = reply.get_future().share();
+      reply.set_value(Json{{"query", query}, {"candidates", Json::array({
+          Json{{"text", "合成候选"}, {"source", repeatedSource}}})}});
+      state->refreshOnline();
+    };
+    deliverRepeatedOnline();
     state->refreshTranslations();
     require(!state->translation_job_.valid(), "translation waits for idle debounce");
     const auto translationDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -3047,10 +3065,29 @@ int main(int argc, char **argv) {
                                    std::istreambuf_iterator<char>());
     require(glossContent.find("synthetic-gloss") != std::string::npos,
             "English translation gloss is persisted");
+    const auto translatedGeneration = state->view_.at("generation");
+    for (int repeat = 0; repeat < 3; ++repeat) {
+      state->online_due_ = state->ai_due_ = std::chrono::steady_clock::now();
+      state->refreshOnline();
+      // 已完成的查询若被再次发起，回放同一份成功回包以捕获译文消失。
+      if (state->online_slots_[repeatedSource].job.valid()) deliverRepeatedOnline();
+      require(ic.inputPanel().candidateList()->candidate(0).text().toString().find("synthetic-gloss") != std::string::npos,
+              "重复在线候选刷新使已显示的译文消失");
+      require(state->view_.at("generation") == translatedGeneration,
+              "相同在线候选不应推进候选代次");
+      require(!state->online_slots_[repeatedSource].job.valid(),
+              "已显示的在线候选不应重复请求");
+    }
     const auto translatedText = state->view_.at("candidates").at(0).at("text").get<std::string>();
     const auto beforeTranslatedCommit = ic.committed;
     ic.inputPanel().candidateList()->candidate(0).select(&ic);
     require(ic.committed == beforeTranslatedCommit + translatedText, "gloss excluded from committed text");
+    require(key(FcitxKey_n) && key(FcitxKey_i), "新的组合仍能发起在线请求");
+    state->refreshOnline();
+    state->online_due_ = state->ai_due_ = std::chrono::steady_clock::now();
+    state->refreshOnline();
+    require(state->online_slots_[repeatedSource].job.valid(),
+            "在线去重不能阻止新组合的请求");
     state->close();
     state->clearPanel();
     // The helpcode annotation on a candidate row follows the scheme's show_in_candidate_window preference, the way the IBus host renders it. This host used to append it whatever the setting said. In / and @ the annotation is the command title or the place's province and city, so neither that preference nor the wubi code hint hides it; Wubi opens / and @ too, and with 五笔剩余编码 off its command rows used to lose their titles. The other local modes still carry helpcodes and stay behind the preference.

@@ -2035,7 +2035,8 @@ public:
       for (uint8_t source = 0; source < 2; ++source) {
         const bool enabled = source == 0 ? cloud : ai;
         auto &slot = online_slots_[source];
-        if (!enabled || slot.job.valid()) continue;
+        // 已显示的查询不再请求；重复应用同一批候选会推进代次并清掉译文。
+        if (!enabled || slot.job.valid() || encoded == online_display_queries_[source]) continue;
         // Windows AiAssistant shows a cached answer as soon as the input changes; only the network request waits for the idle delay. The probe never leaves the provider.
         const bool cacheOnly = source == 1 && changed;
         if (!cacheOnly && now < (source == 0 ? online_due_ : ai_due_)) continue;
