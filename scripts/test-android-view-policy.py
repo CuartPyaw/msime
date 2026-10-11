@@ -80,11 +80,18 @@ def main() -> None:
         raise AssertionError("Ui 按钮没有直接调用共享文本最小宽度策略")
     if "public static void setEnabledLook(" in ui:
         raise AssertionError("Ui 仍保留无调用方的启用状态转发方法")
+    if "public static void makeClickable(" in ui:
+        raise AssertionError("Ui 仍保留 makeClickable 转发方法")
+    for path in HOME.glob("*.java"):
+        if "Ui.makeClickable(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享点击策略")
     if "public static void setBottomPadding(" in ui:
         raise AssertionError("Ui 仍保留底部内边距转发方法")
     for path in HOME.glob("*.java"):
         if "Ui.setBottomPadding(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享底部内边距策略")
+    if "public static void makeClickable(View view, Context context, Runnable action)" not in view_policy:
+        raise AssertionError("ViewPolicy 缺少共享点击策略")
     if "ViewPolicy.setBottomPadding(target, bottom);" not in ui:
         raise AssertionError("Ui 页面避让监听没有调用共享底部内边距策略")
     for name in ("DetailPage.java", "KeyboardFragment.java"):

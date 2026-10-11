@@ -528,12 +528,6 @@ public final class Ui {
         return TextPolicy.initial(trimmed, fallback);
     }
 
-    /** Apply the standard ripple and keyboard-accessible click behavior to a view. */
-    public static void makeClickable(View view, Context context, Runnable action) {
-        ViewPolicy.setBackground(view, DrawablePolicy.ripple(context));
-        bindClick(view, action);
-    }
-
     private static void bindClick(View view, Runnable action) {
         ViewPolicy.setInteractive(view, true);
         ViewPolicy.bindOptionalClick(view, action);

@@ -3,6 +3,7 @@ package app.msime.android;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Paint;
+import android.graphics.drawable.Drawable;
 import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.View;
@@ -186,6 +187,22 @@ public final class ViewPolicy {
     /** Bind an optional action, clearing the listener when no action is available. */
     public static void bindOptionalClick(View view, Runnable action) {
         view.setOnClickListener(action == null ? null : ignored -> action.run());
+    }
+
+    /** Resolve the theme's standard selectable-item ripple. */
+    public static Drawable ripple(Context context) {
+        TypedValue value = new TypedValue();
+        if (!context.getTheme().resolveAttribute(android.R.attr.selectableItemBackground, value, true)) {
+            return null;
+        }
+        return context.getDrawable(value.resourceId);
+    }
+
+    /** Apply the standard theme ripple and optional click behavior to a view. */
+    public static void makeClickable(View view, Context context, Runnable action) {
+        setBackground(view, ViewPolicy.ripple(context));
+        setInteractive(view, true);
+        bindOptionalClick(view, action);
     }
 
     /** Set whether a view accepts input without changing its visibility or focus policy. */

@@ -1,7 +1,6 @@
 package app.msime.android;
 
 import android.content.res.ColorStateList;
-import android.content.Context;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -81,14 +80,6 @@ public final class DrawablePolicy {
     /** 用单色状态列表、内容层和遮罩层构造平台波纹 drawable。 */
     public static RippleDrawable ripple(int color, Drawable content, Drawable mask) {
         return new RippleDrawable(ColorStateList.valueOf(color), content, mask);
-    }
-
-    /** Resolve the theme's standard selectable-item ripple. */
-    public static Drawable ripple(Context context) {
-        android.util.TypedValue value = new android.util.TypedValue();
-        if (!context.getTheme().resolveAttribute(
-                android.R.attr.selectableItemBackground, value, true)) return null;
-        return context.getDrawable(value.resourceId);
     }
 
     /** Build a drawable state list while keeping the supplied state precedence. */

@@ -61,7 +61,7 @@ public final class PhrasesPage extends DetailPage {
         for (CommonPhrasesStore.Phrase phrase : current.phrases()) {
             GroupCard.Row row = list.button(phrase.text(), null, "删除", () -> remove(phrase));
             // 点整行修改这一条（#5673）；行尾的「删除」按钮自己响应，不会连带打开修改框。
-            Ui.makeClickable(row.view(), requireContext(), () -> showEditDialog(phrase));
+            ViewPolicy.makeClickable(row.view(), requireContext(), () -> showEditDialog(phrase));
             row.view().setContentDescription(phrase.text() + "，点按修改");
         }
         if (!current.phrases().isEmpty()) list.footer("点一条常用语可以修改。");

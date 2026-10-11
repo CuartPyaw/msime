@@ -200,7 +200,7 @@ final class KeyboardSheets {
         row.setContentDescription(title
             + (subtitle == null || subtitle.isEmpty() ? "" : "，" + subtitle)
             + (value == null || value.isEmpty() ? "" : "，" + value));
-        Ui.makeClickable(row, context, action);
+        ViewPolicy.makeClickable(row, context, action);
         return row;
     }
 
@@ -234,7 +234,7 @@ final class KeyboardSheets {
         LinearLayout.LayoutParams labelParams = Ui.weightWrap(1f);
         labelParams.setMarginStart(Ui.dp(context, labelMarginStart));
         row.addView(label, labelParams);
-        Ui.makeClickable(row, context, action);
+        ViewPolicy.makeClickable(row, context, action);
         row.setAccessibilityDelegate(buttonDelegate(title));
         return row;
     }
@@ -358,7 +358,7 @@ final class KeyboardSheets {
             LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
             chevronParams.setMarginStart(Ui.dp(context, 6));
             row.addView(chevron, chevronParams);
-            Ui.makeClickable(row, context, action);
+            ViewPolicy.makeClickable(row, context, action);
         }
         return row;
     }
