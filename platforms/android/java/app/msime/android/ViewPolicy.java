@@ -94,6 +94,14 @@ public final class ViewPolicy {
         return view;
     }
 
+    /** Create a polite live-region status label for accessibility announcements. */
+    public static TextView liveStatus(Context context, int sizeSp, int color) {
+        TextView view = newTextView(context, "");
+        style(view, sizeSp, 400, color);
+        setPoliteLiveRegion(view);
+        return view;
+    }
+
     /** Apply a minimum height to a generic view. */
     public static void setMinimumHeight(View view, int height) {
         view.setMinimumHeight(height);

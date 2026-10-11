@@ -54,6 +54,7 @@ def main() -> None:
         "public static TextView centeredLabel(Context context, CharSequence text, float sizeSp,",
         "public static TextView headingLabel(Context context, CharSequence text, float sizeSp,",
         "public static TextView centeredSingleLineLabel(Context context, CharSequence text, int sizeSp,",
+        "public static TextView liveStatus(Context context, int sizeSp, int color)",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -126,6 +127,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.centeredSingleLineLabel(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享居中单行标签工厂")
+    if "public static TextView liveStatus(" in ui:
+        raise AssertionError("Ui 仍保留 liveStatus 转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.liveStatus(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享 live status 工厂")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.afterTextChanged(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文字变更策略")
