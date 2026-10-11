@@ -86,6 +86,14 @@ public final class ViewPolicy {
         return view;
     }
 
+    /** Create a centered styled text label constrained to one line. */
+    public static TextView centeredSingleLineLabel(Context context, CharSequence text, int sizeSp,
+                                                   int weight, int color) {
+        TextView view = centeredLabel(context, text, sizeSp, weight, color);
+        setSingleLine(view);
+        return view;
+    }
+
     /** Apply a minimum height to a generic view. */
     public static void setMinimumHeight(View view, int height) {
         view.setMinimumHeight(height);

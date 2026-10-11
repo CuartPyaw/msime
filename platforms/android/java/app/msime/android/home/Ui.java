@@ -252,14 +252,6 @@ public final class Ui {
         return view;
     }
 
-    /** 创建带字重、双轴居中的单行标签。 */
-    public static TextView centeredSingleLineLabel(Context context, CharSequence text, int sizeSp,
-                                                   int weight, @ColorInt int color) {
-        TextView singleLine = ViewPolicy.centeredLabel(context, text, sizeSp, weight, color);
-        ViewPolicy.setSingleLine(singleLine);
-        return singleLine;
-    }
-
     /** 创建会由辅助功能礼貌播报变化的空状态文本。 */
     public static TextView liveStatus(Context context, int sizeSp) {
         TextView status = styledLabel(context, "", sizeSp, 400, ThemeColorPolicy.subText(context));
@@ -331,7 +323,7 @@ public final class Ui {
                                       @ColorInt int fill, @ColorInt int ink,
                                       float horizontalPaddingDp, float verticalPaddingDp,
                                       float minHeightDp, float minWidthDp, Runnable action) {
-        TextView button = centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);
+        TextView button = ViewPolicy.centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);
         ViewPolicy.setBackground(button, ViewPolicy.pillRipple(context, fill));
         setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
         setTextMinHeightDp(button, context, minHeightDp);
