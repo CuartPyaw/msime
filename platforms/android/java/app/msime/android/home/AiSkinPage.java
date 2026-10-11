@@ -288,21 +288,21 @@ public final class AiSkinPage extends DetailPage {
         GroupCard previewGroup = GroupCard.add(target, null);
         LinearLayout card = previewGroup.card();
         Ui.setPaddingDp(card, context, 14, 14, 14, 12);
-        LinearLayout header = Ui.row(context);
+        LinearLayout header = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(header);
-        LinearLayout heading = Ui.column(context);
+        LinearLayout heading = LayoutPolicy.column(context);
         title = Ui.singleLineLabel(context, "", 17, 600, ThemeColorPolicy.text(context));
         heading.addView(title);
         subtitle = Ui.styledLabel(context, "", 13, 400, ThemeColorPolicy.subText(context));
         heading.addView(subtitle);
-        header.addView(heading, Ui.weightWrap(1f));
+        header.addView(heading, LayoutPolicy.weightedWrapParams(1f));
         SegmentedControl layout = new SegmentedControl(context);
         layout.setOptions(List.of("26 键", "9 键"), s.nineKey ? 1 : 0);
         layout.setOnSelect(index -> {
             s.nineKey = index == 1;
             refreshPreview();
         });
-        header.addView(layout, Ui.wrap());
+        header.addView(layout, LayoutPolicy.wrapParams());
         card.addView(header);
 
         FrameLayout stage = new FrameLayout(context);
@@ -310,7 +310,7 @@ public final class AiSkinPage extends DetailPage {
         preview.setContentDescription("皮肤预览");
         stage.addView(preview,
             LayoutPolicy.frameMatchWidthHeightPx(DimensionPolicy.pixels(context, 200)));
-        LinearLayout overlay = Ui.column(context);
+        LinearLayout overlay = LayoutPolicy.column(context);
         ViewPolicy.setCentered(overlay);
         ProgressBar spinner = new ProgressBar(context);
         ProgressBarPolicy.setIndeterminateTint(spinner, ThemeColorPolicy.accent(context));
@@ -324,12 +324,12 @@ public final class AiSkinPage extends DetailPage {
         stageParams.topMargin = DimensionPolicy.pixels(context, 12);
         card.addView(stage, stageParams);
 
-        LinearLayout colours = Ui.row(context);
+        LinearLayout colours = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(colours);
         TextView label = Ui.styledLabel(context, "配色", 13, 400, ThemeColorPolicy.subText(context));
         colours.addView(label);
-        palette = Ui.row(context);
-        LinearLayout.LayoutParams paletteParams = Ui.wrap();
+        palette = LayoutPolicy.row(context);
+        LinearLayout.LayoutParams paletteParams = LayoutPolicy.wrapParams();
         paletteParams.setMarginStart(DimensionPolicy.pixels(context, 10));
         colours.addView(palette, paletteParams);
         LinearLayout.LayoutParams coloursParams = Ui.matchWidth();
@@ -366,7 +366,7 @@ public final class AiSkinPage extends DetailPage {
         describe.card().addView(input, Ui.matchWidth());
         HorizontalScrollView chipScroll = new HorizontalScrollView(context);
         chipScroll.setHorizontalScrollBarEnabled(false);
-        LinearLayout chips = Ui.row(context);
+        LinearLayout chips = LayoutPolicy.row(context);
         Ui.setPaddingDp(chips, context, 12, 4, 12, 12);
         List<TextView> chipViews = new ArrayList<>(SUGGESTIONS.length);
         for (String suggestion : SUGGESTIONS) {
@@ -379,7 +379,7 @@ public final class AiSkinPage extends DetailPage {
                 input.setSelection(input.length());
             });
             chip.setAccessibilityDelegate(KeyboardSheets.buttonDelegate("建议描述 " + suggestion));
-            LinearLayout.LayoutParams chipParams = Ui.wrap();
+            LinearLayout.LayoutParams chipParams = LayoutPolicy.wrapParams();
             chipParams.setMarginEnd(DimensionPolicy.pixels(context, 8));
             chips.addView(chip, chipParams);
             chipViews.add(chip);
@@ -407,21 +407,21 @@ public final class AiSkinPage extends DetailPage {
         animations.setOnSelect(index -> s.animation = index);
         animationGroup.card().addView(animations, Ui.matchWidth());
 
-        LinearLayout actions = Ui.row(context);
+        LinearLayout actions = LayoutPolicy.row(context);
         LinearLayout.LayoutParams actionsParams = Ui.matchWidth();
         actionsParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
         if (unavailable) {
             GroupCard.add(target, null).note("AI 设计皮肤暂不可用，请稍后再来。");
         } else if (s.results.isEmpty()) {
             TextView generate = KeyboardSheets.bigButton(context, "✦ 生成皮肤", true, () -> generate(input));
-            actions.addView(generate, Ui.weightWrap(1f));
+            actions.addView(generate, LayoutPolicy.weightedWrapParams(1f));
             target.addView(actions, actionsParams);
             bindEnabled(input, generate);
         } else {
             TextView again = KeyboardSheets.bigButton(context, "✦ 重新生成", false, () -> generate(input));
-            actions.addView(again, Ui.weightWrap(1f));
+            actions.addView(again, LayoutPolicy.weightedWrapParams(1f));
             TextView use = KeyboardSheets.bigButton(context, "使用此皮肤", true, this::useResult);
-            LinearLayout.LayoutParams useParams = Ui.weightWrap(1f);
+            LinearLayout.LayoutParams useParams = LayoutPolicy.weightedWrapParams(1f);
             useParams.setMarginStart(DimensionPolicy.pixels(context, 12));
             actions.addView(use, useParams);
             target.addView(actions, actionsParams);

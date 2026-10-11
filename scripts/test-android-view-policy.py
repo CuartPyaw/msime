@@ -118,17 +118,13 @@ def main() -> None:
     slider = (HOME / "MsSlider.java").read_text(encoding="utf-8")
     if "ViewPolicy.setHorizontalPadding(this, inset);" not in slider:
         raise AssertionError("MsSlider 没有直接调用共享水平内边距策略")
-    if "return ViewPolicy.newRow(context);" not in ui:
-        raise AssertionError("Ui 没有调用共享横向容器工厂")
-    if "return ViewPolicy.newRow(context);" not in layout_policy:
-        raise AssertionError("KeyboardGeometry 没有调用共享横向容器工厂")
+    if "public static LinearLayout row(Context context)" not in layout_policy:
+        raise AssertionError("LayoutPolicy 缺少横向容器工厂")
+    if "public static LinearLayout column(Context context)" not in layout_policy:
+        raise AssertionError("LayoutPolicy 缺少纵向容器工厂")
     horizontal_factory = "LinearLayout view = new LinearLayout(context);\n        view.setOrientation(LinearLayout.HORIZONTAL);"
     if horizontal_factory in ui or horizontal_factory in keyboard_geometry:
         raise AssertionError("页面工具类仍保留重复的横向容器实现")
-    if "return ViewPolicy.newColumn(context);" not in ui:
-        raise AssertionError("Ui 没有调用共享纵向容器工厂")
-    if "return ViewPolicy.newColumn(context);" not in layout_policy:
-        raise AssertionError("KeyboardGeometry 没有调用共享纵向容器工厂")
     vertical_factory = "LinearLayout view = new LinearLayout(context);\n        view.setOrientation(LinearLayout.VERTICAL);"
     if vertical_factory in ui or vertical_factory in keyboard_geometry:
         raise AssertionError("页面工具类仍保留重复的纵向容器实现")

@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.DimensionPolicy;
@@ -110,15 +112,15 @@ final class LoginSheet {
         dialog = new BottomSheetDialog(activity);
         appleResult = this::finishWith;
 
-        LinearLayout root = Ui.column(activity);
+        LinearLayout root = LayoutPolicy.column(activity);
         Ui.setPaddingDp(root, activity, 24, 0, 24, 20);
         root.addView(Ui.sheetDragHandle(activity));
 
-        LinearLayout header = Ui.row(activity);
+        LinearLayout header = LayoutPolicy.row(activity);
         ViewPolicy.setCenteredVertically(header);
         TextView title = Ui.headingLabel(activity, "link".equals(purpose) ? "添加登录方式" : "登录水杉",
             22, 700, ThemeColorPolicy.text(activity));
-        header.addView(title, Ui.weightWrap(1f));
+        header.addView(title, LayoutPolicy.weightedWrapParams(1f));
         ImageView close = ImageViewPolicy.iconButton(activity,
             new PathIcon(24, new String[] {CLOSE_PATH}, new int[] {ThemeColorPolicy.text(activity)}),
             ThemeColorPolicy.text(activity), "关闭", Ui.BACK_BUTTON_SIZE, dialog::cancel);
@@ -129,7 +131,7 @@ final class LoginSheet {
             14, 400, ThemeColorPolicy.subText(activity));
         root.addView(subtitle, Ui.matchWidth(activity, 2));
 
-        options = Ui.column(activity);
+        options = LayoutPolicy.column(activity);
         boolean night = DimensionPolicy.isNight(activity);
         if (providers.appleWeb()) {
             // Apple 的规范按钮：浅色下黑底白字，深色下白底黑字；这是 Apple 的品牌色，不随季节主题变。
@@ -142,7 +144,7 @@ final class LoginSheet {
             options.addView(button(new PathIcon(48, GOOGLE_PATHS, GOOGLE_COLORS), "通过 Google 登录",
                 Color.TRANSPARENT, ThemeColorPolicy.text(activity), ThemeColorPolicy.outline(activity), this::google), Ui.matchWidth(activity, 12));
         }
-        email = Ui.column(activity);
+        email = LayoutPolicy.column(activity);
         if (providers.email()) {
             int accent = ThemeColorPolicy.accent(activity);
             options.addView(button(new PathIcon(24, new String[] {MAIL_PATH}, new int[] {accent}), "使用邮箱登录",
@@ -301,7 +303,7 @@ final class LoginSheet {
 
     /** 50dp 高、12dp 圆角的整行按钮：可选的 20dp 图标加 16sp 半粗文字，居中。 */
     private View button(Drawable icon, String label, int fill, int ink, int stroke, Runnable action) {
-        LinearLayout button = Ui.row(activity);
+        LinearLayout button = LayoutPolicy.row(activity);
         ViewPolicy.setCentered(button);
         Ui.setMinimumHeightDp(button, activity, 50);
         GradientDrawable face = stroke == 0

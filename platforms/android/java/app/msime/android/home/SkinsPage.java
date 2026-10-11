@@ -120,12 +120,12 @@ public final class SkinsPage extends ReloadingDetailPage {
         holder.setClipToOutline(false);
         Context context = target.getContext();
         for (int start = 0; start < cards.size(); start += 2) {
-            LinearLayout row = Ui.row(context);
+            LinearLayout row = LayoutPolicy.row(context);
             row.setBaselineAligned(false);
             for (int slot = 0; slot < 2; slot++) {
                 int index = start + slot;
                 View cell = index < cards.size() ? cards.get(index) : new View(context);
-                LinearLayout.LayoutParams params = Ui.weightWrap(1f);
+                LinearLayout.LayoutParams params = LayoutPolicy.weightedWrapParams(1f);
                 if (slot == 1) params.setMarginStart(DimensionPolicy.pixels(context, 12));
                 row.addView(cell, params);
             }
@@ -136,7 +136,7 @@ public final class SkinsPage extends ReloadingDetailPage {
     }
 
     private View card(Context context, Card card) {
-        LinearLayout cell = Ui.column(context);
+        LinearLayout cell = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(cell);
 
         FrameLayout tile = new FrameLayout(context);
@@ -172,9 +172,9 @@ public final class SkinsPage extends ReloadingDetailPage {
 
     /** 虚线卡：「✦ 描述一句话生成」，名字是「AI 设计皮肤」，点了进 AI 设计页。 */
     private View aiCard(Context context) {
-        LinearLayout cell = Ui.column(context);
+        LinearLayout cell = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(cell);
-        LinearLayout tile = Ui.column(context);
+        LinearLayout tile = LayoutPolicy.column(context);
         ViewPolicy.setCentered(tile);
         GradientDrawable dashed = DrawablePolicy.outlinedDashed(ThemeColorPolicy.accentSoft(context), DimensionPolicy.pixels(context, 14),
             DimensionPolicy.atLeastOnePixel(context, 1.5f), ThemeColorPolicy.accent(context), DimensionPolicy.pixels(context, 6),

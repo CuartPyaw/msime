@@ -52,7 +52,7 @@ public final class InputDialog {
         dialog = new AppCompatDialog(context);
         dialog.supportRequestWindowFeature(Window.FEATURE_NO_TITLE);
 
-        LinearLayout root = Ui.column(context);
+        LinearLayout root = LayoutPolicy.column(context);
         ViewPolicy.setBackground(root, DrawablePolicy.rounded(ThemeColorPolicy.sheetBackground(context), DimensionPolicy.pixels(context, Ui.DIALOG_RADIUS)));
         root.setClipToOutline(true);
 
@@ -74,12 +74,12 @@ public final class InputDialog {
             root.addView(note, params);
         }
 
-        fields = Ui.column(context);
+        fields = LayoutPolicy.column(context);
         Ui.setPaddingDp(fields, context, 16, 6, 16, 16);
         root.addView(fields, Ui.matchWidth());
 
         root.addView(Ui.divider(context, true));
-        LinearLayout buttons = Ui.row(context);
+        LinearLayout buttons = LayoutPolicy.row(context);
         TextView cancel = button("取消", 400, ThemeColorPolicy.accent(context));
         ViewPolicy.bindClick(cancel, dialog::cancel);
         buttons.addView(cancel,

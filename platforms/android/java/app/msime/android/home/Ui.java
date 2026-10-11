@@ -287,30 +287,9 @@ public final class Ui {
         return handle;
     }
 
-    /** Create a vertical linear container for stacked host content. */
-    public static LinearLayout column(Context context) {
-        return ViewPolicy.newColumn(context);
-    }
-
-    /** Create a horizontal linear container for inline host content. */
-    public static LinearLayout row(Context context) {
-        return ViewPolicy.newRow(context);
-    }
-
-    /** Layout parameters for a weighted child that wraps its height. */
-    public static LinearLayout.LayoutParams weightWrap(float weight) {
-        return new LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, weight);
-    }
-
-    /** Layout parameters for a view that wraps both its content dimensions. */
-    public static LinearLayout.LayoutParams wrap() {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT);
-    }
-
     /** Layout parameters for a trailing row control with the standard row gap. */
     public static LinearLayout.LayoutParams rowGapParams(Context context) {
-        LinearLayout.LayoutParams params = wrap();
+        LinearLayout.LayoutParams params = LayoutPolicy.wrapParams();
         params.setMarginStart(DimensionPolicy.pixels(context, ROW_GAP));
         return params;
     }
@@ -531,7 +510,7 @@ public final class Ui {
 
     /** Create a vertically arranged rounded surface for page cards. */
     public static LinearLayout verticalCard(Context context, float radiusDp) {
-        LinearLayout card = column(context);
+        LinearLayout card = LayoutPolicy.column(context);
         ViewPolicy.setBackground(card,
             DrawablePolicy.rounded(ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, radiusDp)));
         return card;

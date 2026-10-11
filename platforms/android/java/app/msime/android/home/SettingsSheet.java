@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ThemeColorPolicy;
@@ -26,7 +28,7 @@ public final class SettingsSheet {
     public SettingsSheet(Context context, String title, @Nullable String subtitle) {
         this.context = context;
         dialog = new BottomSheetDialog(context);
-        LinearLayout root = Ui.column(context);
+        LinearLayout root = LayoutPolicy.column(context);
         Ui.setPaddingDp(root, context, 24, 0, 24, 24);
 
         // 拖动条既是可见的把手，也给读屏提供「收起面板」的操作。
@@ -42,7 +44,7 @@ public final class SettingsSheet {
             root.addView(note, params);
         }
 
-        content = Ui.column(context);
+        content = LayoutPolicy.column(context);
         NestedScrollView scroll = new NestedScrollView(context);
         scroll.addView(content, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));

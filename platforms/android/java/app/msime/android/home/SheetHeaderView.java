@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ThemeColorPolicy;
@@ -16,7 +18,7 @@ public final class SheetHeaderView {
     /** 创建带标准内边距、排版和无障碍标题语义的面板标题区。 */
     public static LinearLayout create(Context context, CharSequence title,
             @Nullable CharSequence subtitle) {
-        LinearLayout header = Ui.column(context);
+        LinearLayout header = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(header);
         int horizontal = DimensionPolicy.pixels(context, 16);
         ViewPolicy.setPadding(header, horizontal, 0, horizontal, DimensionPolicy.pixels(context, 12));
@@ -29,7 +31,7 @@ public final class SheetHeaderView {
         if (subtitle != null && subtitle.length() > 0) {
             TextView note = Ui.centeredLabel(context, subtitle, Ui.TEXT_SHEET_HEADER, 400,
                 ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams params = Ui.wrap();
+            LinearLayout.LayoutParams params = LayoutPolicy.wrapParams();
             params.topMargin = DimensionPolicy.pixels(context, 2);
             header.addView(note, params);
         }

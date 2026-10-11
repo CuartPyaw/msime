@@ -429,11 +429,11 @@ public final class StatisticsFragment extends HomeTabFragment {
     /** 卡片上方的一行：左边小标题，右边可选的说明；返回这一行，按键页往右边再放分段控件。 */
     private static LinearLayout header(Context context, LinearLayout parent, String title,
             @Nullable String trailing) {
-        LinearLayout row = Ui.row(context);
+        LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
         Ui.setHorizontalPaddingDp(row, context, 4);
         TextView heading = Ui.headingLabel(context, title, 13, ThemeColorPolicy.subText(context));
-        row.addView(heading, Ui.weightWrap(1f));
+        row.addView(heading, LayoutPolicy.weightedWrapParams(1f));
         if (trailing != null) row.addView(Ui.label(context, trailing, 13, ThemeColorPolicy.subText(context)));
         LinearLayout.LayoutParams params = Ui.matchWidth();
         params.topMargin = DimensionPolicy.pixels(context, 22);
@@ -445,7 +445,7 @@ public final class StatisticsFragment extends HomeTabFragment {
 
     /** 并排两张 KPI 卡。 */
     private static void tiles(Context context, LinearLayout parent, View left, View right) {
-        LinearLayout row = Ui.row(context);
+        LinearLayout row = LayoutPolicy.row(context);
         LinearLayout.LayoutParams leftParams = LayoutPolicy.weightedMatchParentParams(1f);
         LinearLayout.LayoutParams rightParams = LayoutPolicy.weightedMatchParentParams(1f);
         rightParams.setMarginStart(DimensionPolicy.pixels(context, 10));
@@ -459,7 +459,7 @@ public final class StatisticsFragment extends HomeTabFragment {
     /** 一张 KPI 卡：标题、大数字和单位、一行说明；`highlight` 时说明用 accent（环比）。 */
     private static View tile(Context context, String title, String value, String unit, String note,
             boolean highlight) {
-        LinearLayout tile = Ui.column(context);
+        LinearLayout tile = LayoutPolicy.column(context);
         int pad = DimensionPolicy.pixels(context, 14);
         Ui.setSymmetricPaddingPx(tile, pad);
         ViewPolicy.setBackground(tile, DrawablePolicy.rounded(ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, 20)));

@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ImageViewPolicy;
@@ -152,22 +154,22 @@ public final class ClipboardSearchPage extends DetailPage {
     }
 
     private View itemRow(Context context, ClipboardHistory.Item item, long now) {
-        LinearLayout row = Ui.row(context);
+        LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
         Ui.setPaddingDp(row, context, 16, 12, 8, 12);
 
-        LinearLayout texts = Ui.column(context);
+        LinearLayout texts = LayoutPolicy.column(context);
         TextView text = Ui.styledLabel(context, item.text(), 15, 400, ThemeColorPolicy.text(context));
         ViewPolicy.setMaxLinesEllipsized(text, 3);
         texts.addView(text);
         String meta = meta(item, now);
         if (!meta.isEmpty()) {
             TextView label = Ui.styledLabel(context, meta, 12, 400, ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams metaParams = Ui.wrap();
+            LinearLayout.LayoutParams metaParams = LayoutPolicy.wrapParams();
             metaParams.topMargin = DimensionPolicy.pixels(context, 4);
             texts.addView(label, metaParams);
         }
-        row.addView(texts, Ui.weightWrap(1f));
+        row.addView(texts, LayoutPolicy.weightedWrapParams(1f));
 
         row.addView(ImageViewPolicy.iconButton(context, R.drawable.ic_ms_edit, ThemeColorPolicy.subText(context), "编辑", 40, () -> edit(item)));
         row.addView(ImageViewPolicy.iconButton(context, R.drawable.ic_ms_delete, ThemeColorPolicy.subText(context), "删除", 40, () -> delete(item)));

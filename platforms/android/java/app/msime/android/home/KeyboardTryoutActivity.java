@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.DimensionPolicy;
 
@@ -421,7 +423,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
         ViewPolicy.setBackground(bubble, DrawablePolicy.rounded(mine ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 18)));
         Ui.setSymmetricPaddingDp(bubble, this, 14, 10);
         bubble.setMaxWidth(Math.round(DimensionPolicy.screenWidthPixels(this) * 0.8f));
-        LinearLayout.LayoutParams params = Ui.wrap();
+        LinearLayout.LayoutParams params = LayoutPolicy.wrapParams();
         params.gravity = mine ? Gravity.END : Gravity.START;
         if (chat.getChildCount() > 0) params.topMargin = DimensionPolicy.pixels(this, 10);
         chat.addView(bubble, params);

@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ThemeColorPolicy;
@@ -106,7 +108,7 @@ public final class CommunitySkinSheet {
             sheet.dismiss();
             onReport.run();
         });
-        LinearLayout.LayoutParams reportParams = Ui.wrap();
+        LinearLayout.LayoutParams reportParams = LayoutPolicy.wrapParams();
         reportParams.gravity = android.view.Gravity.END;
         reportParams.topMargin = DimensionPolicy.pixels(context, 4);
         sheet.content().addView(report, reportParams);
