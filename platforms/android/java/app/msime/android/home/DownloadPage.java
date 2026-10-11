@@ -56,7 +56,7 @@ public final class DownloadPage extends DetailPage {
         getRow(mobile, R.drawable.ic_ms_tablet, "iPadOS", "与 iPhone 共用同一个 TestFlight", "ios");
         GroupCard.Row android = row(mobile, R.drawable.ic_ms_smartphone, "Android", "各版本的 APK 在 GitHub 发布页");
         TextView current = Ui.styledLabel(context, "当前设备", Ui.TEXT_BUTTON_SMALL, 500, ThemeColorPolicy.text(context));
-        LinearLayout.LayoutParams currentParams = Ui.rowGapParams(context);
+        LinearLayout.LayoutParams currentParams = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         ((LinearLayout) android.view()).addView(current, currentParams);
         getRow(mobile, R.drawable.ic_ms_smartphone, "HarmonyOS", "从源码构建", "harmony");
     }
@@ -130,7 +130,7 @@ public final class DownloadPage extends DetailPage {
     }
 
     private static void attach(GroupCard.Row row, TextView button) {
-        LinearLayout.LayoutParams params = Ui.rowGapParams(button.getContext());
+        LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(button.getContext(), Ui.ROW_GAP);
         ((LinearLayout) row.view()).addView(button, params);
     }
 

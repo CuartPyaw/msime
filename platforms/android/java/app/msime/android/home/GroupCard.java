@@ -104,7 +104,7 @@ public final class GroupCard {
         control.setChecked(checked);
         ViewPolicy.setInteractive(control, false);
         Ui.hideFromAccessibility(control);
-        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
+        LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         row.view.addView(control, params);
         row.toggle = control;
         ViewPolicy.bindClick(row.view, () -> {
@@ -164,7 +164,7 @@ public final class GroupCard {
     public Row button(CharSequence title, @Nullable CharSequence subtitle, CharSequence label, Runnable action) {
         Row row = new Row(this, title, subtitle, false);
         TextView button = KeyboardSheets.tonalButton(context, label, label + "，" + title, 500, action);
-        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
+        LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         row.view.addView(button, params);
         row.button = button;
         return add(row);
@@ -211,7 +211,7 @@ public final class GroupCard {
 
     private TextView trailingValue(Row row, @Nullable CharSequence value) {
         TextView text = Ui.trailingValue(context, "", Ui.TEXT_ROW_TITLE, ThemeColorPolicy.subText(context));
-        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
+        LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         row.view.addView(text, params);
         setText(text, value);
         return text;

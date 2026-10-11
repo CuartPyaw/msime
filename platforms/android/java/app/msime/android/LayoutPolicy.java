@@ -105,6 +105,13 @@ public final class LayoutPolicy {
         return matchWidthHeightPx(DimensionPolicy.pixels(context, heightDp));
     }
 
+    /** Create wrap-content parameters with a standard start margin expressed in dp. */
+    public static LinearLayout.LayoutParams rowGapParams(Context context, float gapDp) {
+        LinearLayout.LayoutParams params = wrapParams();
+        params.setMarginStart(DimensionPolicy.pixels(context, gapDp));
+        return params;
+    }
+
     /** Create linear layout parameters with content-sized width and parent-sized height. */
     public static LinearLayout.LayoutParams wrapMatchParentParams() {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,

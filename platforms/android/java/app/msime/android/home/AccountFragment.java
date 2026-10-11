@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.DrawablePolicy;
@@ -254,7 +256,7 @@ public final class AccountFragment extends HomeTabFragment {
         toggle.setChecked(real && state.syncEnabled());
         ViewPolicy.setInteractive(toggle, false);
         Ui.hideFromAccessibility(toggle);
-            LinearLayout.LayoutParams switchParams = Ui.rowGapParams(context);
+            LinearLayout.LayoutParams switchParams = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         sync.addView(toggle, switchParams);
         sync.setAccessibilityDelegate(new View.AccessibilityDelegate() {
             @Override public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {
