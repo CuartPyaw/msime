@@ -24,6 +24,7 @@ import android.widget.PopupWindow;
 
 /** Shared view configuration for host controls whose widget defaults need resetting. */
 public final class ViewPolicy {
+    private static final float TRAILING_VALUE_MAX_SHARE = 0.5f;
     private ViewPolicy() {}
 
     /** Remove both legacy and platform minimum-height constraints from a view. */
@@ -159,6 +160,23 @@ public final class ViewPolicy {
         setInteractive(button, true);
         bindOptionalClick(button, action);
         return button;
+    }
+
+    /** Create a single-line trailing value capped to half of its available row width. */
+    public static TextView trailingValue(Context context, CharSequence text, int sizeSp, int color) {
+        TextView view = new TextView(context) {
+            @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+                    int limit = Math.round(MeasureSpec.getSize(widthMeasureSpec) * TRAILING_VALUE_MAX_SHARE);
+                    widthMeasureSpec = MeasureSpec.makeMeasureSpec(limit, MeasureSpec.AT_MOST);
+                }
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+            }
+        };
+        view.setText(text);
+        style(view, sizeSp, 400, color);
+        setSingleLineEllipsized(view);
+        return view;
     }
 
     /** Apply a minimum height to a generic view. */
