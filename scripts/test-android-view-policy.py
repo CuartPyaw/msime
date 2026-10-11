@@ -67,6 +67,7 @@ def main() -> None:
         "public static void setRowPadding(Context context, View view)",
         "public static void setRowMinimumHeight(Context context, View view)",
         "public static void setMinimumHeightDp(Context context, View view, float heightDp)",
+        "public static void setTextMinHeightDp(Context context, TextView view, float heightDp)",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -95,8 +96,8 @@ def main() -> None:
         raise AssertionError("ImeBottomBar 没有调用共享条件可见性策略")
     if "view.setMinHeight(dp(context, heightDp));" in ui:
         raise AssertionError("Ui 仍直接实现文本最小高度策略")
-    if "ViewPolicy.setTextMinHeight(view, DimensionPolicy.pixels(context, heightDp));" not in ui:
-        raise AssertionError("Ui 没有调用共享文本最小高度策略")
+    if "public static void setTextMinHeightDp(Context context, TextView view, float heightDp)" not in view_policy:
+        raise AssertionError("ViewPolicy 没有调用共享文本最小高度策略")
     if "public static void setTextMinWidthDp(" in ui:
         raise AssertionError("Ui 仍保留文本最小宽度转发方法")
     if "setTextMinWidth(button, DimensionPolicy.pixels(context, minWidthDp));" not in view_policy:
@@ -176,6 +177,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.setMinimumHeightDp(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享最小高度 dp 策略")
+    if "public static void setTextMinHeightDp(" in ui:
+        raise AssertionError("Ui 仍保留文本最小高度 dp 转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.setTextMinHeightDp(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享文本最小高度 dp 策略")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")

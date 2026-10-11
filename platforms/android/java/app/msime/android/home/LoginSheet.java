@@ -337,7 +337,7 @@ final class LoginSheet {
             DimensionPolicy.atLeastOnePixel(activity, 1), ThemeColorPolicy.hairline(activity));
         ViewPolicy.setBackground(field, face);
         ViewPolicy.setHorizontalPaddingDp(activity, field, 14);
-        Ui.setTextMinHeightDp(field, activity, 50);
+        ViewPolicy.setTextMinHeightDp(activity, field, 50);
         ViewPolicy.setCenteredVertically(field);
         field.setContentDescription(hint);
         return field;

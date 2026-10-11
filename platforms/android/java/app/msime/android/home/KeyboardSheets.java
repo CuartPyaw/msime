@@ -265,7 +265,7 @@ final class KeyboardSheets {
             ViewPolicy.setCentered(button);
             ViewPolicy.setSingleLine(button);
             Ui.setButtonPadding(button, context);
-            Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
+            ViewPolicy.setTextMinHeightDp(context, button, Ui.COMPACT_BUTTON_MIN_HEIGHT);
             ViewPolicy.setEnabled(button, false);
         }
         button.setAccessibilityDelegate(buttonDelegate(label + "，" + title));
