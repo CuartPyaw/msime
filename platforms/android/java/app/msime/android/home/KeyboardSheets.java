@@ -193,7 +193,7 @@ final class KeyboardSheets {
         row.addView(texts(context, title, subtitle, ThemeColorPolicy.text(context)),
             LayoutPolicy.weightedWrapParams(1f));
         if (value != null && !value.isEmpty()) {
-            TextView state = Ui.trailingValue(context, value, Ui.TEXT_ROW_TITLE, valueColor);
+            TextView state = ViewPolicy.trailingValue(context, value, Ui.TEXT_ROW_TITLE, valueColor);
             LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
             row.addView(state, params);
         }
@@ -353,7 +353,7 @@ final class KeyboardSheets {
         row.addView(texts, LayoutPolicy.weightedWrapParams(1f));
 
         if (value != null && value.length() > 0) {
-            TextView trailing = Ui.trailingValue(context, value, Ui.TEXT_ROW_SUBTITLE, ThemeColorPolicy.subText(context));
+            TextView trailing = ViewPolicy.trailingValue(context, value, Ui.TEXT_ROW_SUBTITLE, ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams valueParams = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
             row.addView(trailing, valueParams);
         }

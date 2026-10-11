@@ -211,7 +211,7 @@ public final class GroupCard {
     }
 
     private TextView trailingValue(Row row, @Nullable CharSequence value) {
-        TextView text = Ui.trailingValue(context, "", Ui.TEXT_ROW_TITLE, ThemeColorPolicy.subText(context));
+        TextView text = ViewPolicy.trailingValue(context, "", Ui.TEXT_ROW_TITLE, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         row.view.addView(text, params);
         setText(text, value);
