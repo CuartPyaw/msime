@@ -104,7 +104,7 @@ public final class GroupCard {
         MsSwitch control = new MsSwitch(context);
         control.setChecked(checked);
         ViewPolicy.setInteractive(control, false);
-        Ui.hideFromAccessibility(control);
+        ViewPolicy.hideFromAccessibility(control);
         LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         row.view.addView(control, params);
         row.toggle = control;
@@ -146,7 +146,7 @@ public final class GroupCard {
         TextView text = ViewPolicy.styledLabel(context, label.apply(control.value()), 13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setEndCenteredVertically(text);
         ViewPolicy.setSingleLine(text);
-            Ui.hideFromAccessibility(text);
+            ViewPolicy.hideFromAccessibility(text);
         row.view.addView(text, new LinearLayout.LayoutParams(DimensionPolicy.pixels(context, Ui.SLIDER_LABEL_WIDTH),
             ViewGroup.LayoutParams.WRAP_CONTENT));
         control.setOnValueChange(current -> {

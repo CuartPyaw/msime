@@ -149,7 +149,7 @@ public final class SkinsPage extends ReloadingDetailPage {
         ViewPolicy.setPadding(tile, inset, inset, inset, inset);
         SkinSwatchView swatch = new SkinSwatchView(context);
         swatch.setSkin(card.skin());
-        Ui.hideFromAccessibility(swatch);
+        ViewPolicy.hideFromAccessibility(swatch);
         tile.addView(swatch,
             LayoutPolicy.frameMatchWidthHeightPx(DimensionPolicy.pixels(context, 76)));
         cell.addView(tile, LayoutPolicy.matchWidthWrapParams());

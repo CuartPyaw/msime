@@ -460,7 +460,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             String body) {
         ImageView glyph = ImageViewPolicy.decorative(this, icon, ThemeColorPolicy.accent(this));
         glyph.setScaleType(ImageView.ScaleType.FIT_START);
-        Ui.hideFromAccessibility(glyph);
+        ViewPolicy.hideFromAccessibility(glyph);
         column.addView(glyph, LayoutPolicy.squareParams(this, 36));
 
         TextView kick = ViewPolicy.label(this, kicker, 13, ThemeColorPolicy.accent(this));
@@ -566,7 +566,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         ImageView badge = ImageViewPolicy.decorative(this, icon, ThemeColorPolicy.accent(this));
         Ui.setSymmetricPaddingDp(badge, this, 7, 7);
         ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(this), DimensionPolicy.pixels(this, 9)));
-        Ui.hideFromAccessibility(badge);
+        ViewPolicy.hideFromAccessibility(badge);
         row.addView(badge, LayoutPolicy.squareParams(this, 32));
         TextView text = ViewPolicy.label(this, label, 15, ThemeColorPolicy.text(this));
         LinearLayout.LayoutParams textParams = LayoutPolicy.weightedWrapParams(1f);
