@@ -194,7 +194,7 @@ final class KeyboardSheets {
             LayoutPolicy.weightedWrapParams(1f));
         if (value != null && !value.isEmpty()) {
             TextView state = Ui.trailingValue(context, value, Ui.TEXT_ROW_TITLE, valueColor);
-            LinearLayout.LayoutParams params = Ui.rowGapParams(context);
+            LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
             row.addView(state, params);
         }
         ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
@@ -269,7 +269,7 @@ final class KeyboardSheets {
             ViewPolicy.setEnabled(button, false);
         }
         button.setAccessibilityDelegate(buttonDelegate(label + "，" + title));
-        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
+        LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         row.addView(button, params);
         return row;
     }
@@ -354,7 +354,7 @@ final class KeyboardSheets {
 
         if (value != null && value.length() > 0) {
             TextView trailing = Ui.trailingValue(context, value, Ui.TEXT_ROW_SUBTITLE, ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams valueParams = Ui.rowGapParams(context);
+            LinearLayout.LayoutParams valueParams = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
             row.addView(trailing, valueParams);
         }
         if (action != null) {

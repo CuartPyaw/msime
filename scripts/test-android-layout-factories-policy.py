@@ -15,7 +15,8 @@ def main():
                       "matchWidthHeightPx(int heightPixels)", "matchWidthHeightDp(Context context, int heightDp)",
                       "squareParams(Context context, float sizeDp)",
                       "squareFrameParams(Context context, float sizeDp)",
-                      "squareFrameParamsPx(int size, int gravity)"):
+                      "squareFrameParamsPx(int size, int gravity)",
+                      "rowGapParams(Context context, float gapDp)"):
         if signature not in policy:
             errors.append(f"{POLICY}: 缺少 {signature} 工厂")
     for p in JAVA.rglob("*.java"):
@@ -26,6 +27,8 @@ def main():
             errors.append(f"{p}: 仍调用 Ui.matchWidth")
         if "Ui.square" in s:
             errors.append(f"{p}: 仍调用 Ui.square")
+        if "Ui.rowGapParams" in s:
+            errors.append(f"{p}: 仍调用 Ui.rowGapParams")
     if errors: print("\n".join(errors),file=sys.stderr); return 1
     print("Android layout factories use LayoutPolicy directly")
     return 0

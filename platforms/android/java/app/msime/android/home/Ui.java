@@ -268,13 +268,6 @@ public final class Ui {
         return handle;
     }
 
-    /** Layout parameters for a trailing row control with the standard row gap. */
-    public static LinearLayout.LayoutParams rowGapParams(Context context) {
-        LinearLayout.LayoutParams params = LayoutPolicy.wrapParams();
-        params.setMarginStart(DimensionPolicy.pixels(context, ROW_GAP));
-        return params;
-    }
-
     /** Create a pill-shaped press ripple with a fully rounded mask. */
     public static Drawable pillRipple(Context context, @ColorInt int fill) {
         return rippleOn(context, fill, 9999f);
