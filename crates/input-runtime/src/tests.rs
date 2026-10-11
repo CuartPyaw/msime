@@ -2252,6 +2252,111 @@ fn touch_layout_changes_atomically_with_engine_replacement() {
 }
 
 #[test]
+fn online_candidate_changes_keep_only_existing_glosses() {
+    for source in [0, 1] {
+        for batch in [false, true] {
+            for owned in [false, true] {
+                let directory = tempfile::tempdir().unwrap();
+                let session =
+                    msime_engine::host::Session::new(&real_engine_options(directory.path()))
+                        .unwrap();
+                let mut runtime = Runtime::new(session, 5).unwrap();
+                runtime.focus(true).unwrap();
+                type_characters(&mut runtime, "ni");
+                let query = runtime.online_query().unwrap().unwrap();
+                assert!(runtime
+                    .apply_online_candidate(&query, "合成 AI", 1)
+                    .unwrap());
+                let query = runtime.online_query().unwrap().unwrap();
+                assert!(runtime.apply_online_candidate(&query, "合成云", 0).unwrap());
+                let before = runtime.view();
+                let retained = if source == 0 {
+                    "合成 AI"
+                } else {
+                    "合成云"
+                };
+                let removed = if source == 0 {
+                    "合成云"
+                } else {
+                    "合成 AI"
+                };
+                assert!(runtime.apply_translations(
+                    before.generation,
+                    [
+                        ("合成 AI".into(), "ai-gloss".into()),
+                        ("合成云".into(), "cloud-gloss".into()),
+                        ("合成新".into(), "unrequested-gloss".into()),
+                    ]
+                ));
+                let mut query = runtime.online_query().unwrap().unwrap();
+                query.ai_assistant = Some(
+                    serde_json::from_value(json!({"enabled": true, "candidate_limit": 1})).unwrap(),
+                );
+                let applied = match (batch, owned) {
+                    (false, false) => runtime.apply_online_candidate(&query, "合成新", source),
+                    (false, true) => runtime.apply_online_candidate_owned(query, "合成新", source),
+                    (true, false) => {
+                        runtime.apply_online_candidates(&query, &["合成新".into()], source)
+                    }
+                    (true, true) => {
+                        runtime.apply_online_candidates_owned(query, &["合成新".into()], source)
+                    }
+                };
+                assert!(
+                    applied.unwrap(),
+                    "source={source} batch={batch} owned={owned}"
+                );
+                let after = runtime.view();
+                assert!(after.generation > before.generation);
+                assert!(
+                    after
+                        .candidates
+                        .iter()
+                        .any(|row| row.text == retained && row.translation.is_some()),
+                    "新在线候选不能清空仍在列表中的译文"
+                );
+                assert!(after
+                    .candidates
+                    .iter()
+                    .any(|row| row.text == "合成新" && row.translation.is_none()));
+                assert!(!runtime.translations.contains_key(removed));
+                assert!(!runtime.translations.contains_key("合成新"));
+                assert!(!runtime
+                    .apply_translations(before.generation, [(retained.into(), "stale".into())]));
+                assert!(matches!(
+                    runtime.dispatch(Action::Select(before.candidates[0].id)),
+                    Err(RuntimeError::StaleCandidate)
+                ));
+                runtime.clear_online_candidates(source).unwrap();
+                assert!(runtime
+                    .view()
+                    .candidates
+                    .iter()
+                    .any(|row| row.text == retained && row.translation.is_some()));
+                runtime
+                    .dispatch(Action::Character {
+                        value: b'h',
+                        shift: false,
+                    })
+                    .unwrap();
+                assert!(runtime.translations.is_empty());
+            }
+        }
+    }
+}
+
+#[test]
+fn online_gloss_retention_drops_everything_when_refresh_fails() {
+    let mut runtime = runtime();
+    runtime.focus(true).unwrap();
+    let view = type_key(&mut runtime).view;
+    assert!(runtime.apply_translations(view.generation, [("candidate-0".into(), "gloss".into())]));
+    runtime.engine.snapshot_fails = true;
+    assert!(runtime.refresh_online_candidates().is_err());
+    assert!(runtime.translations.is_empty());
+}
+
+#[test]
 fn translations_are_generation_scoped_and_exposed_on_candidates() {
     let mut runtime = runtime();
     runtime.focus(true).unwrap();

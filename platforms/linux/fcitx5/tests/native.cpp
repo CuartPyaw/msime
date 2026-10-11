@@ -3052,7 +3052,6 @@ int main(int argc, char **argv) {
           Json{{"text", "合成候选"}, {"source", repeatedSource}}})}});
       state->refreshOnline();
     };
-    deliverRepeatedOnline();
     state->refreshTranslations();
     require(!state->translation_job_.valid(), "translation waits for idle debounce");
     const auto translationDeadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
@@ -3064,6 +3063,18 @@ int main(int argc, char **argv) {
     require(translationProvider.get(), "translation socket protocol");
     require(ic.inputPanel().candidateList()->candidate(0).text().toString().find("synthetic-gloss") != std::string::npos,
             "translation visible in native Fcitx candidate");
+    const auto localTranslationGeneration = state->view_.at("generation").get<uint64_t>();
+    deliverRepeatedOnline();
+    require(ic.inputPanel().candidateList()->candidate(0).text().toString().find("synthetic-gloss") != std::string::npos,
+            "新在线候选到达使未变化候选的译文消失");
+    require(state->view_.at("generation").get<uint64_t>() > localTranslationGeneration,
+            "保留译文不能保留旧候选代次");
+    const auto staleGloss = Json::array({Json{{"text", state->view_.at("candidates").at(0).at("text")},
+                                            {"translation", "stale-gloss"}}}).dump();
+    require(!response(msime_client_apply_translations(
+                state->session_, localTranslationGeneration,
+                reinterpret_cast<const uint8_t *>(staleGloss.data()), staleGloss.size())).at("applied").get<bool>(),
+            "新在线候选到达后仍拒绝旧代次的翻译回包");
     const auto glossPath = std::filesystem::path(options.at("user_data").get<std::string>()) /
                            "translation-glosses.db";
     require(std::filesystem::exists(glossPath), "English translation gloss database exists");
@@ -3072,6 +3083,20 @@ int main(int argc, char **argv) {
                                    std::istreambuf_iterator<char>());
     require(glossContent.find("synthetic-gloss") != std::string::npos,
             "English translation gloss is persisted");
+    // 离线探测失败后转在线，空回包也不能清掉当前页保留下来的释义。
+    const auto glossResources = state->resources_;
+    std::filesystem::rename(glossPath, glossPath.string() + ".seed-test-backup");
+    state->resources_ = std::string(directory) + "/missing-gloss-resources";
+    state->startTranslation(response(msime_client_translation_query(state->session_)), true);
+    while (state->translation_job_.valid()) {
+      require(state->translation_job_.wait_for(std::chrono::seconds(5)) == std::future_status::ready,
+              "离线与在线译文任务应结束");
+      state->refreshTranslations();
+      require(ic.inputPanel().candidateList()->candidate(0).text().toString().find("synthetic-gloss") != std::string::npos,
+              "离线探测失败或在线空回包使保留的译文消失");
+    }
+    state->resources_ = glossResources;
+    std::filesystem::rename(glossPath.string() + ".seed-test-backup", glossPath);
     const auto translatedGeneration = state->view_.at("generation");
     for (int repeat = 0; repeat < 3; ++repeat) {
       state->online_due_ = state->ai_due_ = std::chrono::steady_clock::now();

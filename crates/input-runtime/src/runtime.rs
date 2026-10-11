@@ -323,7 +323,7 @@ impl Runtime<Session> {
             // cannot select the pre-provider page and Windows UI mailboxes can
             // recognize the replacement as a new rendered generation.
             self.advance()?;
-            self.refresh()
+            self.refresh_online_candidates()
                 .map_err(|error| RuntimeError::Engine(error.to_string()))?;
         }
         Ok(applied)
@@ -409,7 +409,7 @@ impl Runtime<Session> {
             .clear_online_candidates(source)
             .map_err(|error| RuntimeError::Engine(error.to_string()))?;
         self.advance()?;
-        self.refresh()
+        self.refresh_online_candidates()
     }
 
     fn apply_online_candidates_snapshot(
@@ -441,7 +441,7 @@ impl Runtime<Session> {
             .map_err(|error| RuntimeError::Engine(error.to_string()))?;
         if applied {
             self.advance()?;
-            self.refresh()
+            self.refresh_online_candidates()
                 .map_err(|error| RuntimeError::Engine(error.to_string()))?;
         }
         Ok(applied)
@@ -1587,6 +1587,16 @@ impl<E: InputEngine> Runtime<E> {
         apply_order(&mut snapshot.candidate_answers_key, &order);
         apply_order(&mut self.engine_order, &order);
         true
+    }
+
+    pub(crate) fn refresh_online_candidates(&mut self) -> Result<(), RuntimeError> {
+        // 在线结果不改变组字，只保留前后都存在的词条释义；代次校验照旧。
+        let mut translations = std::mem::take(&mut self.translations);
+        translations.retain(|text, _| self.cached.candidates.contains(text));
+        self.refresh()?;
+        translations.retain(|text, _| self.cached.candidates.contains(text));
+        self.translations = translations;
+        Ok(())
     }
 
     pub(crate) fn refresh(&mut self) -> Result<(), RuntimeError> {
