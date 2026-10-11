@@ -113,7 +113,7 @@ final class LoginSheet {
         appleResult = this::finishWith;
 
         LinearLayout root = LayoutPolicy.column(activity);
-        Ui.setPaddingDp(root, activity, 24, 0, 24, 20);
+        ViewPolicy.setPaddingDp(activity, root, 24, 0, 24, 20);
         root.addView(LayoutPolicy.sheetDragHandle(activity));
 
         LinearLayout header = LayoutPolicy.row(activity);

@@ -29,7 +29,7 @@ public final class SettingsSheet {
         this.context = context;
         dialog = new BottomSheetDialog(context);
         LinearLayout root = LayoutPolicy.column(context);
-        Ui.setPaddingDp(root, context, 24, 0, 24, 24);
+        ViewPolicy.setPaddingDp(context, root, 24, 0, 24, 24);
 
         // 拖动条既是可见的把手，也给读屏提供「收起面板」的操作。
         root.addView(LayoutPolicy.sheetDragHandle(context));

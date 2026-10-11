@@ -156,7 +156,7 @@ public final class ClipboardSearchPage extends DetailPage {
     private View itemRow(Context context, ClipboardHistory.Item item, long now) {
         LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
-        Ui.setPaddingDp(row, context, 16, 12, 8, 12);
+        ViewPolicy.setPaddingDp(context, row, 16, 12, 8, 12);
 
         LinearLayout texts = LayoutPolicy.column(context);
         TextView text = ViewPolicy.styledLabel(context, item.text(), 15, 400, ThemeColorPolicy.text(context));

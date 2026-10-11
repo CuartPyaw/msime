@@ -157,14 +157,14 @@ public final class CloudClipboardPage extends DetailPage {
 
         LinearLayout header = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(header);
-        Ui.setPaddingDp(header, context, Ui.GROUP_TITLE_INSET, 0,
+        ViewPolicy.setPaddingDp(context, header, Ui.GROUP_TITLE_INSET, 0,
             Ui.GROUP_TITLE_INSET, 2);
         TextView recent = ViewPolicy.headingLabel(context, "最近", Ui.TEXT_GROUP_TITLE, 500,
             ThemeColorPolicy.accent(context));
         header.addView(recent, LayoutPolicy.weightedWrapParams(1f));
         if (!current.items().isEmpty()) {
             TextView clear = ViewPolicy.styledLabel(context, "清空", Ui.TEXT_GROUP_TITLE, 500, ThemeColorPolicy.accent(context));
-        Ui.setPaddingDp(clear, context, 8, 4, 0, 4);
+        ViewPolicy.setPaddingDp(context, clear, 8, 4, 0, 4);
             ViewPolicy.makeClickable(clear, context, this::confirmClear);
             header.addView(clear);
         }
@@ -194,7 +194,7 @@ public final class CloudClipboardPage extends DetailPage {
     private View itemRow(Context context, CloudClipboardApi.Item item) {
         LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
-        Ui.setPaddingDp(row, context, 16, 12, 8, 12);
+        ViewPolicy.setPaddingDp(context, row, 16, 12, 8, 12);
 
         LinearLayout texts = LayoutPolicy.column(context);
         TextView text = ViewPolicy.styledLabel(context, item.text(), 15, 400, ThemeColorPolicy.text(context));

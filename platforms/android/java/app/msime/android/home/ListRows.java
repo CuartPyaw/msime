@@ -45,7 +45,7 @@ final class ListRows {
         Context context = parent.getContext();
         TextView heading = ViewPolicy.headingLabel(context, text, Ui.TEXT_GROUP_TITLE, 500,
             ThemeColorPolicy.accent(context));
-        Ui.setPaddingDp(heading, context, Ui.NAV_ROW_PADDING_H, 16,
+        ViewPolicy.setPaddingDp(context, heading, Ui.NAV_ROW_PADDING_H, 16,
             Ui.NAV_ROW_PADDING_H, 4);
         parent.addView(heading, LayoutPolicy.matchWidthWrapParams());
         return heading;

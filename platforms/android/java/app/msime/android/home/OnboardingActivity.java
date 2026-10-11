@@ -495,7 +495,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout row = LayoutPolicy.row(this);
         ViewPolicy.setCenteredVertically(row);
         Ui.setMinimumHeightDp(row, this, Ui.COMPACT_ROW_MIN_HEIGHT);
-        Ui.setPaddingDp(row, this, 14, 6, 8, 6);
+        ViewPolicy.setPaddingDp(this, row, 14, 6, 8, 6);
 
         TextView mark = ViewPolicy.centeredLabel(this, done ? "✓" : "!", 13,
             done ? ThemeColorPolicy.onAccent(this) : 0xFFFFFFFF);
