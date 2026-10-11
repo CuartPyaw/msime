@@ -181,6 +181,13 @@ public final class AboutPage extends DetailPage {
             downloadTask.cancel(true);
             downloadTask = null;
         }
+        // The network result is fenced to this view, so an abandoned check or download cannot
+        // report back after recreation. Reset its transient state or the rebuilt page would show
+        // a permanently disabled busy pill with no task left to finish it.
+        if (state == State.CHECKING || state == State.DOWNLOADING) {
+            state = State.IDLE;
+            downloaded = null;
+        }
         pill = null;
         channelRow = null;
         super.onDestroyView();
