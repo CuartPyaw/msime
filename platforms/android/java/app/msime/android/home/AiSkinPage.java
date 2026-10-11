@@ -374,7 +374,7 @@ public final class AiSkinPage extends DetailPage {
         List<TextView> chipViews = new ArrayList<>(SUGGESTIONS.length);
         for (String suggestion : SUGGESTIONS) {
             TextView chip = ViewPolicy.singleLineLabel(context, suggestion, 13, 400, ThemeColorPolicy.text(context));
-            Ui.setSymmetricPaddingDp(chip, context, 12, 6);
+            ViewPolicy.setSymmetricPaddingDp(context, chip, 12, 6);
             ViewPolicy.setInteractive(chip, true);
             ViewPolicy.bindClick(chip, () -> {
                 if (s.busy) return;

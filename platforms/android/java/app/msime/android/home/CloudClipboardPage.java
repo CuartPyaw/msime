@@ -177,7 +177,7 @@ public final class CloudClipboardPage extends DetailPage {
         if (current.items().isEmpty()) {
             LinearLayout empty = LayoutPolicy.column(context);
             ViewPolicy.setCenteredHorizontally(empty);
-            Ui.setSymmetricPaddingDp(empty, context, 16, 32);
+            ViewPolicy.setSymmetricPaddingDp(context, empty, 16, 32);
             TextView title = ViewPolicy.styledLabel(context, "还没有同步内容", Ui.TEXT_ROW_TITLE, 500, ThemeColorPolicy.text(context));
             empty.addView(title);
             TextView hint = ViewPolicy.centeredLabel(context, "在任一设备上复制文字，这里就会出现",

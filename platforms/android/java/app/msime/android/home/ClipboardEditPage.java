@@ -117,7 +117,7 @@ public final class ClipboardEditPage extends DetailPage {
                 ViewPolicy.setMinLines(input, 4);
                 ViewPolicy.clearBackground(input);
                 input.setHintTextColor(ThemeColorPolicy.subText(context));
-                Ui.setSymmetricPaddingDp(input, context, 16, 14);
+                ViewPolicy.setSymmetricPaddingDp(context, input, 16, 14);
                 input.setText(draft.text);
                 input.setContentDescription("剪贴板记录的文字");
                 card.card().addView(input, LayoutPolicy.matchWidthWrapParams());

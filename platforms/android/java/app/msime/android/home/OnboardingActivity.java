@@ -288,7 +288,7 @@ public final class OnboardingActivity extends AppCompatActivity {
 
         // A still of the candidate strip, drawn from the design's sample: what the switch below changes, before anyone has to open a text field to see it.
         LinearLayout strip = LayoutPolicy.row(this);
-        Ui.setSymmetricPaddingDp(strip, this, 10, 12);
+        ViewPolicy.setSymmetricPaddingDp(this, strip, 10, 12);
         ViewPolicy.setBackground(strip, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(this), DimensionPolicy.pixels(this, 20)));
         ViewPolicy.setImportantForAccessibility(strip,
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
@@ -307,7 +307,7 @@ public final class OnboardingActivity extends AppCompatActivity {
 
         LinearLayout row = LayoutPolicy.row(this);
         ViewPolicy.setCenteredVertically(row);
-        Ui.setSymmetricPaddingDp(row, this, 14, 12);
+        ViewPolicy.setSymmetricPaddingDp(this, row, 14, 12);
         ViewPolicy.setBackground(row, DrawablePolicy.rounded(ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 20)));
         TextView label = ViewPolicy.label(this, "显示译文", 16, ThemeColorPolicy.text(this));
         row.addView(label, LayoutPolicy.weightedWrapParams(1f));
@@ -525,7 +525,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     private void schemeCard(LinearLayout column, SchemeCard option, boolean selected, int top) {
         LinearLayout card = LayoutPolicy.row(this);
         ViewPolicy.setCenteredVertically(card);
-        Ui.setSymmetricPaddingDp(card, this, 16, 14);
+        ViewPolicy.setSymmetricPaddingDp(this, card, 16, 14);
         GradientDrawable face = selected
             ? DrawablePolicy.outlined(ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 20), DimensionPolicy.pixels(this, 2), ThemeColorPolicy.accent(this))
             : DrawablePolicy.rounded(ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 20));
@@ -561,10 +561,10 @@ public final class OnboardingActivity extends AppCompatActivity {
     private void perk(LinearLayout column, @DrawableRes int icon, String label, int top) {
         LinearLayout row = LayoutPolicy.row(this);
         ViewPolicy.setCenteredVertically(row);
-        Ui.setSymmetricPaddingDp(row, this, 14, 12);
+        ViewPolicy.setSymmetricPaddingDp(this, row, 14, 12);
         ViewPolicy.setBackground(row, DrawablePolicy.rounded(ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 20)));
         ImageView badge = ImageViewPolicy.decorative(this, icon, ThemeColorPolicy.accent(this));
-        Ui.setSymmetricPaddingDp(badge, this, 7, 7);
+        ViewPolicy.setSymmetricPaddingDp(this, badge, 7, 7);
         ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(this), DimensionPolicy.pixels(this, 9)));
         ViewPolicy.hideFromAccessibility(badge);
         row.addView(badge, LayoutPolicy.squareParams(this, 32));

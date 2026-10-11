@@ -174,7 +174,7 @@ public final class GroupCard {
     /** 卡片里的一段说明文字，14sp 次要文字色。 */
     public TextView note(CharSequence text) {
         TextView note = ViewPolicy.styledLabel(context, text, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
-        Ui.setSymmetricPaddingDp(note, context, Ui.ROW_PADDING_H, 12);
+        ViewPolicy.setSymmetricPaddingDp(context, note, Ui.ROW_PADDING_H, 12);
         addDivider();
         card.addView(note, LayoutPolicy.matchWidthWrapParams());
         return note;

@@ -195,14 +195,6 @@ public final class Ui {
         ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
     }
 
-    /** Apply symmetric padding expressed in density-independent pixels. */
-    public static void setSymmetricPaddingDp(View view, Context context,
-                                             float horizontalDp, float verticalDp) {
-        int horizontal = DimensionPolicy.pixels(context, horizontalDp);
-        int vertical = DimensionPolicy.pixels(context, verticalDp);
-        ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
-    }
-
     /** Apply equal padding on all sides when the value is already in pixels. */
     public static void setSymmetricPaddingPx(View view, int padding) {
         ViewPolicy.setPadding(view, padding, padding, padding, padding);
