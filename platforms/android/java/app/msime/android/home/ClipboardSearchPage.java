@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
 import android.os.Bundle;
@@ -166,8 +167,8 @@ public final class ClipboardSearchPage extends DetailPage {
         }
         row.addView(texts, Ui.weightWrap(1f));
 
-        row.addView(Ui.iconButton(context, R.drawable.ic_ms_edit, ThemeColorPolicy.subText(context), "编辑", 40, () -> edit(item)));
-        row.addView(Ui.iconButton(context, R.drawable.ic_ms_delete, ThemeColorPolicy.subText(context), "删除", 40, () -> delete(item)));
+        row.addView(ImageViewPolicy.iconButton(context, R.drawable.ic_ms_edit, ThemeColorPolicy.subText(context), "编辑", 40, () -> edit(item)));
+        row.addView(ImageViewPolicy.iconButton(context, R.drawable.ic_ms_delete, ThemeColorPolicy.subText(context), "删除", 40, () -> delete(item)));
 
         row.setContentDescription(item.text() + (meta.isEmpty() ? "" : "，" + meta) + "，点按复制");
         Ui.makeClickable(row, context, () -> copy(item));

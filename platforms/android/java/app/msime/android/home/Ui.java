@@ -522,28 +522,6 @@ public final class Ui {
         return button;
     }
 
-    /** Create a square, centered icon button with the standard detail-page touch target. */
-    public static ImageView iconButton(Context context, int icon, @ColorInt int tint,
-                                       CharSequence description, float sizeDp, Runnable action) {
-        return iconButton(context, context.getDrawable(icon), tint, description, sizeDp, action);
-    }
-
-    /** Create an icon button from a runtime drawable with the standard detail-page touch target. */
-    public static ImageView iconButton(Context context, Drawable icon, @ColorInt int tint,
-                                       CharSequence description, float sizeDp, Runnable action) {
-        ImageView button = new ImageView(context);
-        button.setImageDrawable(icon);
-        ImageViewPolicy.setTint(button, tint);
-        button.setScaleType(ImageView.ScaleType.CENTER);
-        ViewPolicy.setBackground(button, DrawablePolicy.ripple(context));
-        button.setContentDescription(description);
-        bindClick(button, action);
-        int size = dp(context, sizeDp);
-        button.setLayoutParams(ViewPolicy.newSquareParamsPx(size));
-        setSymmetricPaddingPx(button, size / 5);
-        return button;
-    }
-
     /** 去掉名称首尾空白后返回第一个 Unicode 码点；名称为空时返回后备值。 */
     public static String trimmedInitial(CharSequence name, String fallback) {
         String trimmed = TextPolicy.trimmed(name == null ? null : name.toString());

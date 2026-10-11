@@ -1,5 +1,6 @@
 package app.msime.android.home;
 
+import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
 import android.os.Bundle;
@@ -200,14 +201,14 @@ public final class CloudClipboardPage extends DetailPage {
         texts.addView(meta, metaParams);
         row.addView(texts, Ui.weightWrap(1f));
 
-        row.addView(Ui.iconButton(context, R.drawable.ic_ms_keep,
+        row.addView(ImageViewPolicy.iconButton(context, R.drawable.ic_ms_keep,
             item.pinned() ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.subText(context),
             item.pinned() ? "取消置顶" : "置顶", 40, () -> {
                 CloudClipboardApi api = loadedApi;
                 if (api == null) return;
                 mutate(() -> { api.setPinned(item.id(), !item.pinned()); return null; }, null);
             }));
-        row.addView(Ui.iconButton(context, R.drawable.ic_ms_delete, ThemeColorPolicy.subText(context), "删除", 40, () -> {
+        row.addView(ImageViewPolicy.iconButton(context, R.drawable.ic_ms_delete, ThemeColorPolicy.subText(context), "删除", 40, () -> {
             CloudClipboardApi api = loadedApi;
             if (api == null) return;
             mutate(() -> { api.delete(item.id()); return null; }, "已删除");

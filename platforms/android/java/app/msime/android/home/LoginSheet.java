@@ -119,7 +119,7 @@ final class LoginSheet {
         TextView title = Ui.headingLabel(activity, "link".equals(purpose) ? "添加登录方式" : "登录水杉",
             22, 700, ThemeColorPolicy.text(activity));
         header.addView(title, Ui.weightWrap(1f));
-        ImageView close = Ui.iconButton(activity,
+        ImageView close = ImageViewPolicy.iconButton(activity,
             new PathIcon(24, new String[] {CLOSE_PATH}, new int[] {ThemeColorPolicy.text(activity)}),
             ThemeColorPolicy.text(activity), "关闭", Ui.BACK_BUTTON_SIZE, dialog::cancel);
         header.addView(close, Ui.squareParams(activity, 40));

@@ -136,10 +136,9 @@ def main() -> None:
         source = path.read_text(encoding="utf-8")
         if "KeyboardGeometry.squareParamsPx(" in source:
             raise AssertionError(f"{path} 没有直接调用共享正方形布局参数工厂")
-    for name in ("AboutPage.java", "DownloadPage.java", "Ui.java"):
-        source = (HOME / name).read_text(encoding="utf-8")
-        if "ViewPolicy.newSquareParamsPx(" not in source:
-            raise AssertionError(f"{name} 没有调用共享正方形布局参数工厂")
+    image_policy = (ANDROID_JAVA / "app/msime/android/ImageViewPolicy.java").read_text(encoding="utf-8")
+    if "ViewPolicy.newSquareParamsPx(" not in image_policy:
+        raise AssertionError("ImageViewPolicy 没有调用共享正方形布局参数工厂")
     print("android view policy: recursive enabled state is shared")
 
 

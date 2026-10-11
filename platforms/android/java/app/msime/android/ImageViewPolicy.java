@@ -41,6 +41,31 @@ public final class ImageViewPolicy {
         return view;
     }
 
+    /** Create a square icon button from a drawable resource. */
+    public static ImageView iconButton(Context context, @DrawableRes int icon,
+                                       @ColorInt int tint, CharSequence description,
+                                       float sizeDp, Runnable action) {
+        return iconButton(context, context.getDrawable(icon), tint, description, sizeDp, action);
+    }
+
+    /** Create a square icon button with a theme ripple and accessible tap target. */
+    public static ImageView iconButton(Context context, Drawable icon,
+                                       @ColorInt int tint, CharSequence description,
+                                       float sizeDp, Runnable action) {
+        ImageView button = new ImageView(context);
+        button.setImageDrawable(icon);
+        setTint(button, tint);
+        button.setScaleType(ImageView.ScaleType.CENTER);
+        ViewPolicy.setBackground(button, DrawablePolicy.ripple(context));
+        button.setContentDescription(description);
+        ViewPolicy.setInteractive(button, true);
+        ViewPolicy.bindOptionalClick(button, action);
+        int size = DimensionPolicy.pixels(context, sizeDp);
+        button.setLayoutParams(ViewPolicy.newSquareParamsPx(size));
+        ViewPolicy.setSymmetricPadding(button, size / 5, size / 5);
+        return button;
+    }
+
     private static void hideFromAccessibility(View view) {
         view.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
     }
