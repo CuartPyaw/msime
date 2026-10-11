@@ -41,6 +41,14 @@ public final class DownloadPage extends DetailPage {
     private final Set<String> sentPlatforms = new HashSet<>(6);
     private final Set<String> sending = new HashSet<>(6);
 
+    @Override public void onDestroyView() {
+        // AboutPage.network fences its callback to this view. If the view goes away first,
+        // the callback is dropped, so the transient in-flight marker must not lock the rebuilt
+        // page out of retrying that platform.
+        sending.clear();
+        super.onDestroyView();
+    }
+
     @Override protected void buildContent(LinearLayout column, Bundle args) {
         Context context = requireContext();
         column.addView(hero(context));
