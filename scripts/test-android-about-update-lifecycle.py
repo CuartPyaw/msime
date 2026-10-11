@@ -17,6 +17,15 @@ class AndroidAboutUpdateLifecycleContract(unittest.TestCase):
         self.assertIn("state = State.IDLE;", body)
         self.assertIn("downloaded = null;", body)
 
+    def test_download_progress_is_fenced_to_the_view_that_started_it(self):
+        source = SOURCE.read_text(encoding="utf-8")
+        start = source.index("private void download()")
+        end = source.index("\n    private void install()", start)
+        body = source[start:end]
+        self.assertIn("View owner = getView();", body)
+        self.assertIn("long viewToken = viewGeneration;", body)
+        self.assertIn("getView() != owner || viewGeneration != viewToken", body)
+
 
 if __name__ == "__main__":
     unittest.main()
