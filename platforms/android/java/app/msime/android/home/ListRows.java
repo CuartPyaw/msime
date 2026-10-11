@@ -11,6 +11,7 @@ import android.widget.TextView;
 import androidx.annotation.DrawableRes;
 import androidx.annotation.Nullable;
 import app.msime.android.R;
+import app.msime.android.ThemeColorPolicy;
 import app.msime.android.ViewPolicy;
 import com.google.android.material.imageview.ShapeableImageView;
 
@@ -42,7 +43,8 @@ final class ListRows {
     /** M3 组标题：强调色、14sp、500 字重，与行里的图标左对齐。 */
     static TextView heading(ViewGroup parent, CharSequence text) {
         Context context = parent.getContext();
-        TextView heading = Ui.groupHeading(context, text);
+        TextView heading = ViewPolicy.headingLabel(context, text, Ui.TEXT_GROUP_TITLE, 500,
+            ThemeColorPolicy.accent(context));
         Ui.setPaddingDp(heading, context, Ui.NAV_ROW_PADDING_H, 16,
             Ui.NAV_ROW_PADDING_H, 4);
         parent.addView(heading, LayoutPolicy.matchWidthWrapParams());

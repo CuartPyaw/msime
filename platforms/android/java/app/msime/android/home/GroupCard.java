@@ -44,7 +44,8 @@ public final class GroupCard {
         if (parent.getChildCount() > 0) groupParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
 
         if (title != null && title.length() > 0) {
-            TextView heading = Ui.groupHeading(context, title);
+            TextView heading = ViewPolicy.headingLabel(context, title, Ui.TEXT_GROUP_TITLE, 500,
+                ThemeColorPolicy.accent(context));
             Ui.setPaddingDp(heading, context, Ui.GROUP_TITLE_INSET, 0,
                 Ui.GROUP_TITLE_INSET, 2);
             LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
