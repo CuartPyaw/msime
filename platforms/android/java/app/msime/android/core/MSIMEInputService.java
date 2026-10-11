@@ -1546,7 +1546,11 @@ public final class MSIMEInputService extends InputMethodService {
             hardwareKeyboardMode = true;
             if (keyboardRoot != null) render();
         }
+        long expectedGeneration = engineStartGeneration;
         main.post(() -> {
+            // A physical key can arrive just before the editor changes or this service is
+            // destroyed. Do not let the queued show request escape its input session.
+            if (expectedGeneration != engineStartGeneration) return;
             if (hardwareKeyboardMode && !isInputViewShown() && hasEngineComposition()) requestShowSelf(0);
         });
     }
