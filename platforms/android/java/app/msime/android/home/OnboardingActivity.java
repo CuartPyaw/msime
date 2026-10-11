@@ -297,10 +297,10 @@ public final class OnboardingActivity extends AppCompatActivity {
             LinearLayout cell = LayoutPolicy.column(this);
             ViewPolicy.setCenteredHorizontally(cell);
             Ui.setHorizontalPaddingDp(cell, this, 10);
-            TextView word = Ui.label(this, samples[index][0], 19, index == 0 ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.text(this));
+            TextView word = ViewPolicy.label(this, samples[index][0], 19, index == 0 ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.text(this));
             if (index == 0) ViewPolicy.setTypefaceStyle(word, 600);
             cell.addView(word);
-            if (on) cell.addView(Ui.label(this, samples[index][1], 11, ThemeColorPolicy.subText(this)));
+            if (on) cell.addView(ViewPolicy.label(this, samples[index][1], 11, ThemeColorPolicy.subText(this)));
             strip.addView(cell);
         }
         column.addView(strip, LayoutPolicy.matchWidthWrapParams(this, 6));
@@ -309,7 +309,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         ViewPolicy.setCenteredVertically(row);
         Ui.setSymmetricPaddingDp(row, this, 14, 12);
         ViewPolicy.setBackground(row, DrawablePolicy.rounded(ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 20)));
-        TextView label = Ui.label(this, "显示译文", 16, ThemeColorPolicy.text(this));
+        TextView label = ViewPolicy.label(this, "显示译文", 16, ThemeColorPolicy.text(this));
         row.addView(label, LayoutPolicy.weightedWrapParams(1f));
         MaterialSwitch toggle = new MaterialSwitch(this);
         toggle.setChecked(on);
@@ -463,7 +463,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         Ui.hideFromAccessibility(glyph);
         column.addView(glyph, LayoutPolicy.squareParams(this, 36));
 
-        TextView kick = Ui.label(this, kicker, 13, ThemeColorPolicy.accent(this));
+        TextView kick = ViewPolicy.label(this, kicker, 13, ThemeColorPolicy.accent(this));
         ViewPolicy.setTypefaceStyle(kick, 600);
         kick.setLetterSpacing(0.04f);
         column.addView(kick, LayoutPolicy.matchWidthWrapParams(this, 14 + 6));
@@ -472,7 +472,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         ViewPolicy.setLineSpacing(heading, 0, 1.1f);
         column.addView(heading, LayoutPolicy.matchWidthWrapParams(this, 14));
 
-        TextView line = Ui.label(this, body, 16, ThemeColorPolicy.subText(this));
+        TextView line = ViewPolicy.label(this, body, 16, ThemeColorPolicy.subText(this));
         ViewPolicy.setLineSpacing(line, 0, 1.35f);
         column.addView(line, LayoutPolicy.matchWidthWrapParams(this, 14));
     }
@@ -504,7 +504,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         StatusMarkPolicy.apply(mark, this, done);
         row.addView(mark, LayoutPolicy.squareParams(this, 24));
 
-        TextView text = Ui.label(this, label, 16, ThemeColorPolicy.text(this));
+        TextView text = ViewPolicy.label(this, label, 16, ThemeColorPolicy.text(this));
         LinearLayout.LayoutParams textParams = LayoutPolicy.weightedWrapParams(1f);
         textParams.setMarginStart(DimensionPolicy.pixels(this, 12));
         row.addView(text, textParams);
@@ -532,10 +532,10 @@ public final class OnboardingActivity extends AppCompatActivity {
         ViewPolicy.setBackground(card, face);
 
         LinearLayout text = LayoutPolicy.column(this);
-        TextView heading = Ui.label(this, option.label(), 16, ThemeColorPolicy.text(this));
+        TextView heading = ViewPolicy.label(this, option.label(), 16, ThemeColorPolicy.text(this));
         ViewPolicy.setTypefaceStyle(heading, 600);
         text.addView(heading);
-        TextView detail = Ui.label(this, option.detail(), 13, ThemeColorPolicy.subText(this));
+        TextView detail = ViewPolicy.label(this, option.detail(), 13, ThemeColorPolicy.subText(this));
         LinearLayout.LayoutParams detailParams = LayoutPolicy.wrapParams();
         detailParams.topMargin = DimensionPolicy.pixels(this, 2);
         text.addView(detail, detailParams);
@@ -568,7 +568,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(this), DimensionPolicy.pixels(this, 9)));
         Ui.hideFromAccessibility(badge);
         row.addView(badge, LayoutPolicy.squareParams(this, 32));
-        TextView text = Ui.label(this, label, 15, ThemeColorPolicy.text(this));
+        TextView text = ViewPolicy.label(this, label, 15, ThemeColorPolicy.text(this));
         LinearLayout.LayoutParams textParams = LayoutPolicy.weightedWrapParams(1f);
         textParams.setMarginStart(DimensionPolicy.pixels(this, 12));
         row.addView(text, textParams);
@@ -576,7 +576,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     }
 
     private TextView footnote(LinearLayout column, String message) {
-        TextView view = Ui.label(this, message, 13, ThemeColorPolicy.subText(this));
+        TextView view = ViewPolicy.label(this, message, 13, ThemeColorPolicy.subText(this));
         ViewPolicy.setPoliteLiveRegion(view);
         column.addView(view, LayoutPolicy.matchWidthWrapParams(this, 14));
         return view;

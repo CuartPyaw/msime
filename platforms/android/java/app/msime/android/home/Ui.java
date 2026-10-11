@@ -243,15 +243,6 @@ public final class Ui {
         ViewPolicy.hideFromAccessibility(view);
     }
 
-    /** Create a text label with the supplied text, size in sp, and colour. */
-    public static TextView label(Context context, CharSequence text, float sizeSp, @ColorInt int color) {
-        TextView view = new TextView(context);
-        view.setText(text);
-        ViewPolicy.setTextSizeSp(view, sizeSp);
-        ViewPolicy.setTextColor(view, color);
-        return view;
-    }
-
     /** Create a text label with the shared size, weight, and colour policy. */
     public static TextView styledLabel(Context context, CharSequence text, int sizeSp, int weight,
                                        @ColorInt int color) {
@@ -272,7 +263,7 @@ public final class Ui {
     /** 创建双轴居中的普通标签。 */
     public static TextView centeredLabel(Context context, CharSequence text, float sizeSp,
                                          @ColorInt int color) {
-        TextView centered = label(context, text, sizeSp, color);
+        TextView centered = ViewPolicy.label(context, text, sizeSp, color);
         ViewPolicy.setCentered(centered);
         return centered;
     }
@@ -296,7 +287,7 @@ public final class Ui {
     /** 创建带无障碍标题语义的普通标签。 */
     public static TextView headingLabel(Context context, CharSequence text, float sizeSp,
                                         @ColorInt int color) {
-        TextView heading = label(context, text, sizeSp, color);
+        TextView heading = ViewPolicy.label(context, text, sizeSp, color);
         heading.setAccessibilityHeading(true);
         return heading;
     }

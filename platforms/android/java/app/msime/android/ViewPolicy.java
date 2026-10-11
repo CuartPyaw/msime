@@ -153,6 +153,14 @@ public final class ViewPolicy {
     }
 
     /** Create a text view with its initial content assigned. */
+    public static TextView label(Context context, CharSequence text, float sizeSp, int color) {
+        TextView view = newTextView(context, text);
+        setTextSizeSp(view, sizeSp);
+        setTextColor(view, color);
+        return view;
+    }
+
+    /** Create a text view with its initial content assigned. */
     public static TextView newTextView(Context context, CharSequence text) {
         TextView view = new TextView(context);
         view.setText(text);

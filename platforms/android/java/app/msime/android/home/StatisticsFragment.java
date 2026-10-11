@@ -235,15 +235,15 @@ public final class StatisticsFragment extends HomeTabFragment {
 
     private void overview(Context context, LinearLayout content, Overview overview) {
         LinearLayout hero = card(context, content, 18);
-        hero.addView(Ui.label(context, "近 7 天共输入", 13, ThemeColorPolicy.subText(context)));
-        TextView total = Ui.label(context,
+        hero.addView(ViewPolicy.label(context, "近 7 天共输入", 13, ThemeColorPolicy.subText(context)));
+        TextView total = ViewPolicy.label(context,
             figure(context, NumberPolicy.grouped(overview.weekTotal()), 40, "字"),
             40, ThemeColorPolicy.text(context));
         Ui.setPaddingDp(total, context, 0, 4, 0, 0);
         hero.addView(total);
         String delta = TypingStatisticsSummary.weekDelta(overview.weekTotal(), overview.previousWeekTotal());
         if (delta != null) {
-            TextView change = Ui.label(context, delta, 13, ThemeColorPolicy.accent(context));
+            TextView change = ViewPolicy.label(context, delta, 13, ThemeColorPolicy.accent(context));
             ViewPolicy.setTypefaceStyle(change, Typeface.BOLD);
         Ui.setPaddingDp(change, context, 0, 4, 0, 0);
             hero.addView(change);
@@ -288,7 +288,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         header(context, content, "输入构成", null);
         LinearLayout composition = card(context, content, 16);
         if (mix.isEmpty()) {
-            composition.addView(Ui.label(context, "还没有记录", 14, ThemeColorPolicy.subText(context)));
+            composition.addView(ViewPolicy.label(context, "还没有记录", 14, ThemeColorPolicy.subText(context)));
         } else {
             DistributionView bar = new DistributionView(context);
             bar.setShares(mix, DistributionView.Style.STACK);
@@ -384,7 +384,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         text.setSpan(new AbsoluteSizeSpan(15, true), start, text.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         text.setSpan(new ForegroundColorSpan(ThemeColorPolicy.subText(context)), start, text.length(),
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        TextView count = Ui.label(context, text, 15, ThemeColorPolicy.text(context));
+        TextView count = ViewPolicy.label(context, text, 15, ThemeColorPolicy.text(context));
         progress.addView(count);
         View track = new View(context);
         track.setBackground(DrawablePolicy.pill(ThemeColorPolicy.hairline(context)));
@@ -434,7 +434,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         Ui.setHorizontalPaddingDp(row, context, 4);
         TextView heading = Ui.headingLabel(context, title, 13, ThemeColorPolicy.subText(context));
         row.addView(heading, LayoutPolicy.weightedWrapParams(1f));
-        if (trailing != null) row.addView(Ui.label(context, trailing, 13, ThemeColorPolicy.subText(context)));
+        if (trailing != null) row.addView(ViewPolicy.label(context, trailing, 13, ThemeColorPolicy.subText(context)));
         LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
         params.topMargin = DimensionPolicy.pixels(context, 22);
         // 最小 32 dp 而不是固定 32 dp：系统字体调大后标题和右侧的分段控件都比它高。
@@ -463,12 +463,12 @@ public final class StatisticsFragment extends HomeTabFragment {
         int pad = DimensionPolicy.pixels(context, 14);
         Ui.setSymmetricPaddingPx(tile, pad);
         ViewPolicy.setBackground(tile, DrawablePolicy.rounded(ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, 20)));
-        tile.addView(Ui.label(context, title, 13, ThemeColorPolicy.text(context)));
-        TextView number = Ui.label(context, figure(context, value, 24,
+        tile.addView(ViewPolicy.label(context, title, 13, ThemeColorPolicy.text(context)));
+        TextView number = ViewPolicy.label(context, figure(context, value, 24,
             "—".equals(value) ? "" : unit), 24, ThemeColorPolicy.text(context));
         Ui.setPaddingDp(number, context, 0, 6, 0, 6);
         tile.addView(number);
-        tile.addView(Ui.label(context, note, 12, highlight ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.subText(context)));
+        tile.addView(ViewPolicy.label(context, note, 12, highlight ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.subText(context)));
         tile.setContentDescription(title + " " + value + ("—".equals(value) ? "" : " " + unit) + "，" + note);
         ViewPolicy.setImportantForAccessibility(tile, View.IMPORTANT_FOR_ACCESSIBILITY_YES);
         return tile;
