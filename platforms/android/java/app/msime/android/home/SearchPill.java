@@ -40,7 +40,7 @@ public final class SearchPill extends LinearLayout {
         int icon = DimensionPolicy.pixels(context, 16);
         addView(glyph, new LayoutParams(icon, icon));
 
-        field = Ui.styledInput(context, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
+        field = ViewPolicy.styledInput(context, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
         ViewPolicy.clearBackground(field);
         ViewPolicy.clearPadding(field);
         ViewPolicy.setSingleLine(field);

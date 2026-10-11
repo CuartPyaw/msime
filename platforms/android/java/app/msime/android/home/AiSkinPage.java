@@ -355,7 +355,7 @@ public final class AiSkinPage extends DetailPage {
         }
 
         GroupCard describe = GroupCard.add(target, "描述");
-        EditText input = Ui.styledInput(context, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
+        EditText input = ViewPolicy.styledInput(context, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
         input.setText(s.prompt);
         input.setHint("写下你想要的样子，例如「雨后竹林」");
         input.setHintTextColor(ThemeColorPolicy.subText(context));

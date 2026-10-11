@@ -327,7 +327,7 @@ final class LoginSheet {
     }
 
     private EditText field(String hint, int inputType, int maxLength) {
-        EditText field = Ui.styledInput(activity, 16, 400, ThemeColorPolicy.text(activity));
+        EditText field = ViewPolicy.styledInput(activity, 16, 400, ThemeColorPolicy.text(activity));
         field.setHint(hint);
         field.setInputType(inputType);
         ViewPolicy.setSingleLine(field);
