@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """检查 Android 递归控件启用策略是否集中在共享 ViewPolicy。"""
 from pathlib import Path
+import re
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -88,6 +89,10 @@ def main() -> None:
         raise AssertionError("Ui 仍保留 afterTextChanged 转发方法")
     if "public static void style(TextView view, int sizeSp, int weight, int color)" in ui:
         raise AssertionError("Ui 仍保留文本样式转发方法")
+    if re.search(r"(?<![.\w])style\(", ui):
+        raise AssertionError("Ui 仍调用已移除的文本样式方法")
+    if ui.count("ViewPolicy.style(") != 3:
+        raise AssertionError("Ui 文本工厂没有直接调用共享样式方法")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")
@@ -121,6 +126,10 @@ def main() -> None:
             raise AssertionError(f"{path} 没有直接调用共享着色视图工厂")
     if "public static Drawable pillRipple(" in ui or "public static Drawable rippleOn(" in ui:
         raise AssertionError("Ui 仍保留主题 ripple 转发方法")
+    if re.search(r"(?<![.\w])pillRipple\(", ui):
+        raise AssertionError("Ui 仍调用已移除的胶囊 ripple 方法")
+    if "ViewPolicy.pillRipple(context, fill)" not in ui:
+        raise AssertionError("Ui 胶囊按钮没有调用共享 ripple 工厂")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.pillRipple(" in path.read_text(encoding="utf-8") or "Ui.rippleOn(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享主题 ripple 工厂")
