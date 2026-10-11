@@ -288,6 +288,11 @@ public final class ViewPolicy {
         setTextMinHeight(view, DimensionPolicy.pixels(context, heightDp));
     }
 
+    /** Apply the standard compact action-button insets. */
+    public static void setButtonPadding(Context context, View view) {
+        setSymmetricPaddingDp(context, view, 14, 5);
+    }
+
     /** Clear all view padding. */
     public static void clearPadding(View view) {
         view.setPadding(0, 0, 0, 0);
