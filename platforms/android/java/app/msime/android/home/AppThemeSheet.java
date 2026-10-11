@@ -50,7 +50,7 @@ final class AppThemeSheet {
         Context context = host.requireContext();
         BottomSheetDialog dialog = new BottomSheetDialog(context);
         LinearLayout root = LayoutPolicy.column(context);
-        root.addView(Ui.sheetDragHandle(context));
+        root.addView(LayoutPolicy.sheetDragHandle(context));
 
         LinearLayout header = SheetHeaderView.create(context, "应用主题", "四季会随季节自动更换配色");
 

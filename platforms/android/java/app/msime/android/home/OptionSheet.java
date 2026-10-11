@@ -30,7 +30,7 @@ public final class OptionSheet {
         this.context = context;
         dialog = new BottomSheetDialog(context);
         LinearLayout root = LayoutPolicy.column(context);
-        root.addView(Ui.sheetDragHandle(context));
+        root.addView(LayoutPolicy.sheetDragHandle(context));
 
         LinearLayout header = SheetHeaderView.create(context, title, subtitle);
         root.addView(header);

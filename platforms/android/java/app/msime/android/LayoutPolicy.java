@@ -6,6 +6,7 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import com.google.android.material.bottomsheet.BottomSheetDragHandleView;
 
 /** Shared Android containers and layout parameter factories. */
 public final class LayoutPolicy {
@@ -30,6 +31,13 @@ public final class LayoutPolicy {
     /** Create linear layout parameters from already pixel-sized dimensions. */
     public static LinearLayout.LayoutParams linearParamsPx(int widthPixels, int heightPixels) {
         return new LinearLayout.LayoutParams(widthPixels, heightPixels);
+    }
+
+    /** Create the full-width Material bottom-sheet drag handle. */
+    public static BottomSheetDragHandleView sheetDragHandle(Context context) {
+        BottomSheetDragHandleView handle = new BottomSheetDragHandleView(context);
+        handle.setLayoutParams(matchWidthWrapParams());
+        return handle;
     }
 
     /** Create a full-width solid colour band with a dp height. */
