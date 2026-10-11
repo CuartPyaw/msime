@@ -193,13 +193,13 @@ public final class ProfilePage extends DetailPage {
             ViewPolicy.setBackground(picture, circle);
             picture.setClipToOutline(true);
             Ui.hideFromAccessibility(picture);
-            frame.addView(picture, Ui.squareFrameParams(context, sizeDp));
+            frame.addView(picture, LayoutPolicy.squareFrameParams(context, sizeDp));
         } else {
             TextView letter = Ui.centeredLabel(context, Ui.trimmedInitial(name, "?"),
                 Math.round(sizeDp * 0.4f), 600, ThemeColorPolicy.onAccent(context));
             ViewPolicy.setBackground(letter, circle);
             Ui.hideFromAccessibility(letter);
-            frame.addView(letter, Ui.squareFrameParams(context, sizeDp));
+            frame.addView(letter, LayoutPolicy.squareFrameParams(context, sizeDp));
         }
         return frame;
     }
@@ -272,13 +272,13 @@ public final class ProfilePage extends DetailPage {
         int pad = DimensionPolicy.pixels(context, 6);
         Ui.setSymmetricPaddingPx(camera, pad);
         Ui.hideFromAccessibility(camera);
-        FrameLayout.LayoutParams cameraParams = Ui.squareFrameParams(context, 28);
+        FrameLayout.LayoutParams cameraParams = LayoutPolicy.squareFrameParams(context, 28);
         cameraParams.gravity = Gravity.BOTTOM | Gravity.END;
         avatar.addView(camera, cameraParams);
         ViewPolicy.setInteractive(avatar, true);
         avatar.setContentDescription("更换头像");
         ViewPolicy.bindClick(avatar, this::chooseAvatar);
-        header.addView(avatar, Ui.squareParams(context, 92));
+        header.addView(avatar, LayoutPolicy.squareParams(context, 92));
 
         TextView name = Ui.styledLabel(context, profile.displayName(), 22, 700, ThemeColorPolicy.text(context));
         LinearLayout.LayoutParams nameParams = LayoutPolicy.wrapParams();

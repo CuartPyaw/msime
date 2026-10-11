@@ -73,7 +73,7 @@ public final class DownloadPage extends DetailPage {
         ViewPolicy.setBackground(tile, DrawablePolicy.rounded(ThemeColorPolicy.accent(context), DimensionPolicy.pixels(context, 12)));
         ImageView icon = ImageViewPolicy.decorative(context, R.drawable.ic_ms_link, ThemeColorPolicy.onAccent(context));
         int iconSize = DimensionPolicy.pixels(context, 24);
-        tile.addView(icon, Ui.squareFrameParamsPx(iconSize, Gravity.CENTER));
+        tile.addView(icon, LayoutPolicy.squareFrameParamsPx(iconSize, Gravity.CENTER));
         int tileSize = DimensionPolicy.pixels(context, 44);
         card.addView(tile, ViewPolicy.newSquareParamsPx(tileSize));
 

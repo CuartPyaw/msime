@@ -82,7 +82,7 @@ public final class GroupCard {
         Row row = new Row(this, title, subtitle, false);
         row.value = trailingValue(row, value);
         ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
-        LinearLayout.LayoutParams params = Ui.squareParams(context, Ui.CHEVRON_SIZE);
+        LinearLayout.LayoutParams params = LayoutPolicy.squareParams(context, Ui.CHEVRON_SIZE);
         params.setMarginStart(DimensionPolicy.pixels(context, 6));
         row.view.addView(chevron, params);
         row.setAction(action);

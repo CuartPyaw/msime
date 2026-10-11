@@ -198,7 +198,7 @@ final class KeyboardSheets {
             row.addView(state, params);
         }
         ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
-        LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
+        LinearLayout.LayoutParams chevronParams = LayoutPolicy.squareParams(context, Ui.CHEVRON_SIZE);
         chevronParams.setMarginStart(DimensionPolicy.pixels(context, 6));
         row.addView(chevron, chevronParams);
         row.setContentDescription(title
@@ -230,7 +230,7 @@ final class KeyboardSheets {
             TextView icon = Ui.styledLabel(context, glyph, 22, 400, ThemeColorPolicy.accent(context));
             ViewPolicy.setCentered(icon);
             Ui.hideFromAccessibility(icon);
-            LinearLayout.LayoutParams iconParams = Ui.squareParams(context, iconSize);
+            LinearLayout.LayoutParams iconParams = LayoutPolicy.squareParams(context, iconSize);
             iconParams.setMarginEnd(DimensionPolicy.pixels(context, iconMarginEnd));
             row.addView(icon, iconParams);
         }
@@ -299,7 +299,7 @@ final class KeyboardSheets {
         ViewPolicy.setCentered(badge);
         ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), DimensionPolicy.pixels(context, 8)));
             Ui.hideFromAccessibility(badge);
-        LinearLayout.LayoutParams params = Ui.squareParams(context, 32);
+        LinearLayout.LayoutParams params = LayoutPolicy.squareParams(context, 32);
         params.setMarginEnd(DimensionPolicy.pixels(context, Ui.ROW_GAP));
         badge.setLayoutParams(params);
         return badge;
@@ -339,7 +339,7 @@ final class KeyboardSheets {
         Ui.setRowPadding(row, context);
 
         ImageView glyph = ImageViewPolicy.decorative(context, icon, ThemeColorPolicy.subText(context));
-        LinearLayout.LayoutParams glyphParams = Ui.squareParams(context, 22);
+        LinearLayout.LayoutParams glyphParams = LayoutPolicy.squareParams(context, 22);
         glyphParams.setMarginEnd(DimensionPolicy.pixels(context, 18));
         row.addView(glyph, glyphParams);
 
@@ -359,7 +359,7 @@ final class KeyboardSheets {
         }
         if (action != null) {
             ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
+            LinearLayout.LayoutParams chevronParams = LayoutPolicy.squareParams(context, Ui.CHEVRON_SIZE);
             chevronParams.setMarginStart(DimensionPolicy.pixels(context, 6));
             row.addView(chevron, chevronParams);
             ViewPolicy.makeClickable(row, context, action);

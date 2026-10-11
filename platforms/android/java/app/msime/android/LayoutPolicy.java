@@ -128,9 +128,26 @@ public final class LayoutPolicy {
         return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, heightPixels);
     }
 
+    /** Create linear layout parameters for a square child sized in dp. */
+    public static LinearLayout.LayoutParams squareParams(Context context, float sizeDp) {
+        int size = DimensionPolicy.pixels(context, sizeDp);
+        return new LinearLayout.LayoutParams(size, size);
+    }
+
+    /** Create frame layout parameters for a square child sized in dp. */
+    public static FrameLayout.LayoutParams squareFrameParams(Context context, float sizeDp) {
+        int size = DimensionPolicy.pixels(context, sizeDp);
+        return squareFrameParamsPx(size);
+    }
+
     /** Create frame layout parameters for a pixel-sized square. */
     public static FrameLayout.LayoutParams squareFrameParamsPx(int size) {
         return new FrameLayout.LayoutParams(size, size);
+    }
+
+    /** Create frame layout parameters for a pixel-sized square with explicit gravity. */
+    public static FrameLayout.LayoutParams squareFrameParamsPx(int size, int gravity) {
+        return new FrameLayout.LayoutParams(size, size, gravity);
     }
 
     /** Create frame layout parameters from already pixel-sized dimensions. */

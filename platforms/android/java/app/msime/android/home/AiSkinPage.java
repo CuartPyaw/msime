@@ -314,7 +314,7 @@ public final class AiSkinPage extends DetailPage {
         ViewPolicy.setCentered(overlay);
         ProgressBar spinner = new ProgressBar(context);
         ProgressBarPolicy.setIndeterminateTint(spinner, ThemeColorPolicy.accent(context));
-        overlay.addView(spinner, Ui.squareParams(context, 32));
+        overlay.addView(spinner, LayoutPolicy.squareParams(context, 32));
         TextView designing = Ui.styledLabel(context, "正在设计…", 14, 500, ThemeColorPolicy.text(context));
         overlay.addView(designing);
         busyOverlay = overlay;
@@ -486,7 +486,7 @@ public final class AiSkinPage extends DetailPage {
                         ColorPolicy.parse(colour, Color.GRAY), 9999f,
                         DimensionPolicy.atLeastOnePixel(context, 1), ThemeColorPolicy.hairline(context));
                     ViewPolicy.setBackground(dot, shape);
-                    LinearLayout.LayoutParams params = Ui.squareParams(context, 16);
+                    LinearLayout.LayoutParams params = LayoutPolicy.squareParams(context, 16);
                     params.setMarginEnd(DimensionPolicy.pixels(context, 6));
                     dots.addView(dot, params);
                 }
