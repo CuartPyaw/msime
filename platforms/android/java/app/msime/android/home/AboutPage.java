@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ImageViewPolicy;
@@ -201,7 +203,7 @@ public final class AboutPage extends DetailPage {
 
     /** 居中的标、应用名、版本，以及检查更新药丸（Play 安装时没有）。 */
     private View header(Context context, boolean play) {
-        LinearLayout header = Ui.column(context);
+        LinearLayout header = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(header);
         Ui.setPaddingDp(header, context, 0, 8, 0, 20);
 
@@ -216,14 +218,14 @@ public final class AboutPage extends DetailPage {
         TextView name = Ui.styledLabel(context, getString(R.string.app_name), 22, 700, ThemeColorPolicy.text(context));
         ViewPolicy.setCentered(name);
         name.setAccessibilityHeading(true);
-        LinearLayout.LayoutParams nameParams = Ui.wrap();
+        LinearLayout.LayoutParams nameParams = LayoutPolicy.wrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 18);
         header.addView(name, nameParams);
 
         TextView version = Ui.styledLabel(context,
             "版本 " + UpdateJobService.currentVersion(context) + " · Android", 13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setCentered(version);
-        LinearLayout.LayoutParams versionParams = Ui.wrap();
+        LinearLayout.LayoutParams versionParams = LayoutPolicy.wrapParams();
         versionParams.topMargin = DimensionPolicy.pixels(context, 6);
         header.addView(version, versionParams);
 
@@ -231,7 +233,7 @@ public final class AboutPage extends DetailPage {
             TextView button = Ui.pillButton(context, "检查更新", 15, 600, ThemeColorPolicy.onAccent(context),
                 20, 0, 36, 96, this::onPill);
             ViewPolicy.setPoliteLiveRegion(button);
-            LinearLayout.LayoutParams pillParams = Ui.wrap();
+            LinearLayout.LayoutParams pillParams = LayoutPolicy.wrapParams();
             pillParams.topMargin = DimensionPolicy.pixels(context, 14);
             header.addView(button, pillParams);
             pill = button;

@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ThemeColorPolicy;
@@ -47,7 +49,7 @@ final class AppThemeSheet {
     static void show(Fragment host, @Nullable JSONObject preferences, Runnable refresh) {
         Context context = host.requireContext();
         BottomSheetDialog dialog = new BottomSheetDialog(context);
-        LinearLayout root = Ui.column(context);
+        LinearLayout root = LayoutPolicy.column(context);
         root.addView(Ui.sheetDragHandle(context));
 
         LinearLayout header = SheetHeaderView.create(context, "应用主题", "四季会随季节自动更换配色");
@@ -63,7 +65,7 @@ final class AppThemeSheet {
             dialog.dismiss();
             save(host, "theme", MODES[index][0], refresh);
         });
-        LinearLayout.LayoutParams modeParams = Ui.wrap();
+        LinearLayout.LayoutParams modeParams = LayoutPolicy.wrapParams();
         modeParams.topMargin = DimensionPolicy.pixels(context, 12);
         header.addView(modes, modeParams);
         root.addView(header);

@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ImageViewPolicy;
@@ -37,7 +39,7 @@ public final class GroupCard {
 
     private GroupCard(ViewGroup parent, @Nullable CharSequence title) {
         context = parent.getContext();
-        group = Ui.column(context);
+        group = LayoutPolicy.column(context);
         LinearLayout.LayoutParams groupParams = Ui.matchWidth();
         if (parent.getChildCount() > 0) groupParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
 
@@ -241,15 +243,15 @@ public final class GroupCard {
             Ui.setRowMinimumHeight(view, owner.context);
             Ui.setRowPadding(view, owner.context);
 
-            LinearLayout texts = Ui.column(context);
+            LinearLayout texts = LayoutPolicy.column(context);
             title = Ui.styledLabel(context, titleText, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
             texts.addView(title);
             subtitle = Ui.styledLabel(context, subtitleText, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams subtitleParams = Ui.wrap();
+            LinearLayout.LayoutParams subtitleParams = LayoutPolicy.wrapParams();
             subtitleParams.topMargin = DimensionPolicy.pixels(owner.context, 1);
             texts.addView(subtitle, subtitleParams);
             setText(subtitle, subtitleText);
-            view.addView(texts, Ui.weightWrap(1f));
+            view.addView(texts, LayoutPolicy.weightedWrapParams(1f));
         }
 
         private void setAction(@Nullable Runnable action) {

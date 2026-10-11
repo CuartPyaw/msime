@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DrawablePolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
@@ -194,7 +196,7 @@ public final class LexiconPage extends DetailPage {
         if (parts.isEmpty() && !item.description().isEmpty()) parts.add(item.description());
         row.addView(KeyboardSheets.texts(context, item.name(), parts.isEmpty() ? null : String.join(" · ", parts),
                 ThemeColorPolicy.text(context)),
-            Ui.weightWrap(1f));
+            LayoutPolicy.weightedWrapParams(1f));
         boolean added = view.installed(item.id());
         boolean busy = installing.contains(item.id());
         boolean enabled = !added && !busy;

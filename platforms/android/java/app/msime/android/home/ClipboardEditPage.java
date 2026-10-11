@@ -129,7 +129,7 @@ public final class ClipboardEditPage extends DetailPage {
             }
         }
 
-        LinearLayout buttons = Ui.row(context);
+        LinearLayout buttons = LayoutPolicy.row(context);
         LinearLayout.LayoutParams buttonsParams = Ui.matchWidth();
         buttonsParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
         target.addView(buttons, buttonsParams);

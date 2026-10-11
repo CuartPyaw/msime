@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ImageViewPolicy;
@@ -61,7 +63,7 @@ public final class DownloadPage extends DetailPage {
 
     /** 「在电脑上打开」卡：accentSoft 底的 r20 卡片，左边强调色圆角方块里一枚链接图标。 */
     private View hero(Context context) {
-        LinearLayout card = Ui.row(context);
+        LinearLayout card = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(card);
         ViewPolicy.setBackground(card, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), DimensionPolicy.pixels(context, 20)));
         int pad = DimensionPolicy.pixels(context, 16);
@@ -75,19 +77,19 @@ public final class DownloadPage extends DetailPage {
         int tileSize = DimensionPolicy.pixels(context, 44);
         card.addView(tile, ViewPolicy.newSquareParamsPx(tileSize));
 
-        LinearLayout texts = Ui.column(context);
+        LinearLayout texts = LayoutPolicy.column(context);
         TextView title = Ui.styledLabel(context, "在电脑上打开", Ui.TEXT_ROW_TITLE, 600, ThemeColorPolicy.text(context));
         texts.addView(title);
         TextView link = Ui.styledLabel(context, DOWNLOAD_LABEL, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
         texts.addView(link);
-        LinearLayout.LayoutParams textParams = Ui.weightWrap(1f);
+        LinearLayout.LayoutParams textParams = LayoutPolicy.weightedWrapParams(1f);
         textParams.setMarginStart(DimensionPolicy.pixels(context, 14));
         card.addView(texts, textParams);
 
         TextView copy = Ui.pillButton(context, "复制链接", Ui.TEXT_BUTTON_SMALL, 600, ThemeColorPolicy.onAccent(context),
             14, 6, Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, () -> copyLink(context));
         copy.setContentDescription("复制下载页链接");
-        LinearLayout.LayoutParams copyParams = Ui.wrap();
+        LinearLayout.LayoutParams copyParams = LayoutPolicy.wrapParams();
         copyParams.setMarginStart(DimensionPolicy.pixels(context, 12));
         card.addView(copy, copyParams);
         return card;

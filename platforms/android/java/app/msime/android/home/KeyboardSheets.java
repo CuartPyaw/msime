@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ImageViewPolicy;
@@ -189,7 +191,7 @@ final class KeyboardSheets {
         LinearLayout row = baseRow(context);
         row.addView(badge(context, badge));
         row.addView(texts(context, title, subtitle, ThemeColorPolicy.text(context)),
-            Ui.weightWrap(1f));
+            LayoutPolicy.weightedWrapParams(1f));
         if (value != null && !value.isEmpty()) {
             TextView state = Ui.trailingValue(context, value, Ui.TEXT_ROW_TITLE, valueColor);
             LinearLayout.LayoutParams params = Ui.rowGapParams(context);
@@ -233,7 +235,7 @@ final class KeyboardSheets {
             row.addView(icon, iconParams);
         }
         TextView label = Ui.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
-        LinearLayout.LayoutParams labelParams = Ui.weightWrap(1f);
+        LinearLayout.LayoutParams labelParams = LayoutPolicy.weightedWrapParams(1f);
         labelParams.setMarginStart(DimensionPolicy.pixels(context, labelMarginStart));
         row.addView(label, labelParams);
         ViewPolicy.makeClickable(row, context, action);
@@ -251,7 +253,7 @@ final class KeyboardSheets {
         LinearLayout row = baseRow(context);
         row.addView(badge(context, badge));
         row.addView(texts(context, title, subtitle, ThemeColorPolicy.text(context)),
-            Ui.weightWrap(1f));
+            LayoutPolicy.weightedWrapParams(1f));
         boolean enabled = action != null;
         TextView button;
         if (enabled) {
@@ -284,7 +286,7 @@ final class KeyboardSheets {
     }
 
     static LinearLayout baseRow(Context context) {
-        LinearLayout row = Ui.row(context);
+        LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
         Ui.setRowMinimumHeight(row, context);
         Ui.setRowPadding(row, context);
@@ -304,7 +306,7 @@ final class KeyboardSheets {
     }
 
     static LinearLayout texts(Context context, String title, @Nullable String subtitle, int titleColor) {
-        LinearLayout texts = Ui.column(context);
+        LinearLayout texts = LayoutPolicy.column(context);
         TextView heading = Ui.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, titleColor);
         ViewPolicy.setSingleLine(heading);
         texts.addView(heading);
@@ -330,7 +332,7 @@ final class KeyboardSheets {
     /** 「我的」页面共用的图标导航行，支持副标题、尾部值和可选点击行为。 */
     static LinearLayout iconNavRow(Context context, @DrawableRes int icon, CharSequence title,
             @Nullable CharSequence subtitle, @Nullable CharSequence value, @Nullable Runnable action) {
-        LinearLayout row = Ui.row(context);
+        LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
         Ui.setMinimumHeightDp(row, context,
             subtitle == null ? Ui.COMPACT_ROW_MIN_HEIGHT : Ui.ROW_MIN_HEIGHT);
@@ -341,14 +343,14 @@ final class KeyboardSheets {
         glyphParams.setMarginEnd(DimensionPolicy.pixels(context, 18));
         row.addView(glyph, glyphParams);
 
-        LinearLayout texts = Ui.column(context);
+        LinearLayout texts = LayoutPolicy.column(context);
         TextView heading = Ui.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
         texts.addView(heading);
         if (subtitle != null) {
             TextView detail = Ui.styledLabel(context, subtitle, 12, 400, ThemeColorPolicy.subText(context));
             texts.addView(detail);
         }
-        row.addView(texts, Ui.weightWrap(1f));
+        row.addView(texts, LayoutPolicy.weightedWrapParams(1f));
 
         if (value != null && value.length() > 0) {
             TextView trailing = Ui.trailingValue(context, value, Ui.TEXT_ROW_SUBTITLE, ThemeColorPolicy.subText(context));

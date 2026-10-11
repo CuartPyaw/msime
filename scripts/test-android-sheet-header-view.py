@@ -17,7 +17,7 @@ def main() -> int:
     required = (
         "public final class SheetHeaderView",
         "public static LinearLayout create(Context context, CharSequence title,",
-        "LinearLayout header = Ui.column(context);",
+        "LinearLayout header = LayoutPolicy.column(context);",
         "ViewPolicy.setCenteredHorizontally(header);",
         "ViewPolicy.setPadding(header, horizontal, 0, horizontal, DimensionPolicy.pixels(context, 12));",
         "TextView heading = Ui.headingLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,",

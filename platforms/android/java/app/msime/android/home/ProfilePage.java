@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ImageViewPolicy;
@@ -257,7 +259,7 @@ public final class ProfilePage extends DetailPage {
     }
 
     private View header(Context context, DeviceDataApi.Profile profile, @Nullable Bitmap image) {
-        LinearLayout header = Ui.column(context);
+        LinearLayout header = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(header);
         Ui.setPaddingDp(header, context, 0, 8, 0, 4);
 
@@ -279,14 +281,14 @@ public final class ProfilePage extends DetailPage {
         header.addView(avatar, Ui.squareParams(context, 92));
 
         TextView name = Ui.styledLabel(context, profile.displayName(), 22, 700, ThemeColorPolicy.text(context));
-        LinearLayout.LayoutParams nameParams = Ui.wrap();
+        LinearLayout.LayoutParams nameParams = LayoutPolicy.wrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 10);
         header.addView(name, nameParams);
 
         if (!profile.email().isEmpty()) {
             TextView email = Ui.styledLabel(context, profile.email(), Ui.TEXT_ROW_SUBTITLE, 400,
                 ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams emailParams = Ui.wrap();
+            LinearLayout.LayoutParams emailParams = LayoutPolicy.wrapParams();
             emailParams.topMargin = DimensionPolicy.pixels(context, 2);
             header.addView(email, emailParams);
         }
@@ -298,7 +300,7 @@ public final class ProfilePage extends DetailPage {
                 ThemeColorPolicy.accent(context));
             ViewPolicy.setBackground(chip, DrawablePolicy.pill(ThemeColorPolicy.accentSoft(context)));
             Ui.setSymmetricPaddingDp(chip, context, 10, 3);
-            LinearLayout.LayoutParams chipParams = Ui.wrap();
+            LinearLayout.LayoutParams chipParams = LayoutPolicy.wrapParams();
             chipParams.topMargin = DimensionPolicy.pixels(context, 8);
             header.addView(chip, chipParams);
         }

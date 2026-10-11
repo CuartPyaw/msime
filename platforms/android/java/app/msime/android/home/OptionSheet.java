@@ -29,13 +29,13 @@ public final class OptionSheet {
     public OptionSheet(Context context, CharSequence title, @Nullable CharSequence subtitle) {
         this.context = context;
         dialog = new BottomSheetDialog(context);
-        LinearLayout root = Ui.column(context);
+        LinearLayout root = LayoutPolicy.column(context);
         root.addView(Ui.sheetDragHandle(context));
 
         LinearLayout header = SheetHeaderView.create(context, title, subtitle);
         root.addView(header);
 
-        options = Ui.column(context);
+        options = LayoutPolicy.column(context);
         NestedScrollView scroll = new NestedScrollView(context);
         scroll.addView(options, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));

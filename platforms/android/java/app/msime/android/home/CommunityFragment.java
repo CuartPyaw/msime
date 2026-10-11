@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.TextPolicy;
@@ -462,7 +464,7 @@ public final class CommunityFragment extends Fragment {
     private void report(CommunityCatalog.Item item) {
         Context context = requireContext();
         int padding = DimensionPolicy.pixels(context, 20);
-        LinearLayout form = Ui.column(context);
+        LinearLayout form = LayoutPolicy.column(context);
         ViewPolicy.setPadding(form, padding, DimensionPolicy.pixels(context, 8), padding, 0);
         RadioGroup reasons = new RadioGroup(context);
         for (String reason : CommunityRequest.REPORT_REASONS) {

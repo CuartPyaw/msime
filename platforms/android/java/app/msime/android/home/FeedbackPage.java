@@ -109,20 +109,20 @@ public final class FeedbackPage extends DetailPage {
 
         HorizontalScrollView strip = new HorizontalScrollView(context);
         strip.setHorizontalScrollBarEnabled(false);
-        LinearLayout shots = Ui.row(context);
+        LinearLayout shots = LayoutPolicy.row(context);
         Ui.setPaddingDp(shots, requireContext(), 16, 10, 16, 0);
         strip.addView(shots);
         card.addView(strip, Ui.matchWidth());
         thumbnails = shots;
 
-        LinearLayout add = Ui.row(context);
+        LinearLayout add = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(add);
         Ui.setPaddingDp(add, requireContext(), 16, 12, 16, 14);
         add.setContentDescription("添加截图，最多 " + FeedbackApi.MAX_SCREENSHOTS + " 张");
         ImageView icon = ImageViewPolicy.decorative(context, R.drawable.ms_w4_me2_image, ThemeColorPolicy.accent(context));
         add.addView(icon, Ui.squareParams(requireContext(), 20));
         TextView label = Ui.styledLabel(context, "添加截图", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
-        LinearLayout.LayoutParams labelParams = Ui.wrap();
+        LinearLayout.LayoutParams labelParams = LayoutPolicy.wrapParams();
         labelParams.setMarginStart(DimensionPolicy.pixels(requireContext(), 10));
         add.addView(label, labelParams);
         ViewPolicy.makeClickable(add, context, () -> picker.launch("image/*"));
