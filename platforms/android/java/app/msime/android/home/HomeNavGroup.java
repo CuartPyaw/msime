@@ -27,7 +27,7 @@ public final class HomeNavGroup {
 
     private HomeNavGroup(ViewGroup parent) {
         Context context = parent.getContext();
-        card = Ui.verticalCard(context, Ui.NAV_GROUP_RADIUS);
+        card = LayoutPolicy.roundedColumn(context, ThemeColorPolicy.card(context), Ui.NAV_GROUP_RADIUS);
         // 按压波纹裁在 24dp 的圆角里。
         card.setClipToOutline(true);
         LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();

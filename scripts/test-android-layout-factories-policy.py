@@ -19,7 +19,8 @@ def main():
                       "rowGapParams(Context context, float gapDp)",
                       "divider(Context context, int color, boolean horizontal)",
                       "colorBand(Context context, int color, float heightDp)",
-                      "sheetDragHandle(Context context)"):
+                      "sheetDragHandle(Context context)",
+                      "roundedColumn(Context context, int color, float radiusDp)"):
         if signature not in policy:
             errors.append(f"{POLICY}: 缺少 {signature} 工厂")
     for p in JAVA.rglob("*.java"):
@@ -38,6 +39,8 @@ def main():
             errors.append(f"{p}: 仍调用 Ui.sheetSeparator")
         if "Ui.sheetDragHandle" in s:
             errors.append(f"{p}: 仍调用 Ui.sheetDragHandle")
+        if "Ui.verticalCard" in s:
+            errors.append(f"{p}: 仍调用 Ui.verticalCard")
     if errors: print("\n".join(errors),file=sys.stderr); return 1
     print("Android layout factories use LayoutPolicy directly")
     return 0

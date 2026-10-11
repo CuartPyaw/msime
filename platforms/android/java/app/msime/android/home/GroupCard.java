@@ -52,7 +52,7 @@ public final class GroupCard {
             group.addView(heading, params);
         }
 
-        card = Ui.verticalCard(context, Ui.GROUP_RADIUS);
+        card = LayoutPolicy.roundedColumn(context, ThemeColorPolicy.card(context), Ui.GROUP_RADIUS);
         // 行的按压波纹裁在卡片圆角里，首尾两行不会露出直角。
         card.setClipToOutline(true);
         group.addView(card, LayoutPolicy.matchWidthWrapParams());
