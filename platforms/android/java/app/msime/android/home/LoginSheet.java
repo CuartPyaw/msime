@@ -114,7 +114,7 @@ final class LoginSheet {
 
         LinearLayout root = LayoutPolicy.column(activity);
         Ui.setPaddingDp(root, activity, 24, 0, 24, 20);
-        root.addView(Ui.sheetDragHandle(activity));
+        root.addView(LayoutPolicy.sheetDragHandle(activity));
 
         LinearLayout header = LayoutPolicy.row(activity);
         ViewPolicy.setCenteredVertically(header);

@@ -243,13 +243,6 @@ public final class Ui {
         ViewPolicy.hideFromAccessibility(view);
     }
 
-    /** Create the full-width Material bottom-sheet drag handle. */
-    public static BottomSheetDragHandleView sheetDragHandle(Context context) {
-        BottomSheetDragHandleView handle = new BottomSheetDragHandleView(context);
-        handle.setLayoutParams(LayoutPolicy.matchWidthWrapParams());
-        return handle;
-    }
-
     /** Create a text label with the supplied text, size in sp, and colour. */
     public static TextView label(Context context, CharSequence text, float sizeSp, @ColorInt int color) {
         TextView view = new TextView(context);
