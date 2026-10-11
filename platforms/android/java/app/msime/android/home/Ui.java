@@ -243,14 +243,6 @@ public final class Ui {
         ViewPolicy.hideFromAccessibility(view);
     }
 
-    /** Create the page-coloured separation band used between sheet options and the cancel row. */
-    public static View sheetSeparator(Context context) {
-        View view = new View(context);
-        ViewPolicy.setBackgroundColor(view, ThemeColorPolicy.page(context));
-        view.setLayoutParams(LayoutPolicy.matchWidthHeightDp(context, 8));
-        return view;
-    }
-
     /** Create the full-width Material bottom-sheet drag handle. */
     public static BottomSheetDragHandleView sheetDragHandle(Context context) {
         BottomSheetDragHandleView handle = new BottomSheetDragHandleView(context);

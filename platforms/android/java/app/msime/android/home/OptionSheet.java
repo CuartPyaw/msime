@@ -43,7 +43,7 @@ public final class OptionSheet {
         root.addView(scroll, LayoutPolicy.weightedWidthParams(1f));
 
         // 「取消」与选项之间一条页面底色的带子，代替设计里分开的两块卡片。
-        root.addView(Ui.sheetSeparator(context));
+        root.addView(LayoutPolicy.colorBand(context, ThemeColorPolicy.page(context), 8));
         root.addView(SheetOptionView.create(context, "取消", false, false, ThemeColorPolicy.accent(context), true,
             dialog::cancel));
         dialog.setContentView(root);
