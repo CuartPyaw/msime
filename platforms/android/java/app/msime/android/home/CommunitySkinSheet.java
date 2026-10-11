@@ -58,7 +58,7 @@ public final class CommunitySkinSheet {
             sheet.content().addView(preview, params);
         }
 
-        TextView description = Ui.styledLabel(context,
+        TextView description = ViewPolicy.styledLabel(context,
             item.description().isEmpty() ? "作者没有写说明。" : item.description(),
             14, 400, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams text = LayoutPolicy.matchWidthWrapParams();

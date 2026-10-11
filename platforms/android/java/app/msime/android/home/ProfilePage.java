@@ -282,13 +282,13 @@ public final class ProfilePage extends DetailPage {
         ViewPolicy.bindClick(avatar, this::chooseAvatar);
         header.addView(avatar, LayoutPolicy.squareParams(context, 92));
 
-        TextView name = Ui.styledLabel(context, profile.displayName(), 22, 700, ThemeColorPolicy.text(context));
+        TextView name = ViewPolicy.styledLabel(context, profile.displayName(), 22, 700, ThemeColorPolicy.text(context));
         LinearLayout.LayoutParams nameParams = LayoutPolicy.wrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 10);
         header.addView(name, nameParams);
 
         if (!profile.email().isEmpty()) {
-            TextView email = Ui.styledLabel(context, profile.email(), Ui.TEXT_ROW_SUBTITLE, 400,
+            TextView email = ViewPolicy.styledLabel(context, profile.email(), Ui.TEXT_ROW_SUBTITLE, 400,
                 ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams emailParams = LayoutPolicy.wrapParams();
             emailParams.topMargin = DimensionPolicy.pixels(context, 2);
@@ -298,7 +298,7 @@ public final class ProfilePage extends DetailPage {
         String kind = SyncSwitch.validLoginKind(SyncSwitch.loginKind(context)) ? SyncSwitch.loginKind(context)
             : profile.loginKind();
         if (!kind.isEmpty()) {
-            TextView chip = Ui.styledLabel(context, "通过 " + providerName(kind) + " 登录", 12, 500,
+            TextView chip = ViewPolicy.styledLabel(context, "通过 " + providerName(kind) + " 登录", 12, 500,
                 ThemeColorPolicy.accent(context));
             ViewPolicy.setBackground(chip, DrawablePolicy.pill(ThemeColorPolicy.accentSoft(context)));
             Ui.setSymmetricPaddingDp(chip, context, 10, 3);

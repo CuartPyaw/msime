@@ -39,7 +39,7 @@ public final class SettingsSheet {
         root.addView(heading);
 
         if (subtitle != null && !subtitle.isEmpty()) {
-            TextView note = Ui.styledLabel(context, subtitle, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
+            TextView note = ViewPolicy.styledLabel(context, subtitle, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams(context, 4);
             root.addView(note, params);
         }
@@ -68,7 +68,7 @@ public final class SettingsSheet {
 
     /** 这一列末尾的脚注。 */
     public void addNote(String text) {
-        TextView note = Ui.styledLabel(context, text, 12, 400, ThemeColorPolicy.subText(context));
+        TextView note = ViewPolicy.styledLabel(context, text, 12, 400, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
         params.topMargin = DimensionPolicy.pixels(context, 14);
         content.addView(note, params);

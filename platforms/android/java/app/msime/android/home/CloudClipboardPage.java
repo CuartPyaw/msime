@@ -137,7 +137,7 @@ public final class CloudClipboardPage extends DetailPage {
         ViewPolicy.setCenteredVertically(retention);
         Ui.setRowMinimumHeight(retention, context);
         Ui.setRowPadding(retention, context);
-        TextView label = Ui.styledLabel(context, "保留时长", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
+        TextView label = ViewPolicy.styledLabel(context, "保留时长", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
         retention.addView(label, LayoutPolicy.weightedWrapParams(1f));
         SegmentedControl segments = new SegmentedControl(context);
         int selected = current == null ? -1 : CloudClipboardApi.RETENTION_DAYS.indexOf(current.retentionDays());
@@ -163,7 +163,7 @@ public final class CloudClipboardPage extends DetailPage {
             ThemeColorPolicy.accent(context));
         header.addView(recent, LayoutPolicy.weightedWrapParams(1f));
         if (!current.items().isEmpty()) {
-            TextView clear = Ui.styledLabel(context, "清空", Ui.TEXT_GROUP_TITLE, 500, ThemeColorPolicy.accent(context));
+            TextView clear = ViewPolicy.styledLabel(context, "清空", Ui.TEXT_GROUP_TITLE, 500, ThemeColorPolicy.accent(context));
         Ui.setPaddingDp(clear, context, 8, 4, 0, 4);
             ViewPolicy.makeClickable(clear, context, this::confirmClear);
             header.addView(clear);
@@ -178,7 +178,7 @@ public final class CloudClipboardPage extends DetailPage {
             LinearLayout empty = LayoutPolicy.column(context);
             ViewPolicy.setCenteredHorizontally(empty);
             Ui.setSymmetricPaddingDp(empty, context, 16, 32);
-            TextView title = Ui.styledLabel(context, "还没有同步内容", Ui.TEXT_ROW_TITLE, 500, ThemeColorPolicy.text(context));
+            TextView title = ViewPolicy.styledLabel(context, "还没有同步内容", Ui.TEXT_ROW_TITLE, 500, ThemeColorPolicy.text(context));
             empty.addView(title);
             TextView hint = ViewPolicy.centeredLabel(context, "在任一设备上复制文字，这里就会出现",
                 Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
@@ -197,10 +197,10 @@ public final class CloudClipboardPage extends DetailPage {
         Ui.setPaddingDp(row, context, 16, 12, 8, 12);
 
         LinearLayout texts = LayoutPolicy.column(context);
-        TextView text = Ui.styledLabel(context, item.text(), 15, 400, ThemeColorPolicy.text(context));
+        TextView text = ViewPolicy.styledLabel(context, item.text(), 15, 400, ThemeColorPolicy.text(context));
         ViewPolicy.setMaxLinesEllipsized(text, 3);
         texts.addView(text);
-        TextView meta = Ui.styledLabel(context, meta(item), 12, 400, ThemeColorPolicy.subText(context));
+        TextView meta = ViewPolicy.styledLabel(context, meta(item), 12, 400, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams metaParams = LayoutPolicy.wrapParams();
         metaParams.topMargin = DimensionPolicy.pixels(context, 4);
         texts.addView(meta, metaParams);

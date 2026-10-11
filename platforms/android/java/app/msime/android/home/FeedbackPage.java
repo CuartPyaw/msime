@@ -123,7 +123,7 @@ public final class FeedbackPage extends DetailPage {
         add.setContentDescription("添加截图，最多 " + FeedbackApi.MAX_SCREENSHOTS + " 张");
         ImageView icon = ImageViewPolicy.decorative(context, R.drawable.ms_w4_me2_image, ThemeColorPolicy.accent(context));
         add.addView(icon, LayoutPolicy.squareParams(requireContext(), 20));
-        TextView label = Ui.styledLabel(context, "添加截图", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
+        TextView label = ViewPolicy.styledLabel(context, "添加截图", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
         LinearLayout.LayoutParams labelParams = LayoutPolicy.wrapParams();
         labelParams.setMarginStart(DimensionPolicy.pixels(requireContext(), 10));
         add.addView(label, labelParams);
@@ -131,7 +131,7 @@ public final class FeedbackPage extends DetailPage {
         card.addView(add, LayoutPolicy.matchWidthWrapParams());
         addShot = add;
 
-        TextView count = Ui.styledLabel(context, "", 13, 400, ThemeColorPolicy.subText(context));
+        TextView count = ViewPolicy.styledLabel(context, "", 13, 400, ThemeColorPolicy.subText(context));
         Ui.setPaddingDp(count, requireContext(), Ui.GROUP_TITLE_INSET, 6,
             Ui.GROUP_TITLE_INSET, 0);
         description.view().addView(count, LayoutPolicy.matchWidthWrapParams());
