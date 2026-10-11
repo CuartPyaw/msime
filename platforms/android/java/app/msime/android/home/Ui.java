@@ -166,11 +166,6 @@ public final class Ui {
 
     // ---- 读取 ----
 
-    /** Set a view's minimum height from a density-independent value. */
-    public static void setMinimumHeightDp(View view, Context context, float heightDp) {
-        ViewPolicy.setMinimumHeight(view, DimensionPolicy.pixels(context, heightDp));
-    }
-
     /** Set a text view's line-aware minimum height from a density-independent value. */
     public static void setTextMinHeightDp(TextView view, Context context, float heightDp) {
         ViewPolicy.setTextMinHeight(view, DimensionPolicy.pixels(context, heightDp));
