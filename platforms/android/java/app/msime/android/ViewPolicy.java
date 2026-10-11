@@ -43,6 +43,15 @@ public final class ViewPolicy {
         setTextColor(view, color);
     }
 
+    /** Create a styled text label constrained to one line. */
+    public static TextView singleLineLabel(Context context, CharSequence text, int sizeSp,
+                                           int weight, int color) {
+        TextView view = newTextView(context, text);
+        style(view, sizeSp, weight, color);
+        setSingleLine(view);
+        return view;
+    }
+
     /** Apply a minimum height to a generic view. */
     public static void setMinimumHeight(View view, int height) {
         view.setMinimumHeight(height);
