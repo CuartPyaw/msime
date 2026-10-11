@@ -6,6 +6,7 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.graphics.drawable.GradientDrawable;
 
 /** Shared Android containers and layout parameter factories. */
 public final class LayoutPolicy {
@@ -50,8 +51,11 @@ public final class LayoutPolicy {
     /** Create a vertical rounded container with a caller-supplied fill colour. */
     public static LinearLayout roundedColumn(Context context, int color, float radiusDp) {
         LinearLayout column = column(context);
-        ViewPolicy.setBackground(column,
-            DrawablePolicy.rounded(color, DimensionPolicy.pixels(context, radiusDp)));
+        GradientDrawable background = new GradientDrawable();
+        background.setShape(GradientDrawable.RECTANGLE);
+        background.setColor(color);
+        background.setCornerRadius(DimensionPolicy.pixels(context, radiusDp));
+        ViewPolicy.setBackground(column, background);
         return column;
     }
 
