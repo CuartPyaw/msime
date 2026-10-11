@@ -2441,6 +2441,12 @@ int main(int argc, char **argv) {
       releaseSave.set_value();
       std::ofstream(path) << options.dump();
       state->refreshProviderSockets();
+      // 恢复目录也会清空快照；模拟下一次偏好计时器重读，后续动作才能使用有效修订号。
+      state->refreshPreferences();
+      require(state->preferences_job_.valid(), "恢复偏好目录后重新读取快照");
+      state->preferences_job_.wait();
+      state->refreshPreferences();
+      require(state->preferences_snapshot_.contains("revision"), "恢复的偏好快照包含修订号");
     }
     {
       // Moving the local history store must release reads and mutations that
@@ -2842,10 +2848,11 @@ int main(int argc, char **argv) {
     state->voice_space_consumed_ = false;
     state->voice_space_locked_ = false;
     const auto committedBeforeCancel = ic.committed;
-    state->voice_job_ = std::async(std::launch::async, [] {
+    // 使用产品相同的后台任务；std::async 的最后一份 future 析构会等待，无法验证非阻塞取消。
+    state->voice_job_ = detachedJob([] {
       std::this_thread::sleep_for(std::chrono::milliseconds(250));
       return Json{{"text", "已取消语音"}};
-    }).share();
+    });
     state->voice_loading_ = true;
     state->voice_socket_.clear();
     state->voice_generation_ = 0;
