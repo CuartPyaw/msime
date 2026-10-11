@@ -452,7 +452,7 @@ public final class AiSkinPage extends DetailPage {
         String current = TextPolicy.trimmed(s.prompt);
         for (TextView chip : chips) {
             boolean on = chip.getText().toString().equals(current);
-            Ui.style(chip, 13, on ? 600 : 400, on ? ThemeColorPolicy.onAccent(context) : ThemeColorPolicy.text(context));
+            ViewPolicy.style(chip, 13, on ? 600 : 400, on ? ThemeColorPolicy.onAccent(context) : ThemeColorPolicy.text(context));
             ViewPolicy.setBackground(chip, ViewPolicy.pillRipple(context, on ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.rowBackground(context)));
         }
     }
