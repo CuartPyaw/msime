@@ -203,7 +203,7 @@ public final class LexiconPage extends DetailPage {
         boolean enabled = !added && !busy;
         TextView button;
         if (enabled) {
-            button = Ui.pillButton(context, "添加", Ui.TEXT_BUTTON_SMALL, 500,
+            button = ViewPolicy.pillButton(context, "添加", Ui.TEXT_BUTTON_SMALL, 500,
                 ThemeColorPolicy.accentSoft(context), ThemeColorPolicy.accent(context), Ui.BUTTON_PADDING_H, Ui.BUTTON_PADDING_V,
                 Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, () -> install(item));
         } else {

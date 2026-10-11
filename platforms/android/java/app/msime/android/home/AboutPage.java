@@ -230,7 +230,8 @@ public final class AboutPage extends DetailPage {
         header.addView(version, versionParams);
 
         if (!play) {
-            TextView button = Ui.pillButton(context, "检查更新", 15, 600, ThemeColorPolicy.onAccent(context),
+            TextView button = ViewPolicy.pillButton(context, "检查更新", 15, 600, ThemeColorPolicy.accent(context),
+                ThemeColorPolicy.onAccent(context),
                 20, 0, 36, 96, this::onPill);
             ViewPolicy.setPoliteLiveRegion(button);
             LinearLayout.LayoutParams pillParams = LayoutPolicy.wrapParams();

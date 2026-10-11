@@ -264,49 +264,4 @@ public final class Ui {
         return view;
     }
 
-    /** Create a filled accent pill button; callers add their content description and action. */
-    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
-                                      @ColorInt int ink, float horizontalPaddingDp, float verticalPaddingDp,
-                                      float minHeightDp, float minWidthDp) {
-        return pillButton(context, label, sizeSp, weight, ThemeColorPolicy.accent(context), ink,
-            horizontalPaddingDp, verticalPaddingDp, minHeightDp, minWidthDp, null);
-    }
-
-    /** Create a filled accent pill button and bind its action. */
-    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
-                                      @ColorInt int ink, float horizontalPaddingDp, float verticalPaddingDp,
-                                      float minHeightDp, float minWidthDp, Runnable action) {
-        return pillButton(context, label, sizeSp, weight, ThemeColorPolicy.accent(context), ink,
-            horizontalPaddingDp, verticalPaddingDp, minHeightDp, minWidthDp, action);
-    }
-
-    /** Create a filled accent pill button with an explicit fill colour. */
-    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
-                                      @ColorInt int fill, @ColorInt int ink,
-                                      float horizontalPaddingDp, float verticalPaddingDp,
-                                      float minHeightDp, float minWidthDp) {
-        return pillButton(context, label, sizeSp, weight, fill, ink, horizontalPaddingDp, verticalPaddingDp,
-            minHeightDp, minWidthDp, null);
-    }
-
-    /** Create a pill button with an explicit fill colour and bind its action. */
-    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
-                                      @ColorInt int fill, @ColorInt int ink,
-                                      float horizontalPaddingDp, float verticalPaddingDp,
-                                      float minHeightDp, float minWidthDp, Runnable action) {
-        TextView button = ViewPolicy.centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);
-        ViewPolicy.setBackground(button, ViewPolicy.pillRipple(context, fill));
-        setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
-        setTextMinHeightDp(button, context, minHeightDp);
-        if (minWidthDp > 0) ViewPolicy.setTextMinWidth(button, DimensionPolicy.pixels(context, minWidthDp));
-        bindClick(button, action);
-        return button;
-    }
-
-    private static void bindClick(View view, Runnable action) {
-        ViewPolicy.setInteractive(view, true);
-        ViewPolicy.bindOptionalClick(view, action);
-    }
-
-
 }
