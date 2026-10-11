@@ -197,7 +197,7 @@ public final class ProfilePage extends DetailPage {
             Ui.hideFromAccessibility(picture);
             frame.addView(picture, LayoutPolicy.squareFrameParams(context, sizeDp));
         } else {
-            TextView letter = Ui.centeredLabel(context, TextPolicy.trimmedInitial(name, "?"),
+            TextView letter = ViewPolicy.centeredLabel(context, TextPolicy.trimmedInitial(name, "?"),
                 Math.round(sizeDp * 0.4f), 600, ThemeColorPolicy.onAccent(context));
             ViewPolicy.setBackground(letter, circle);
             Ui.hideFromAccessibility(letter);

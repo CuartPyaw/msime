@@ -51,6 +51,7 @@ def main() -> None:
         "public static Drawable pillRipple(Context context, int fill)",
         "public static void style(TextView view, int sizeSp, int weight, int color)",
         "public static TextView singleLineLabel(Context context, CharSequence text, int sizeSp,",
+        "public static TextView centeredLabel(Context context, CharSequence text, float sizeSp,",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -108,6 +109,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.singleLineLabel(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享单行标签工厂")
+    if "public static TextView centeredLabel(" in ui:
+        raise AssertionError("Ui 仍保留 centeredLabel 转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.centeredLabel(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享居中标签工厂")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.afterTextChanged(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文字变更策略")

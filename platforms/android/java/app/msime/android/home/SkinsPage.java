@@ -154,7 +154,7 @@ public final class SkinsPage extends ReloadingDetailPage {
             LayoutPolicy.frameMatchWidthHeightPx(DimensionPolicy.pixels(context, 76)));
         cell.addView(tile, LayoutPolicy.matchWidthWrapParams());
 
-        TextView name = Ui.centeredLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
+        TextView name = ViewPolicy.centeredLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
             Ui.TEXT_ROW_SUBTITLE + 1, card.selected() ? 600 : 400,
             card.selected() ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.text(context));
         ViewPolicy.setSingleLineEllipsized(name);
@@ -180,12 +180,12 @@ public final class SkinsPage extends ReloadingDetailPage {
             DimensionPolicy.atLeastOnePixel(context, 1.5f), ThemeColorPolicy.accent(context), DimensionPolicy.pixels(context, 6),
             DimensionPolicy.pixels(context, 4));
         ViewPolicy.setBackground(tile, dashed);
-        TextView spark = Ui.centeredLabel(context, "✦", 22, 400, ThemeColorPolicy.accent(context));
+        TextView spark = ViewPolicy.centeredLabel(context, "✦", 22, 400, ThemeColorPolicy.accent(context));
         tile.addView(spark);
-        TextView hint = Ui.centeredLabel(context, "描述一句话生成", 12, 400, ThemeColorPolicy.accent(context));
+        TextView hint = ViewPolicy.centeredLabel(context, "描述一句话生成", 12, 400, ThemeColorPolicy.accent(context));
         tile.addView(hint);
         cell.addView(tile, LayoutPolicy.matchWidthHeightPx(DimensionPolicy.pixels(context, 76) + DimensionPolicy.pixels(context, 6)));
-        TextView name = Ui.centeredLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
+        TextView name = ViewPolicy.centeredLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
             ThemeColorPolicy.accent(context));
         LinearLayout.LayoutParams nameParams = LayoutPolicy.matchWidthWrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 8);

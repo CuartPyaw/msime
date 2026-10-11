@@ -29,7 +29,7 @@ public final class SheetHeaderView {
         header.addView(heading);
 
         if (subtitle != null && subtitle.length() > 0) {
-            TextView note = Ui.centeredLabel(context, subtitle, Ui.TEXT_SHEET_HEADER, 400,
+            TextView note = ViewPolicy.centeredLabel(context, subtitle, Ui.TEXT_SHEET_HEADER, 400,
                 ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams params = LayoutPolicy.wrapParams();
             params.topMargin = DimensionPolicy.pixels(context, 2);
