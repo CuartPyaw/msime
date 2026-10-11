@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.DrawablePolicy;
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.LayoutPolicy;
@@ -47,16 +49,16 @@ public final class MsToast {
         ViewPolicy.setMaxLines(toast, 3);
         ViewPolicy.setBackground(toast, DrawablePolicy.pill(ThemeColorPolicy.color(activity, com.google.android.material.R.attr.colorSurfaceInverse)));
         Ui.setSymmetricPaddingDp(toast, activity, 20, 10);
-        ViewPolicy.setElevation(toast, Ui.dp(activity, 6));
+        ViewPolicy.setElevation(toast, DimensionPolicy.pixels(activity, 6));
         ViewPolicy.setPoliteLiveRegion(toast);
 
         FrameLayout.LayoutParams params = LayoutPolicy.frameParamsPx(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        int side = Ui.dp(activity, 32);
+        int side = DimensionPolicy.pixels(activity, 32);
         params.leftMargin = side;
         params.rightMargin = side;
-        params.bottomMargin = Ui.dp(activity, Ui.TOAST_BOTTOM) + navigationInset(frame);
+        params.bottomMargin = DimensionPolicy.pixels(activity, Ui.TOAST_BOTTOM) + navigationInset(frame);
         toast.setAlpha(0f);
         frame.addView(toast, params);
         toast.animate().alpha(1f).setDuration(Ui.FADE_MILLIS).withEndAction(() ->

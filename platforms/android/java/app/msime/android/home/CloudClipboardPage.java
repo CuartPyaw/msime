@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
@@ -164,11 +166,11 @@ public final class CloudClipboardPage extends DetailPage {
             header.addView(clear);
         }
         LinearLayout.LayoutParams headerParams = Ui.matchWidth();
-        headerParams.topMargin = Ui.dp(context, Ui.GROUP_GAP);
+        headerParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
         target.addView(header, headerParams);
 
         GroupCard list = GroupCard.add(target, null).withDividers(Ui.ROW_PADDING_H);
-        ((LinearLayout.LayoutParams) list.view().getLayoutParams()).topMargin = Ui.dp(context, 2);
+        ((LinearLayout.LayoutParams) list.view().getLayoutParams()).topMargin = DimensionPolicy.pixels(context, 2);
         if (current.items().isEmpty()) {
             LinearLayout empty = Ui.column(context);
             ViewPolicy.setCenteredHorizontally(empty);
@@ -178,7 +180,7 @@ public final class CloudClipboardPage extends DetailPage {
             TextView hint = Ui.centeredLabel(context, "在任一设备上复制文字，这里就会出现",
                 Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams hintParams = Ui.wrap();
-            hintParams.topMargin = Ui.dp(context, 4);
+            hintParams.topMargin = DimensionPolicy.pixels(context, 4);
             empty.addView(hint, hintParams);
             list.addView(empty);
             return;
@@ -197,7 +199,7 @@ public final class CloudClipboardPage extends DetailPage {
         texts.addView(text);
         TextView meta = Ui.styledLabel(context, meta(item), 12, 400, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams metaParams = Ui.wrap();
-        metaParams.topMargin = Ui.dp(context, 4);
+        metaParams.topMargin = DimensionPolicy.pixels(context, 4);
         texts.addView(meta, metaParams);
         row.addView(texts, Ui.weightWrap(1f));
 

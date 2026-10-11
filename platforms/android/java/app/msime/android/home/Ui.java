@@ -168,14 +168,10 @@ public final class Ui {
 
     // ---- 读取 ----
 
-    public static int dp(Context context, float value) {
-        return DimensionPolicy.pixels(context, value);
-    }
-
     /** Apply the standard detail-row horizontal and vertical insets to a view. */
     public static void setRowPadding(View view, Context context) {
-        int horizontal = dp(context, ROW_PADDING_H);
-        int vertical = dp(context, ROW_PADDING_V);
+        int horizontal = DimensionPolicy.pixels(context, ROW_PADDING_H);
+        int vertical = DimensionPolicy.pixels(context, ROW_PADDING_V);
         ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
     }
 
@@ -186,26 +182,26 @@ public final class Ui {
 
     /** Set a view's minimum height from a density-independent value. */
     public static void setMinimumHeightDp(View view, Context context, float heightDp) {
-        ViewPolicy.setMinimumHeight(view, dp(context, heightDp));
+        ViewPolicy.setMinimumHeight(view, DimensionPolicy.pixels(context, heightDp));
     }
 
     /** Set a text view's line-aware minimum height from a density-independent value. */
     public static void setTextMinHeightDp(TextView view, Context context, float heightDp) {
-        ViewPolicy.setTextMinHeight(view, dp(context, heightDp));
+        ViewPolicy.setTextMinHeight(view, DimensionPolicy.pixels(context, heightDp));
     }
 
     /** Apply the standard compact action-button insets to a view. */
     public static void setButtonPadding(View view, Context context) {
-        int horizontal = dp(context, BUTTON_PADDING_H);
-        int vertical = dp(context, BUTTON_PADDING_V);
+        int horizontal = DimensionPolicy.pixels(context, BUTTON_PADDING_H);
+        int vertical = DimensionPolicy.pixels(context, BUTTON_PADDING_V);
         ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
     }
 
     /** Apply symmetric padding expressed in density-independent pixels. */
     public static void setSymmetricPaddingDp(View view, Context context,
                                              float horizontalDp, float verticalDp) {
-        int horizontal = dp(context, horizontalDp);
-        int vertical = dp(context, verticalDp);
+        int horizontal = DimensionPolicy.pixels(context, horizontalDp);
+        int vertical = DimensionPolicy.pixels(context, verticalDp);
         ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
     }
 
@@ -216,22 +212,22 @@ public final class Ui {
 
     /** Apply equal horizontal dp padding with no vertical padding. */
     public static void setHorizontalPaddingDp(View view, Context context, float horizontalDp) {
-        int horizontal = dp(context, horizontalDp);
+        int horizontal = DimensionPolicy.pixels(context, horizontalDp);
         ViewPolicy.setPadding(view, horizontal, 0, horizontal, 0);
     }
 
     /** Apply four-sided padding expressed in density-independent pixels. */
     public static void setPaddingDp(View view, Context context, float leftDp, float topDp,
                                     float rightDp, float bottomDp) {
-        ViewPolicy.setPadding(view, dp(context, leftDp), dp(context, topDp),
-            dp(context, rightDp), dp(context, bottomDp));
+        ViewPolicy.setPadding(view, DimensionPolicy.pixels(context, leftDp), DimensionPolicy.pixels(context, topDp),
+            DimensionPolicy.pixels(context, rightDp), DimensionPolicy.pixels(context, bottomDp));
     }
 
     /** 让页面底部避开导航栏、底部标签栏和输入法，并保留标准内容留白。 */
     public static void bindPageBottomInsets(View view) {
         Context context = view.getContext();
-        int base = dp(context, PAGE_PADDING_BOTTOM);
-        int tabs = dp(context, TAB_BAR_HEIGHT);
+        int base = DimensionPolicy.pixels(context, PAGE_PADDING_BOTTOM);
+        int tabs = DimensionPolicy.pixels(context, TAB_BAR_HEIGHT);
         ViewCompat.setOnApplyWindowInsetsListener(view, (target, insets) -> {
             Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
             Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
@@ -256,14 +252,14 @@ public final class Ui {
     /** Full-width layout parameters with a top margin expressed in dp. */
     public static LinearLayout.LayoutParams matchWidth(Context context, int topMarginDp) {
         LinearLayout.LayoutParams params = matchWidth();
-        params.topMargin = dp(context, topMarginDp);
+        params.topMargin = DimensionPolicy.pixels(context, topMarginDp);
         return params;
     }
 
     /** Full-width layout parameters with a height expressed in dp. */
     public static LinearLayout.LayoutParams matchWidthHeight(Context context, int heightDp) {
         return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            dp(context, heightDp));
+            DimensionPolicy.pixels(context, heightDp));
     }
 
     /** Create a theme-coloured one-pixel divider in either orientation. */
@@ -315,19 +311,19 @@ public final class Ui {
     /** Layout parameters for a trailing row control with the standard row gap. */
     public static LinearLayout.LayoutParams rowGapParams(Context context) {
         LinearLayout.LayoutParams params = wrap();
-        params.setMarginStart(dp(context, ROW_GAP));
+        params.setMarginStart(DimensionPolicy.pixels(context, ROW_GAP));
         return params;
     }
 
     /** Layout parameters for a square child with a size expressed in dp. */
     public static LinearLayout.LayoutParams squareParams(Context context, float sizeDp) {
-        int size = dp(context, sizeDp);
+        int size = DimensionPolicy.pixels(context, sizeDp);
         return new LinearLayout.LayoutParams(size, size);
     }
 
     /** Frame layout parameters for a square child with a size expressed in dp. */
     public static FrameLayout.LayoutParams squareFrameParams(Context context, float sizeDp) {
-        int size = dp(context, sizeDp);
+        int size = DimensionPolicy.pixels(context, sizeDp);
         return new FrameLayout.LayoutParams(size, size);
     }
 
@@ -500,7 +496,7 @@ public final class Ui {
         ViewPolicy.setBackground(button, pillRipple(context, fill));
         setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
         setTextMinHeightDp(button, context, minHeightDp);
-        if (minWidthDp > 0) ViewPolicy.setTextMinWidth(button, dp(context, minWidthDp));
+        if (minWidthDp > 0) ViewPolicy.setTextMinWidth(button, DimensionPolicy.pixels(context, minWidthDp));
         bindClick(button, action);
         return button;
     }
@@ -537,7 +533,7 @@ public final class Ui {
     public static LinearLayout verticalCard(Context context, float radiusDp) {
         LinearLayout card = column(context);
         ViewPolicy.setBackground(card,
-            DrawablePolicy.rounded(ThemeColorPolicy.card(context), dp(context, radiusDp)));
+            DrawablePolicy.rounded(ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, radiusDp)));
         return card;
     }
 

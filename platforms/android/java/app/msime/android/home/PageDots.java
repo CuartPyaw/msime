@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import android.animation.ValueAnimator;
 import android.content.Context;
@@ -38,9 +40,9 @@ public final class PageDots extends View {
 
     public PageDots(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
-        dot = Ui.dp(context, Ui.DOT_SIZE);
-        active = Ui.dp(context, Ui.DOT_ACTIVE_WIDTH);
-        gap = Ui.dp(context, Ui.DOT_GAP);
+        dot = DimensionPolicy.pixels(context, Ui.DOT_SIZE);
+        active = DimensionPolicy.pixels(context, Ui.DOT_ACTIVE_WIDTH);
+        gap = DimensionPolicy.pixels(context, Ui.DOT_GAP);
         ViewPolicy.setImportantForAccessibility(this, IMPORTANT_FOR_ACCESSIBILITY_YES);
     }
 

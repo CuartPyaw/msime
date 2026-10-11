@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import android.animation.ValueAnimator;
 import android.content.Intent;
 import android.os.Bundle;
@@ -371,7 +373,7 @@ public final class HomeActivity extends AppCompatActivity {
     private void fadeUp(View view, long delay) {
         view.animate().cancel();
         view.setAlpha(0f);
-        view.setTranslationY(Ui.dp(this, 10));
+        view.setTranslationY(DimensionPolicy.pixels(this, 10));
         view.animate().alpha(1f).translationY(0f)
             .setDuration(500).setStartDelay(delay).setInterpolator(MotionCurves.EASE).start();
     }

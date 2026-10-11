@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import android.content.Context;
 import android.view.View;
 import android.view.ViewGroup;
@@ -27,7 +29,7 @@ public final class HomeNavGroup {
         // 按压波纹裁在 24dp 的圆角里。
         card.setClipToOutline(true);
         LinearLayout.LayoutParams params = Ui.matchWidth();
-        if (parent.getChildCount() > 0) params.topMargin = Ui.dp(context, BLOCK_GAP);
+        if (parent.getChildCount() > 0) params.topMargin = DimensionPolicy.pixels(context, BLOCK_GAP);
         parent.addView(card, params);
     }
 

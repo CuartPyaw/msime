@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.KeyboardSpacingPolicy;
 import app.msime.android.KeyboardHeightPolicy;
@@ -250,12 +252,12 @@ public final class KeyboardOptionsPage extends DetailPage {
                                        KeyboardSkin skin) {
         LinearLayout strip = Ui.row(context);
         ViewPolicy.setCenteredVertically(strip);
-        int pad = Ui.dp(context, 12);
+        int pad = DimensionPolicy.pixels(context, 12);
         Ui.setSymmetricPaddingPx(strip, pad);
         LinearLayout plate = Ui.row(context);
         ViewPolicy.setCenteredVertically(plate);
         Ui.setHorizontalPaddingDp(plate, context, 10);
-        ViewPolicy.setBackground(plate, DrawablePolicy.rounded(ColorPolicy.parse(skin.background(), ThemeColorPolicy.page(context)), Ui.dp(context, 12)));
+        ViewPolicy.setBackground(plate, DrawablePolicy.rounded(ColorPolicy.parse(skin.background(), ThemeColorPolicy.page(context)), DimensionPolicy.pixels(context, 12)));
         ViewPolicy.setImportantForAccessibility(plate,
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         int icon = ColorPolicy.parse(skin.toolbarIcon(), ThemeColorPolicy.subText(context));
@@ -277,7 +279,7 @@ public final class KeyboardOptionsPage extends DetailPage {
         TextView chip = Ui.styledLabel(context, label, 12, 500, colour);
         ViewPolicy.setSingleLine(chip);
         LinearLayout.LayoutParams params = Ui.wrap();
-        params.setMarginEnd(Ui.dp(context, 12));
+        params.setMarginEnd(DimensionPolicy.pixels(context, 12));
         plate.addView(chip, params);
     }
 

@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
 import android.view.ViewGroup;
@@ -49,7 +51,7 @@ public final class CommunitySkinSheet {
             // 哪种布局，不是皮肤名——名字就在上面那行标题里。
             preview.setKeyboard(skin, nineKey, nineKey ? "九键" : "26 键");
             LinearLayout.LayoutParams params = Ui.matchWidthHeight(context, 196);
-            params.topMargin = Ui.dp(context, 4);
+            params.topMargin = DimensionPolicy.pixels(context, 4);
             // add() fixes every row at WRAP_CONTENT, and this view measures to nothing under it.
             sheet.content().addView(preview, params);
         }
@@ -58,7 +60,7 @@ public final class CommunitySkinSheet {
             item.description().isEmpty() ? "作者没有写说明。" : item.description(),
             14, 400, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams text = Ui.matchWidth();
-        text.topMargin = Ui.dp(context, 14);
+        text.topMargin = DimensionPolicy.pixels(context, 14);
         sheet.content().addView(description, text);
 
         if (onChangeCategory != null && item.category() != null) {
@@ -93,7 +95,7 @@ public final class CommunitySkinSheet {
             });
         }
         LinearLayout.LayoutParams action = Ui.matchWidth();
-        action.topMargin = Ui.dp(context, 18);
+        action.topMargin = DimensionPolicy.pixels(context, 18);
         sheet.content().addView(save, action);
 
         // Everything here is someone else's work, published without review first; this is how a reader flags it to the moderators.
@@ -106,7 +108,7 @@ public final class CommunitySkinSheet {
         });
         LinearLayout.LayoutParams reportParams = Ui.wrap();
         reportParams.gravity = android.view.Gravity.END;
-        reportParams.topMargin = Ui.dp(context, 4);
+        reportParams.topMargin = DimensionPolicy.pixels(context, 4);
         sheet.content().addView(report, reportParams);
 
         sheet.addNote(note(item));

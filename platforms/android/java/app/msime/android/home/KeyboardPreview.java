@@ -105,7 +105,7 @@ public final class KeyboardPreview extends View {
     }
 
     private void applyBackground() {
-        int radius = Ui.dp(getContext(), cornerRadiusDp);
+        int radius = DimensionPolicy.pixels(getContext(), cornerRadiusDp);
         int base = skin == null ? ThemeColorPolicy.card(getContext()) : ColorPolicy.parse(skin.background(), ThemeColorPolicy.card(getContext()));
         android.graphics.drawable.GradientDrawable surface = DrawablePolicy.rounded(base, radius);
         // 设计皮肤的底是一道渐变，和键盘本身一样画出来；只画纯色时，深色设计上的功能键和回车显得格外跳。

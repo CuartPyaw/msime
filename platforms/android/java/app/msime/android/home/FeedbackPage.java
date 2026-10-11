@@ -104,7 +104,7 @@ public final class FeedbackPage extends DetailPage {
         View rule = ViewPolicy.newColorView(context, ThemeColorPolicy.hairline(context));
         LinearLayout.LayoutParams ruleParams = LayoutPolicy.matchWidthHeightPx(
             DimensionPolicy.atLeastOnePixel(context, 0.5f));
-        ruleParams.setMarginStart(Ui.dp(requireContext(), 16));
+        ruleParams.setMarginStart(DimensionPolicy.pixels(requireContext(), 16));
         card.addView(rule, ruleParams);
 
         HorizontalScrollView strip = new HorizontalScrollView(context);
@@ -123,7 +123,7 @@ public final class FeedbackPage extends DetailPage {
         add.addView(icon, Ui.squareParams(requireContext(), 20));
         TextView label = Ui.styledLabel(context, "添加截图", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
         LinearLayout.LayoutParams labelParams = Ui.wrap();
-        labelParams.setMarginStart(Ui.dp(requireContext(), 10));
+        labelParams.setMarginStart(DimensionPolicy.pixels(requireContext(), 10));
         add.addView(label, labelParams);
         ViewPolicy.makeClickable(add, context, () -> picker.launch("image/*"));
         card.addView(add, Ui.matchWidth());
@@ -139,7 +139,7 @@ public final class FeedbackPage extends DetailPage {
             Ui.ACTION_BUTTON_MIN_HEIGHT, this::submit);
         ViewPolicy.setPoliteLiveRegion(button);
         LinearLayout.LayoutParams buttonParams = Ui.matchWidth();
-        buttonParams.topMargin = Ui.dp(requireContext(), Ui.GROUP_GAP);
+        buttonParams.topMargin = DimensionPolicy.pixels(requireContext(), Ui.GROUP_GAP);
         column.addView(button, buttonParams);
         submit = button;
 
@@ -195,7 +195,7 @@ public final class FeedbackPage extends DetailPage {
         ViewPolicy.setTextColor(submit, ready ? ThemeColorPolicy.onAccent(context) : ThemeColorPolicy.subText(context));
         int fill = ready ? ThemeColorPolicy.accent(context)
             : ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorSurfaceContainerHighest);
-        ViewPolicy.setBackground(submit, Ui.rippleOn(context, fill, Ui.dp(requireContext(), Ui.GROUP_RADIUS)));
+        ViewPolicy.setBackground(submit, Ui.rippleOn(context, fill, DimensionPolicy.pixels(requireContext(), Ui.GROUP_RADIUS)));
         if (addShot != null) ViewPolicy.setEnabledWithAlpha(addShot,
             screenshots.size() < FeedbackApi.MAX_SCREENSHOTS && !sending, 0.38f);
     }
@@ -215,7 +215,7 @@ public final class FeedbackPage extends DetailPage {
             BitmapFactory.Options options = new BitmapFactory.Options();
             options.inSampleSize = 4;
             image.setImageBitmap(BitmapFactory.decodeByteArray(bytes, 0, bytes.length, options));
-            ViewPolicy.setBackground(image, DrawablePolicy.rounded(ThemeColorPolicy.rowBackground(context), Ui.dp(requireContext(), 10)));
+            ViewPolicy.setBackground(image, DrawablePolicy.rounded(ThemeColorPolicy.rowBackground(context), DimensionPolicy.pixels(requireContext(), 10)));
             image.setClipToOutline(true);
             image.setContentDescription("截图 " + (index + 1));
             frame.addView(image, Ui.squareFrameParams(requireContext(), Ui.THUMBNAIL_SIZE));
@@ -236,7 +236,7 @@ public final class FeedbackPage extends DetailPage {
             removeParams.gravity = Gravity.TOP | Gravity.END;
             frame.addView(remove, removeParams);
             LinearLayout.LayoutParams params = Ui.squareParams(requireContext(), Ui.THUMBNAIL_SIZE);
-            params.setMarginEnd(Ui.dp(requireContext(), 8));
+            params.setMarginEnd(DimensionPolicy.pixels(requireContext(), 8));
             strip.addView(frame, params);
         }
     }

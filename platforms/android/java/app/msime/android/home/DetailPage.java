@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import android.animation.ValueAnimator;
 import android.graphics.drawable.Drawable;
@@ -71,7 +73,7 @@ public abstract class DetailPage extends HomeTabFragment {
             () -> requireActivity().getOnBackPressedDispatcher().onBackPressed());
 
         NestedScrollView scroll = view.findViewById(R.id.ms_detail_scroll);
-        int threshold = Ui.dp(requireContext(), Ui.COLLAPSE_THRESHOLD);
+        int threshold = DimensionPolicy.pixels(requireContext(), Ui.COLLAPSE_THRESHOLD);
         scroll.setOnScrollChangeListener((NestedScrollView.OnScrollChangeListener)
             (ignored, x, y, oldX, oldY) -> setCollapsed(y > threshold, true));
 

@@ -309,7 +309,7 @@ public final class AiSkinPage extends DetailPage {
         preview = new KeyboardPreview(context);
         preview.setContentDescription("皮肤预览");
         stage.addView(preview,
-            LayoutPolicy.frameMatchWidthHeightPx(Ui.dp(context, 200)));
+            LayoutPolicy.frameMatchWidthHeightPx(DimensionPolicy.pixels(context, 200)));
         LinearLayout overlay = Ui.column(context);
         ViewPolicy.setCentered(overlay);
         ProgressBar spinner = new ProgressBar(context);
@@ -321,7 +321,7 @@ public final class AiSkinPage extends DetailPage {
         stage.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT));
         LinearLayout.LayoutParams stageParams = Ui.matchWidth();
-        stageParams.topMargin = Ui.dp(context, 12);
+        stageParams.topMargin = DimensionPolicy.pixels(context, 12);
         card.addView(stage, stageParams);
 
         LinearLayout colours = Ui.row(context);
@@ -330,10 +330,10 @@ public final class AiSkinPage extends DetailPage {
         colours.addView(label);
         palette = Ui.row(context);
         LinearLayout.LayoutParams paletteParams = Ui.wrap();
-        paletteParams.setMarginStart(Ui.dp(context, 10));
+        paletteParams.setMarginStart(DimensionPolicy.pixels(context, 10));
         colours.addView(palette, paletteParams);
         LinearLayout.LayoutParams coloursParams = Ui.matchWidth();
-        coloursParams.topMargin = Ui.dp(context, 10);
+        coloursParams.topMargin = DimensionPolicy.pixels(context, 10);
         card.addView(colours, coloursParams);
 
         if (s.results.size() > 1) {
@@ -380,7 +380,7 @@ public final class AiSkinPage extends DetailPage {
             });
             chip.setAccessibilityDelegate(KeyboardSheets.buttonDelegate("建议描述 " + suggestion));
             LinearLayout.LayoutParams chipParams = Ui.wrap();
-            chipParams.setMarginEnd(Ui.dp(context, 8));
+            chipParams.setMarginEnd(DimensionPolicy.pixels(context, 8));
             chips.addView(chip, chipParams);
             chipViews.add(chip);
         }
@@ -409,7 +409,7 @@ public final class AiSkinPage extends DetailPage {
 
         LinearLayout actions = Ui.row(context);
         LinearLayout.LayoutParams actionsParams = Ui.matchWidth();
-        actionsParams.topMargin = Ui.dp(context, Ui.GROUP_GAP);
+        actionsParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
         if (unavailable) {
             GroupCard.add(target, null).note("AI 设计皮肤暂不可用，请稍后再来。");
         } else if (s.results.isEmpty()) {
@@ -422,7 +422,7 @@ public final class AiSkinPage extends DetailPage {
             actions.addView(again, Ui.weightWrap(1f));
             TextView use = KeyboardSheets.bigButton(context, "使用此皮肤", true, this::useResult);
             LinearLayout.LayoutParams useParams = Ui.weightWrap(1f);
-            useParams.setMarginStart(Ui.dp(context, 12));
+            useParams.setMarginStart(DimensionPolicy.pixels(context, 12));
             actions.addView(use, useParams);
             target.addView(actions, actionsParams);
             bindEnabled(input, again);
@@ -487,7 +487,7 @@ public final class AiSkinPage extends DetailPage {
                         DimensionPolicy.atLeastOnePixel(context, 1), ThemeColorPolicy.hairline(context));
                     ViewPolicy.setBackground(dot, shape);
                     LinearLayout.LayoutParams params = Ui.squareParams(context, 16);
-                    params.setMarginEnd(Ui.dp(context, 6));
+                    params.setMarginEnd(DimensionPolicy.pixels(context, 6));
                     dots.addView(dot, params);
                 }
             }

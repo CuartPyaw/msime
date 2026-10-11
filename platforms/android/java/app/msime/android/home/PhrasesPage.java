@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import android.os.Bundle;
 import android.text.InputType;
 import android.view.ViewGroup;
@@ -102,8 +104,8 @@ public final class PhrasesPage extends DetailPage {
         ViewPolicy.setMinLines(field, 3);
         ViewPolicy.setMaxLines(field, 6);
         ViewPolicy.setTopStart(field);
-        int padding = Ui.dp(requireContext(), 10);
-        int horizontal = Ui.dp(requireContext(), 12);
+        int padding = DimensionPolicy.pixels(requireContext(), 10);
+        int horizontal = DimensionPolicy.pixels(requireContext(), 12);
         ViewPolicy.setPadding(field, horizontal, padding, horizontal, padding);
         ViewGroup.LayoutParams params = field.getLayoutParams();
         if (params != null) {

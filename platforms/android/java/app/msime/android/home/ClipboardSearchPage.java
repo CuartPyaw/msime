@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
@@ -162,7 +164,7 @@ public final class ClipboardSearchPage extends DetailPage {
         if (!meta.isEmpty()) {
             TextView label = Ui.styledLabel(context, meta, 12, 400, ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams metaParams = Ui.wrap();
-            metaParams.topMargin = Ui.dp(context, 4);
+            metaParams.topMargin = DimensionPolicy.pixels(context, 4);
             texts.addView(label, metaParams);
         }
         row.addView(texts, Ui.weightWrap(1f));

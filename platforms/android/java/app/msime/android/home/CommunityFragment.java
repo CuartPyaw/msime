@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.TextPolicy;
 import app.msime.android.ViewPolicy;
 import app.msime.android.core.InputViewValuePolicy;
@@ -459,9 +461,9 @@ public final class CommunityFragment extends Fragment {
     /** 举报：one of the fixed reasons and an optional detail, sent with this device's account (the anonymous one counts). */
     private void report(CommunityCatalog.Item item) {
         Context context = requireContext();
-        int padding = Ui.dp(context, 20);
+        int padding = DimensionPolicy.pixels(context, 20);
         LinearLayout form = Ui.column(context);
-        ViewPolicy.setPadding(form, padding, Ui.dp(context, 8), padding, 0);
+        ViewPolicy.setPadding(form, padding, DimensionPolicy.pixels(context, 8), padding, 0);
         RadioGroup reasons = new RadioGroup(context);
         for (String reason : CommunityRequest.REPORT_REASONS) {
             RadioButton choice = new RadioButton(context);

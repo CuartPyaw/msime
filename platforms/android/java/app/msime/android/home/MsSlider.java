@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.BoundsPolicy;
 import app.msime.android.DrawablePolicy;
@@ -34,7 +36,7 @@ public final class MsSlider extends SeekBar {
 
     public MsSlider(Context context, @Nullable AttributeSet attrs) {
         super(context, attrs);
-        int track = Ui.dp(context, Ui.SLIDER_TRACK);
+        int track = DimensionPolicy.pixels(context, Ui.SLIDER_TRACK);
         float radius = track / 2f;
 
         GradientDrawable rest = DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), radius);
@@ -50,14 +52,14 @@ public final class MsSlider extends SeekBar {
         }
         setProgressDrawable(layers);
 
-        GradientDrawable thumb = DrawablePolicy.rounded(ThemeColorPolicy.accent(context), Ui.dp(context, 2),
-            Ui.dp(context, Ui.SLIDER_THUMB_WIDTH), Ui.dp(context, Ui.SLIDER_THUMB_HEIGHT));
+        GradientDrawable thumb = DrawablePolicy.rounded(ThemeColorPolicy.accent(context), DimensionPolicy.pixels(context, 2),
+            DimensionPolicy.pixels(context, Ui.SLIDER_THUMB_WIDTH), DimensionPolicy.pixels(context, Ui.SLIDER_THUMB_HEIGHT));
         setThumb(thumb);
-        setThumbOffset(Ui.dp(context, Ui.SLIDER_THUMB_WIDTH) / 2);
+        setThumbOffset(DimensionPolicy.pixels(context, Ui.SLIDER_THUMB_WIDTH) / 2);
         setSplitTrack(false);
         ViewPolicy.clearBackground(this);
         // 左右留出半个滑块，滑块在两端时不会被裁掉。
-        int inset = Ui.dp(context, Ui.SLIDER_THUMB_WIDTH);
+        int inset = DimensionPolicy.pixels(context, Ui.SLIDER_THUMB_WIDTH);
         ViewPolicy.setHorizontalPadding(this, inset);
         Ui.setMinimumHeightDp(this, context, Ui.SLIDER_TOUCH_HEIGHT);
 

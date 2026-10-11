@@ -305,15 +305,15 @@ final class LoginSheet {
         ViewPolicy.setCentered(button);
         Ui.setMinimumHeightDp(button, activity, 50);
         GradientDrawable face = stroke == 0
-            ? DrawablePolicy.rounded(fill, Ui.dp(activity, 12))
-            : DrawablePolicy.outlined(fill, Ui.dp(activity, 12), DimensionPolicy.atLeastOnePixel(activity, 1), stroke);
-        GradientDrawable mask = DrawablePolicy.rounded(Color.WHITE, Ui.dp(activity, 12));
+            ? DrawablePolicy.rounded(fill, DimensionPolicy.pixels(activity, 12))
+            : DrawablePolicy.outlined(fill, DimensionPolicy.pixels(activity, 12), DimensionPolicy.atLeastOnePixel(activity, 1), stroke);
+        GradientDrawable mask = DrawablePolicy.rounded(Color.WHITE, DimensionPolicy.pixels(activity, 12));
         int pressed = ColorPolicy.withAlpha(fill == Color.BLACK ? Color.WHITE : ThemeColorPolicy.text(activity), 0.12f);
         ViewPolicy.setBackground(button, DrawablePolicy.ripple(pressed, face, mask));
         if (icon != null) {
             ImageView glyph = ImageViewPolicy.decorative(activity, icon);
             LinearLayout.LayoutParams params = Ui.squareParams(activity, 20);
-            params.setMarginEnd(Ui.dp(activity, 8));
+            params.setMarginEnd(DimensionPolicy.pixels(activity, 8));
             button.addView(glyph, params);
         }
         TextView text = Ui.styledLabel(activity, label, 16, 600, ink);
@@ -331,7 +331,7 @@ final class LoginSheet {
         ViewPolicy.setSingleLine(field);
         field.setFilters(new InputFilter[] {new InputFilter.LengthFilter(maxLength)});
         field.setHintTextColor(ThemeColorPolicy.subText(activity));
-        GradientDrawable face = DrawablePolicy.outlined(ThemeColorPolicy.rowBackground(activity), Ui.dp(activity, 12),
+        GradientDrawable face = DrawablePolicy.outlined(ThemeColorPolicy.rowBackground(activity), DimensionPolicy.pixels(activity, 12),
             DimensionPolicy.atLeastOnePixel(activity, 1), ThemeColorPolicy.hairline(activity));
         ViewPolicy.setBackground(field, face);
         Ui.setHorizontalPaddingDp(field, activity, 14);

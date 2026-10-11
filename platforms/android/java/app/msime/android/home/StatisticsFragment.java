@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.LayoutPolicy;
 
@@ -99,7 +101,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         Drawable lock = ContextCompat.getDrawable(requireContext(), R.drawable.ic_ms_shield_lock);
         if (lock != null) {
             lock = lock.mutate();
-            int size = Ui.dp(requireContext(), 14);
+            int size = DimensionPolicy.pixels(requireContext(), 14);
             lock.setBounds(0, 0, size, size);
             lock.setTint(ThemeColorPolicy.subText(requireContext()));
             footer.setCompoundDrawablesRelative(lock, null, null, null);
@@ -249,7 +251,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         TrendChart chart = new TrendChart(context);
         chart.setDays(overview.last7());
         LinearLayout.LayoutParams chartParams = Ui.matchWidth();
-        chartParams.topMargin = Ui.dp(context, 18);
+        chartParams.topMargin = DimensionPolicy.pixels(context, 18);
         hero.addView(chart, chartParams);
 
         String speedNote = TypingStatisticsSummary.speedDelta(overview.averageSpeed(),
@@ -302,9 +304,9 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout row = header(context, content, "按键热力图", null);
         SegmentedControl layout = new SegmentedControl(context);
         layout.setOptions(List.of("26 键", "9 键"), nine ? 1 : 0);
-        ViewPolicy.setMinimumHeight(layout, Ui.dp(context, 32));
+        ViewPolicy.setMinimumHeight(layout, DimensionPolicy.pixels(context, 32));
         row.addView(layout, LayoutPolicy.linearParamsPx(
-            ViewGroup.LayoutParams.WRAP_CONTENT, Ui.dp(context, 32)));
+            ViewGroup.LayoutParams.WRAP_CONTENT, DimensionPolicy.pixels(context, 32)));
         LinearLayout board = card(context, content, 12);
         KeyHeatmapView heatmap = new KeyHeatmapView(context);
         heatmap.setNineKey(nine);
@@ -387,13 +389,13 @@ public final class StatisticsFragment extends HomeTabFragment {
         View track = new View(context);
         track.setBackground(DrawablePolicy.pill(ThemeColorPolicy.hairline(context)));
         LinearLayout.LayoutParams trackParams = Ui.matchWidthHeight(context, 6);
-        trackParams.topMargin = Ui.dp(context, 12);
+        trackParams.topMargin = DimensionPolicy.pixels(context, 12);
         android.widget.FrameLayout bar = new android.widget.FrameLayout(context);
         bar.addView(track, new android.widget.FrameLayout.LayoutParams(
-            ViewGroup.LayoutParams.MATCH_PARENT, Ui.dp(context, 6)));
+            ViewGroup.LayoutParams.MATCH_PARENT, DimensionPolicy.pixels(context, 6)));
         View fillView = new View(context);
         fillView.setBackground(DrawablePolicy.pill(ThemeColorPolicy.accent(context)));
-        bar.addView(fillView, new android.widget.FrameLayout.LayoutParams(0, Ui.dp(context, 6)));
+        bar.addView(fillView, new android.widget.FrameLayout.LayoutParams(0, DimensionPolicy.pixels(context, 6)));
         progress.addView(bar, trackParams);
         float share = badges.isEmpty() ? 0 : unlocked / (float) badges.size();
         bar.post(() -> {
@@ -407,7 +409,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         grid.setBadges(badges);
         grid.setOnBadgeTap(badge -> MsToast.show(context, TypingStatisticsSummary.toast(badge)));
         LinearLayout.LayoutParams gridParams = Ui.matchWidth();
-        gridParams.topMargin = Ui.dp(context, 10);
+        gridParams.topMargin = DimensionPolicy.pixels(context, 10);
         content.addView(grid, gridParams);
     }
 
@@ -416,10 +418,10 @@ public final class StatisticsFragment extends HomeTabFragment {
     /** 一张统计卡：andCard 底、20dp 圆角，加在 `parent` 末尾。 */
     private static LinearLayout card(Context context, LinearLayout parent, int padding) {
         LinearLayout card = Ui.verticalCard(context, 20);
-        int pad = Ui.dp(context, padding);
+        int pad = DimensionPolicy.pixels(context, padding);
         Ui.setSymmetricPaddingPx(card, pad);
         LinearLayout.LayoutParams params = Ui.matchWidth();
-        params.topMargin = Ui.dp(context, parent.getChildCount() == 0 ? 16 : 10);
+        params.topMargin = DimensionPolicy.pixels(context, parent.getChildCount() == 0 ? 16 : 10);
         parent.addView(card, params);
         return card;
     }
@@ -434,9 +436,9 @@ public final class StatisticsFragment extends HomeTabFragment {
         row.addView(heading, Ui.weightWrap(1f));
         if (trailing != null) row.addView(Ui.label(context, trailing, 13, ThemeColorPolicy.subText(context)));
         LinearLayout.LayoutParams params = Ui.matchWidth();
-        params.topMargin = Ui.dp(context, 22);
+        params.topMargin = DimensionPolicy.pixels(context, 22);
         // 最小 32 dp 而不是固定 32 dp：系统字体调大后标题和右侧的分段控件都比它高。
-        ViewPolicy.setMinimumHeight(row, Ui.dp(context, 32));
+        ViewPolicy.setMinimumHeight(row, DimensionPolicy.pixels(context, 32));
         parent.addView(row, params);
         return row;
     }
@@ -446,11 +448,11 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout row = Ui.row(context);
         LinearLayout.LayoutParams leftParams = LayoutPolicy.weightedMatchParentParams(1f);
         LinearLayout.LayoutParams rightParams = LayoutPolicy.weightedMatchParentParams(1f);
-        rightParams.setMarginStart(Ui.dp(context, 10));
+        rightParams.setMarginStart(DimensionPolicy.pixels(context, 10));
         row.addView(left, leftParams);
         row.addView(right, rightParams);
         LinearLayout.LayoutParams params = Ui.matchWidth();
-        params.topMargin = Ui.dp(context, 10);
+        params.topMargin = DimensionPolicy.pixels(context, 10);
         parent.addView(row, params);
     }
 
@@ -458,9 +460,9 @@ public final class StatisticsFragment extends HomeTabFragment {
     private static View tile(Context context, String title, String value, String unit, String note,
             boolean highlight) {
         LinearLayout tile = Ui.column(context);
-        int pad = Ui.dp(context, 14);
+        int pad = DimensionPolicy.pixels(context, 14);
         Ui.setSymmetricPaddingPx(tile, pad);
-        ViewPolicy.setBackground(tile, DrawablePolicy.rounded(ThemeColorPolicy.card(context), Ui.dp(context, 20)));
+        ViewPolicy.setBackground(tile, DrawablePolicy.rounded(ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, 20)));
         tile.addView(Ui.label(context, title, 13, ThemeColorPolicy.text(context)));
         TextView number = Ui.label(context, figure(context, value, 24,
             "—".equals(value) ? "" : unit), 24, ThemeColorPolicy.text(context));

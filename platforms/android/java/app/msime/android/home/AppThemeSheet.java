@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
 import android.widget.LinearLayout;
@@ -62,7 +64,7 @@ final class AppThemeSheet {
             save(host, "theme", MODES[index][0], refresh);
         });
         LinearLayout.LayoutParams modeParams = Ui.wrap();
-        modeParams.topMargin = Ui.dp(context, 12);
+        modeParams.topMargin = DimensionPolicy.pixels(context, 12);
         header.addView(modes, modeParams);
         root.addView(header);
 
