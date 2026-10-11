@@ -101,7 +101,7 @@ public final class KeyboardFragment extends HomeTabFragment {
                 }
             });
         // 和 DetailPage 一样：底部留出 tab 栏加系统导航栏的高度，键盘弹出时改留键盘的高度，最后一组和搜索结果才能滚到可见处。
-        Ui.bindPageBottomInsets(scroll);
+        PageInsetsPolicy.bind(scroll);
         buildRows(view);
         render();
         reload();
