@@ -82,6 +82,8 @@ public final class AboutPage extends DetailPage {
     @Nullable private List<String> notices;
     /** 正在进行的下载；离开页面时取消，不在后台继续下完再把结果丢掉。 */
     @Nullable private Future<?> downloadTask;
+    /** 视图重建后递增，阻止旧下载的进度回调写入新页面。 */
+    private long viewGeneration;
 
     private final ActivityResultLauncher<String> notificationPermission =
         registerForActivityResult(new ActivityResultContracts.RequestPermission(), granted -> {});
@@ -181,6 +183,7 @@ public final class AboutPage extends DetailPage {
     }
 
     @Override public void onDestroyView() {
+        viewGeneration++;
         if (downloadTask != null) {
             downloadTask.cancel(true);
             downloadTask = null;
@@ -294,6 +297,9 @@ public final class AboutPage extends DetailPage {
     private void download() {
         UpdateApi.Update target = update;
         if (target == null) return;
+        View owner = getView();
+        if (owner == null) return;
+        long viewToken = viewGeneration;
         Context context = requireContext().getApplicationContext();
         state = State.DOWNLOADING;
         percent = 0;
@@ -306,7 +312,8 @@ public final class AboutPage extends DetailPage {
                 if (total <= 0) return;
                 int value = (int) BoundsPolicy.atMost(done * 100 / total, 100L);
                 MAIN.post(() -> {
-                    if (value == percent || state != State.DOWNLOADING) return;
+                    if (getView() != owner || viewGeneration != viewToken
+                            || value == percent || state != State.DOWNLOADING) return;
                     percent = value;
                     renderPill();
                 });

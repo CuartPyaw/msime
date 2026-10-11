@@ -78,7 +78,7 @@ public abstract class DetailPage extends HomeTabFragment {
             (ignored, x, y, oldX, oldY) -> setCollapsed(y > threshold, true));
 
         // home_content 已经让开了状态栏和左右的刘海，这里只管底部：内容要能滚到底部导航栏（80dp 加手势区）之上，键盘弹出时再让到键盘之上。
-        Ui.bindPageBottomInsets(scroll);
+        PageInsetsPolicy.bind(scroll);
 
         Bundle args = getArguments();
         buildContent(view.findViewById(R.id.ms_detail_column), args == null ? new Bundle() : args);

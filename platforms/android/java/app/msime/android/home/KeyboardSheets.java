@@ -225,7 +225,7 @@ final class KeyboardSheets {
     static View accentActionRow(Context context, @Nullable String glyph, String title, Runnable action,
             int iconSize, int iconMarginEnd, int labelMarginStart) {
         LinearLayout row = baseRow(context);
-        Ui.setMinimumHeightDp(row, context, Ui.COMPACT_ROW_MIN_HEIGHT);
+        ViewPolicy.setMinimumHeightDp(context, row, Ui.COMPACT_ROW_MIN_HEIGHT);
         if (glyph != null) {
             TextView icon = ViewPolicy.styledLabel(context, glyph, 22, 400, ThemeColorPolicy.accent(context));
             ViewPolicy.setCentered(icon);
@@ -264,8 +264,8 @@ final class KeyboardSheets {
             button = ViewPolicy.styledLabel(context, label, Ui.TEXT_BUTTON_SMALL, 500, ThemeColorPolicy.subText(context));
             ViewPolicy.setCentered(button);
             ViewPolicy.setSingleLine(button);
-            Ui.setButtonPadding(button, context);
-            Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
+            ViewPolicy.setButtonPadding(context, button);
+            ViewPolicy.setTextMinHeightDp(context, button, Ui.COMPACT_BUTTON_MIN_HEIGHT);
             ViewPolicy.setEnabled(button, false);
         }
         button.setAccessibilityDelegate(buttonDelegate(label + "，" + title));
@@ -334,7 +334,7 @@ final class KeyboardSheets {
             @Nullable CharSequence subtitle, @Nullable CharSequence value, @Nullable Runnable action) {
         LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
-        Ui.setMinimumHeightDp(row, context,
+        ViewPolicy.setMinimumHeightDp(context, row,
             subtitle == null ? Ui.COMPACT_ROW_MIN_HEIGHT : Ui.ROW_MIN_HEIGHT);
         ViewPolicy.setRowPadding(context, row);
 

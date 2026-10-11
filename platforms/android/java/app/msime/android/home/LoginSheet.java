@@ -305,7 +305,7 @@ final class LoginSheet {
     private View button(Drawable icon, String label, int fill, int ink, int stroke, Runnable action) {
         LinearLayout button = LayoutPolicy.row(activity);
         ViewPolicy.setCentered(button);
-        Ui.setMinimumHeightDp(button, activity, 50);
+        ViewPolicy.setMinimumHeightDp(activity, button, 50);
         GradientDrawable face = stroke == 0
             ? DrawablePolicy.rounded(fill, DimensionPolicy.pixels(activity, 12))
             : DrawablePolicy.outlined(fill, DimensionPolicy.pixels(activity, 12), DimensionPolicy.atLeastOnePixel(activity, 1), stroke);
@@ -337,7 +337,7 @@ final class LoginSheet {
             DimensionPolicy.atLeastOnePixel(activity, 1), ThemeColorPolicy.hairline(activity));
         ViewPolicy.setBackground(field, face);
         ViewPolicy.setHorizontalPaddingDp(activity, field, 14);
-        Ui.setTextMinHeightDp(field, activity, 50);
+        ViewPolicy.setTextMinHeightDp(activity, field, 50);
         ViewPolicy.setCenteredVertically(field);
         field.setContentDescription(hint);
         return field;
