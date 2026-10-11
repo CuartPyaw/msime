@@ -11,4 +11,28 @@ public final class RelativeTimePolicy {
         if (hours < 24) return hours + " 小时前";
         return (hours / 24) + " 天前";
     }
+
+    /** Format an epoch timestamp that may be expressed in seconds or milliseconds. */
+    public static String timestampAgo(long timestamp, long nowMillis) {
+        if (timestamp <= 0) return "";
+        long millis = timestamp < 100_000_000_000L ? timestamp * 1000 : timestamp;
+        return millisAgo(nowMillis, millis);
+    }
+
+    /** Format an epoch-millisecond timestamp relative to the current time. */
+    public static String millisAgo(long nowMillis, long thenMillis) {
+        if (thenMillis <= 0) return "";
+        long minutes = BoundsPolicy.nonNegative(nowMillis - thenMillis) / 60_000L;
+        return minutesAgo(minutes);
+    }
+
+    /** Format an ISO-8601 timestamp, returning an empty label when parsing fails. */
+    public static String isoAgo(String iso, long nowMillis) {
+        if (iso == null || iso.isEmpty()) return "";
+        try {
+            return timestampAgo(java.time.Instant.parse(iso).toEpochMilli(), nowMillis);
+        } catch (java.time.format.DateTimeParseException | ArithmeticException malformed) {
+            return "";
+        }
+    }
 }
