@@ -31,6 +31,13 @@ public final class ViewPolicy {
         view.setMinimumHeight(0);
     }
 
+    /** Apply shared text size, weight and colour styling to a text view. */
+    public static void style(TextView view, int sizeSp, int weight, int color) {
+        setTextSizeSp(view, sizeSp);
+        setTypefaceWeight(view, weight);
+        setTextColor(view, color);
+    }
+
     /** Apply a minimum height to a generic view. */
     public static void setMinimumHeight(View view, int height) {
         view.setMinimumHeight(height);
