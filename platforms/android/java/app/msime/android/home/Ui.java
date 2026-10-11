@@ -411,13 +411,5 @@ public final class Ui {
         ViewPolicy.bindOptionalClick(view, action);
     }
 
-    /** Create a vertically arranged rounded surface for page cards. */
-    public static LinearLayout verticalCard(Context context, float radiusDp) {
-        LinearLayout card = LayoutPolicy.column(context);
-        ViewPolicy.setBackground(card,
-            DrawablePolicy.rounded(ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, radiusDp)));
-        return card;
-    }
-
 
 }

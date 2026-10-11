@@ -40,6 +40,14 @@ public final class LayoutPolicy {
         return handle;
     }
 
+    /** Create a vertical rounded container with a caller-supplied fill colour. */
+    public static LinearLayout roundedColumn(Context context, int color, float radiusDp) {
+        LinearLayout column = column(context);
+        ViewPolicy.setBackground(column,
+            DrawablePolicy.rounded(color, DimensionPolicy.pixels(context, radiusDp)));
+        return column;
+    }
+
     /** Create a full-width solid colour band with a dp height. */
     public static View colorBand(Context context, int color, float heightDp) {
         View view = ViewPolicy.newColorView(context, color);

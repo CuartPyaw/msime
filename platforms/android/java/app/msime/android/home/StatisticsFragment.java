@@ -417,7 +417,7 @@ public final class StatisticsFragment extends HomeTabFragment {
 
     /** 一张统计卡：andCard 底、20dp 圆角，加在 `parent` 末尾。 */
     private static LinearLayout card(Context context, LinearLayout parent, int padding) {
-        LinearLayout card = Ui.verticalCard(context, 20);
+        LinearLayout card = LayoutPolicy.roundedColumn(context, ThemeColorPolicy.card(context), 20);
         int pad = DimensionPolicy.pixels(context, padding);
         Ui.setSymmetricPaddingPx(card, pad);
         LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();

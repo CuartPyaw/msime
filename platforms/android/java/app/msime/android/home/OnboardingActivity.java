@@ -478,7 +478,7 @@ public final class OnboardingActivity extends AppCompatActivity {
     }
 
     private LinearLayout card(LinearLayout column, int top) {
-        LinearLayout card = Ui.verticalCard(this, 20);
+        LinearLayout card = LayoutPolicy.roundedColumn(this, ThemeColorPolicy.card(this), 20);
         column.addView(card, LayoutPolicy.matchWidthWrapParams(this, 14 + top));
         return card;
     }
