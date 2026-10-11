@@ -32,6 +32,16 @@ public final class LayoutPolicy {
         return new LinearLayout.LayoutParams(widthPixels, heightPixels);
     }
 
+    /** Create a theme-coloured one-pixel divider in either orientation. */
+    public static View divider(Context context, int color, boolean horizontal) {
+        View view = ViewPolicy.newColorView(context, color);
+        int thin = DimensionPolicy.atLeastOnePixel(context, 0.5f);
+        view.setLayoutParams(horizontal
+            ? matchWidthHeightPx(thin)
+            : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
+        return view;
+    }
+
     /** Create full-width linear layout parameters with content-sized height. */
     public static LinearLayout.LayoutParams matchWidthWrapParams() {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,

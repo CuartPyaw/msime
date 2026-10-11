@@ -16,7 +16,8 @@ def main():
                       "squareParams(Context context, float sizeDp)",
                       "squareFrameParams(Context context, float sizeDp)",
                       "squareFrameParamsPx(int size, int gravity)",
-                      "rowGapParams(Context context, float gapDp)"):
+                      "rowGapParams(Context context, float gapDp)",
+                      "divider(Context context, int color, boolean horizontal)"):
         if signature not in policy:
             errors.append(f"{POLICY}: 缺少 {signature} 工厂")
     for p in JAVA.rglob("*.java"):
@@ -29,6 +30,8 @@ def main():
             errors.append(f"{p}: 仍调用 Ui.square")
         if "Ui.rowGapParams" in s:
             errors.append(f"{p}: 仍调用 Ui.rowGapParams")
+        if "Ui.divider" in s:
+            errors.append(f"{p}: 仍调用 Ui.divider")
     if errors: print("\n".join(errors),file=sys.stderr); return 1
     print("Android layout factories use LayoutPolicy directly")
     return 0

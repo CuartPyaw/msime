@@ -78,13 +78,13 @@ public final class InputDialog {
         Ui.setPaddingDp(fields, context, 16, 6, 16, 16);
         root.addView(fields, LayoutPolicy.matchWidthWrapParams());
 
-        root.addView(Ui.divider(context, true));
+        root.addView(LayoutPolicy.divider(context, ThemeColorPolicy.hairline(context), true));
         LinearLayout buttons = LayoutPolicy.row(context);
         TextView cancel = button("取消", 400, ThemeColorPolicy.accent(context));
         ViewPolicy.bindClick(cancel, dialog::cancel);
         buttons.addView(cancel,
             LayoutPolicy.weightedHeightPxParams(DimensionPolicy.pixels(context, 48), 1f));
-        buttons.addView(Ui.divider(context, false));
+        buttons.addView(LayoutPolicy.divider(context, ThemeColorPolicy.hairline(context), false));
         primary = button("确定", 600, ThemeColorPolicy.text(context));
         ViewPolicy.bindClick(primary, this::submit);
         buttons.addView(primary,

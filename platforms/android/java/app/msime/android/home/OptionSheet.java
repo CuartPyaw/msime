@@ -83,7 +83,7 @@ public final class OptionSheet {
 
     private void addOption(View view) {
         if (count > 0) {
-            options.addView(Ui.divider(context, true));
+            options.addView(LayoutPolicy.divider(context, ThemeColorPolicy.hairline(context), true));
         }
         options.addView(view);
         count++;

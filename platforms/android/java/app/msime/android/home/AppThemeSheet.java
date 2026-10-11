@@ -72,7 +72,7 @@ final class AppThemeSheet {
 
         String current = theme(context);
         for (int index = 0; index < THEMES.length; index++) {
-            if (index > 0) root.addView(Ui.divider(context, true));
+            if (index > 0) root.addView(LayoutPolicy.divider(context, ThemeColorPolicy.hairline(context), true));
             String id = THEMES[index][0];
             root.addView(SheetOptionView.create(context, THEMES[index][1], id.equals(current), false,
                 ThemeColorPolicy.accent(context), id.equals(current), () -> {

@@ -203,7 +203,7 @@ public final class GroupCard {
 
     private void addDivider() {
         if (dividerInset < 0 || card.getChildCount() == 0) return;
-        View rule = Ui.divider(context, true);
+        View rule = LayoutPolicy.divider(context, ThemeColorPolicy.hairline(context), true);
         LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) rule.getLayoutParams();
         params.setMarginStart(DimensionPolicy.pixels(context, dividerInset));
         card.addView(rule, params);
