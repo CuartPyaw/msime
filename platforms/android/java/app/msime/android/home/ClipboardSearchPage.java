@@ -73,7 +73,7 @@ public final class ClipboardSearchPage extends DetailPage {
             query.text = text;
             renderResults();
         });
-        column.addView(search, Ui.matchWidth());
+        column.addView(search, LayoutPolicy.matchWidthWrapParams());
 
         results = GroupCard.add(column, null).withDividers(Ui.ROW_PADDING_H);
         // 读取放在 onBecameVisible：每次显示都会调到它，这里再读一次就重复了。

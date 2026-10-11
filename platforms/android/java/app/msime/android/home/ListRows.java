@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import android.content.Context;
 import android.view.LayoutInflater;
 import android.view.View;
@@ -43,13 +45,13 @@ final class ListRows {
         TextView heading = Ui.groupHeading(context, text);
         Ui.setPaddingDp(heading, context, Ui.NAV_ROW_PADDING_H, 16,
             Ui.NAV_ROW_PADDING_H, 4);
-        parent.addView(heading, Ui.matchWidth());
+        parent.addView(heading, LayoutPolicy.matchWidthWrapParams());
         return heading;
     }
 
     /** 设计在两组之间留的空白，代替分隔线。 */
     static void gap(ViewGroup parent) {
         View space = new View(parent.getContext());
-        parent.addView(space, Ui.matchWidthHeight(parent.getContext(), Ui.GROUP_GAP));
+        parent.addView(space, LayoutPolicy.matchWidthHeightDp(parent.getContext(), Ui.GROUP_GAP));
     }
 }

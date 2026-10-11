@@ -243,25 +243,6 @@ public final class Ui {
         ViewPolicy.hideFromAccessibility(view);
     }
 
-    /** Layout parameters for a view that fills the parent width at its measured height. */
-    public static LinearLayout.LayoutParams matchWidth() {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            ViewGroup.LayoutParams.WRAP_CONTENT);
-    }
-
-    /** Full-width layout parameters with a top margin expressed in dp. */
-    public static LinearLayout.LayoutParams matchWidth(Context context, int topMarginDp) {
-        LinearLayout.LayoutParams params = matchWidth();
-        params.topMargin = DimensionPolicy.pixels(context, topMarginDp);
-        return params;
-    }
-
-    /** Full-width layout parameters with a height expressed in dp. */
-    public static LinearLayout.LayoutParams matchWidthHeight(Context context, int heightDp) {
-        return new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
-            DimensionPolicy.pixels(context, heightDp));
-    }
-
     /** Create a theme-coloured one-pixel divider in either orientation. */
     public static View divider(Context context, boolean horizontal) {
         View view = ViewPolicy.newColorView(context, ThemeColorPolicy.hairline(context));
@@ -276,14 +257,14 @@ public final class Ui {
     public static View sheetSeparator(Context context) {
         View view = new View(context);
         ViewPolicy.setBackgroundColor(view, ThemeColorPolicy.page(context));
-        view.setLayoutParams(matchWidthHeight(context, 8));
+        view.setLayoutParams(LayoutPolicy.matchWidthHeightDp(context, 8));
         return view;
     }
 
     /** Create the full-width Material bottom-sheet drag handle. */
     public static BottomSheetDragHandleView sheetDragHandle(Context context) {
         BottomSheetDragHandleView handle = new BottomSheetDragHandleView(context);
-        handle.setLayoutParams(matchWidth());
+        handle.setLayoutParams(LayoutPolicy.matchWidthWrapParams());
         return handle;
     }
 

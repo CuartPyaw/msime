@@ -4,15 +4,23 @@ import sys
 ROOT=Path(__file__).resolve().parents[1]
 JAVA=ROOT/"platforms/android/java"
 UI=JAVA/"app/msime/android/home/Ui.java"
+POLICY=JAVA/"app/msime/android/LayoutPolicy.java"
 def main():
     errors=[]; ui=UI.read_text(encoding="utf-8")
     for name in ("column","row","weightWrap","wrap"):
         if f"public static" in ui and f" {name}(" in ui:
             errors.append(f"{UI}: 仍保留 {name} 转发")
+    policy=POLICY.read_text(encoding="utf-8")
+    for signature in ("matchWidthWrapParams()", "matchWidthWrapParams(Context context, int topMarginDp)",
+                      "matchWidthHeightPx(int heightPixels)", "matchWidthHeightDp(Context context, int heightDp)"):
+        if signature not in policy:
+            errors.append(f"{POLICY}: 缺少 {signature} 工厂")
     for p in JAVA.rglob("*.java"):
         s=p.read_text(encoding="utf-8")
         for name in ("column","row","weightWrap","wrap"):
             if f"Ui.{name}(" in s: errors.append(f"{p}: 仍调用 Ui.{name}")
+        if "Ui.matchWidth" in s:
+            errors.append(f"{p}: 仍调用 Ui.matchWidth")
     if errors: print("\n".join(errors),file=sys.stderr); return 1
     print("Android layout factories use LayoutPolicy directly")
     return 0

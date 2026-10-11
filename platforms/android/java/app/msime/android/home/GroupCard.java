@@ -40,14 +40,14 @@ public final class GroupCard {
     private GroupCard(ViewGroup parent, @Nullable CharSequence title) {
         context = parent.getContext();
         group = LayoutPolicy.column(context);
-        LinearLayout.LayoutParams groupParams = Ui.matchWidth();
+        LinearLayout.LayoutParams groupParams = LayoutPolicy.matchWidthWrapParams();
         if (parent.getChildCount() > 0) groupParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
 
         if (title != null && title.length() > 0) {
             TextView heading = Ui.groupHeading(context, title);
             Ui.setPaddingDp(heading, context, Ui.GROUP_TITLE_INSET, 0,
                 Ui.GROUP_TITLE_INSET, 2);
-            LinearLayout.LayoutParams params = Ui.matchWidth();
+            LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
             params.bottomMargin = DimensionPolicy.pixels(context, 2);
             group.addView(heading, params);
         }
@@ -55,7 +55,7 @@ public final class GroupCard {
         card = Ui.verticalCard(context, Ui.GROUP_RADIUS);
         // 行的按压波纹裁在卡片圆角里，首尾两行不会露出直角。
         card.setClipToOutline(true);
-        group.addView(card, Ui.matchWidth());
+        group.addView(card, LayoutPolicy.matchWidthWrapParams());
         parent.addView(group, groupParams);
     }
 
@@ -175,7 +175,7 @@ public final class GroupCard {
         TextView note = Ui.styledLabel(context, text, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
         Ui.setSymmetricPaddingDp(note, context, Ui.ROW_PADDING_H, 12);
         addDivider();
-        card.addView(note, Ui.matchWidth());
+        card.addView(note, LayoutPolicy.matchWidthWrapParams());
         return note;
     }
 
@@ -184,20 +184,20 @@ public final class GroupCard {
         TextView note = Ui.styledLabel(context, text, 13, 400, ThemeColorPolicy.subText(context));
         Ui.setPaddingDp(note, context, Ui.GROUP_TITLE_INSET, 8,
             Ui.GROUP_TITLE_INSET, 0);
-        group.addView(note, Ui.matchWidth());
+        group.addView(note, LayoutPolicy.matchWidthWrapParams());
         return note;
     }
 
     /** 放一个自定义的行（例如语言卡的行、词条行），按需要在它前面画分隔线。 */
     public <T extends View> T addView(T row) {
         addDivider();
-        card.addView(row, Ui.matchWidth());
+        card.addView(row, LayoutPolicy.matchWidthWrapParams());
         return row;
     }
 
     private Row add(Row row) {
         addDivider();
-        card.addView(row.view, Ui.matchWidth());
+        card.addView(row.view, LayoutPolicy.matchWidthWrapParams());
         return row;
     }
 

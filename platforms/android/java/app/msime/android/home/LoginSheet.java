@@ -129,7 +129,7 @@ final class LoginSheet {
 
         TextView subtitle = Ui.styledLabel(activity, "在手机、平板和电脑之间同步词库、皮肤和云剪贴板",
             14, 400, ThemeColorPolicy.subText(activity));
-        root.addView(subtitle, Ui.matchWidth(activity, 2));
+        root.addView(subtitle, LayoutPolicy.matchWidthWrapParams(activity, 2));
 
         options = LayoutPolicy.column(activity);
         boolean night = DimensionPolicy.isNight(activity);
@@ -138,28 +138,28 @@ final class LoginSheet {
             int fill = night ? Color.WHITE : Color.BLACK;
             int ink = night ? Color.BLACK : Color.WHITE;
             options.addView(button(new PathIcon(24, new String[] {APPLE_PATH}, new int[] {ink}),
-                "通过 Apple 登录", fill, ink, 0, this::apple), Ui.matchWidth(activity, 16));
+                "通过 Apple 登录", fill, ink, 0, this::apple), LayoutPolicy.matchWidthWrapParams(activity, 16));
         }
         if (google) {
             options.addView(button(new PathIcon(48, GOOGLE_PATHS, GOOGLE_COLORS), "通过 Google 登录",
-                Color.TRANSPARENT, ThemeColorPolicy.text(activity), ThemeColorPolicy.outline(activity), this::google), Ui.matchWidth(activity, 12));
+                Color.TRANSPARENT, ThemeColorPolicy.text(activity), ThemeColorPolicy.outline(activity), this::google), LayoutPolicy.matchWidthWrapParams(activity, 12));
         }
         email = LayoutPolicy.column(activity);
         if (providers.email()) {
             int accent = ThemeColorPolicy.accent(activity);
             options.addView(button(new PathIcon(24, new String[] {MAIL_PATH}, new int[] {accent}), "使用邮箱登录",
                 ThemeColorPolicy.color(activity, com.google.android.material.R.attr.colorSecondaryContainer), accent, 0,
-                this::expandEmail), Ui.matchWidth(activity, 12));
-            options.addView(email, Ui.matchWidth(activity, 0));
+                this::expandEmail), LayoutPolicy.matchWidthWrapParams(activity, 12));
+            options.addView(email, LayoutPolicy.matchWidthWrapParams(activity, 0));
         }
-            root.addView(options, Ui.matchWidth(activity, 0));
+            root.addView(options, LayoutPolicy.matchWidthWrapParams(activity, 0));
 
         status = Ui.liveStatus(activity, 13);
         ViewPolicy.setCenteredHorizontally(status);
         ViewPolicy.hide(status);
-        root.addView(status, Ui.matchWidth(activity, 12));
+        root.addView(status, LayoutPolicy.matchWidthWrapParams(activity, 12));
 
-        root.addView(agreement(), Ui.matchWidth(activity, 16));
+        root.addView(agreement(), LayoutPolicy.matchWidthWrapParams(activity, 16));
 
         NestedScrollView scroll = new NestedScrollView(activity);
         scroll.addView(root, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
@@ -194,10 +194,10 @@ final class LoginSheet {
         challenge = null;
         EditText field = field("邮箱地址", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS, 254);
         field.setText(emailAddress);
-        email.addView(field, Ui.matchWidth(activity, 12));
+        email.addView(field, LayoutPolicy.matchWidthWrapParams(activity, 12));
         View send = button(null, "发送验证码", ThemeColorPolicy.accent(activity), ThemeColorPolicy.onAccent(activity), 0,
             () -> sendCode(field.getText().toString()));
-        email.addView(send, Ui.matchWidth(activity, 12));
+        email.addView(send, LayoutPolicy.matchWidthWrapParams(activity, 12));
         field.setOnEditorActionListener((view, action, event) -> {
             if (action != EditorInfo.IME_ACTION_SEND) return false;
             sendCode(field.getText().toString());
@@ -232,13 +232,13 @@ final class LoginSheet {
         TextView sent = Ui.styledLabel(activity, "验证码已发到 " + emailAddress + "，"
             + BoundsPolicy.bounded(challenge.expiresIn() / 60, 1, Integer.MAX_VALUE)
             + " 分钟内有效", 13, 400, ThemeColorPolicy.subText(activity));
-        email.addView(sent, Ui.matchWidth(activity, 12));
+        email.addView(sent, LayoutPolicy.matchWidthWrapParams(activity, 12));
         EditText code = field("6 位验证码", InputType.TYPE_CLASS_NUMBER, 6);
         code.setImeOptions(EditorInfo.IME_ACTION_DONE);
         code.setLetterSpacing(0.3f);
-        email.addView(code, Ui.matchWidth(activity, 8));
+        email.addView(code, LayoutPolicy.matchWidthWrapParams(activity, 8));
         email.addView(button(null, "登录", ThemeColorPolicy.accent(activity), ThemeColorPolicy.onAccent(activity), 0,
-            () -> verify(code.getText().toString())), Ui.matchWidth(activity, 12));
+            () -> verify(code.getText().toString())), LayoutPolicy.matchWidthWrapParams(activity, 12));
         code.setOnEditorActionListener((view, action, event) -> {
             if (action != EditorInfo.IME_ACTION_DONE) return false;
             verify(code.getText().toString());
@@ -251,7 +251,7 @@ final class LoginSheet {
                 ViewPolicy.hide(status);
                 expandEmail();
             });
-        email.addView(again, Ui.matchWidth(activity, 4));
+        email.addView(again, LayoutPolicy.matchWidthWrapParams(activity, 4));
         ViewPolicy.hide(status);
         code.requestFocus();
     }

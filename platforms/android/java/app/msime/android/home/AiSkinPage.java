@@ -320,7 +320,7 @@ public final class AiSkinPage extends DetailPage {
         busyOverlay = overlay;
         stage.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.MATCH_PARENT));
-        LinearLayout.LayoutParams stageParams = Ui.matchWidth();
+        LinearLayout.LayoutParams stageParams = LayoutPolicy.matchWidthWrapParams();
         stageParams.topMargin = DimensionPolicy.pixels(context, 12);
         card.addView(stage, stageParams);
 
@@ -332,7 +332,7 @@ public final class AiSkinPage extends DetailPage {
         LinearLayout.LayoutParams paletteParams = LayoutPolicy.wrapParams();
         paletteParams.setMarginStart(DimensionPolicy.pixels(context, 10));
         colours.addView(palette, paletteParams);
-        LinearLayout.LayoutParams coloursParams = Ui.matchWidth();
+        LinearLayout.LayoutParams coloursParams = LayoutPolicy.matchWidthWrapParams();
         coloursParams.topMargin = DimensionPolicy.pixels(context, 10);
         card.addView(colours, coloursParams);
 
@@ -348,7 +348,7 @@ public final class AiSkinPage extends DetailPage {
                 s.chosen = index;
                 refreshPreview();
             });
-            choices.card().addView(picker, Ui.matchWidth());
+            choices.card().addView(picker, LayoutPolicy.matchWidthWrapParams());
         }
 
         GroupCard describe = GroupCard.add(target, "描述");
@@ -363,7 +363,7 @@ public final class AiSkinPage extends DetailPage {
         ViewPolicy.clearBackground(input);
         Ui.setPaddingDp(input, context, 16, 12, 16, 4);
         ViewPolicy.setEnabled(input, !s.busy);
-        describe.card().addView(input, Ui.matchWidth());
+        describe.card().addView(input, LayoutPolicy.matchWidthWrapParams());
         HorizontalScrollView chipScroll = new HorizontalScrollView(context);
         chipScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout chips = LayoutPolicy.row(context);
@@ -385,7 +385,7 @@ public final class AiSkinPage extends DetailPage {
             chipViews.add(chip);
         }
         chipScroll.addView(chips);
-        describe.card().addView(chipScroll, Ui.matchWidth());
+        describe.card().addView(chipScroll, LayoutPolicy.matchWidthWrapParams());
         styleChips(context, chipViews);
 
         GroupCard soundGroup = GroupCard.add(target, "按键音效");
@@ -397,7 +397,7 @@ public final class AiSkinPage extends DetailPage {
             s.sound = index;
             refreshPreview();
         });
-        soundGroup.card().addView(sounds, Ui.matchWidth());
+        soundGroup.card().addView(sounds, LayoutPolicy.matchWidthWrapParams());
 
         GroupCard animationGroup = GroupCard.add(target, "按键动画");
         ViewPolicy.clearBackground(animationGroup.card());
@@ -405,10 +405,10 @@ public final class AiSkinPage extends DetailPage {
         animations.setFillWidth(true);
         animations.setOptions(List.of(ANIMATION_LABELS), s.animation);
         animations.setOnSelect(index -> s.animation = index);
-        animationGroup.card().addView(animations, Ui.matchWidth());
+        animationGroup.card().addView(animations, LayoutPolicy.matchWidthWrapParams());
 
         LinearLayout actions = LayoutPolicy.row(context);
-        LinearLayout.LayoutParams actionsParams = Ui.matchWidth();
+        LinearLayout.LayoutParams actionsParams = LayoutPolicy.matchWidthWrapParams();
         actionsParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
         if (unavailable) {
             GroupCard.add(target, null).note("AI 设计皮肤暂不可用，请稍后再来。");

@@ -129,7 +129,7 @@ public final class SkinsPage extends ReloadingDetailPage {
                 if (slot == 1) params.setMarginStart(DimensionPolicy.pixels(context, 12));
                 row.addView(cell, params);
             }
-            LinearLayout.LayoutParams rowParams = Ui.matchWidth();
+            LinearLayout.LayoutParams rowParams = LayoutPolicy.matchWidthWrapParams();
             if (start > 0) rowParams.topMargin = DimensionPolicy.pixels(context, 14);
             holder.addView(row, rowParams);
         }
@@ -152,13 +152,13 @@ public final class SkinsPage extends ReloadingDetailPage {
         Ui.hideFromAccessibility(swatch);
         tile.addView(swatch,
             LayoutPolicy.frameMatchWidthHeightPx(DimensionPolicy.pixels(context, 76)));
-        cell.addView(tile, Ui.matchWidth());
+        cell.addView(tile, LayoutPolicy.matchWidthWrapParams());
 
         TextView name = Ui.centeredLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
             Ui.TEXT_ROW_SUBTITLE + 1, card.selected() ? 600 : 400,
             card.selected() ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.text(context));
         ViewPolicy.setSingleLineEllipsized(name);
-        LinearLayout.LayoutParams nameParams = Ui.matchWidth();
+        LinearLayout.LayoutParams nameParams = LayoutPolicy.matchWidthWrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 8);
         cell.addView(name, nameParams);
 
@@ -187,7 +187,7 @@ public final class SkinsPage extends ReloadingDetailPage {
         cell.addView(tile, LayoutPolicy.matchWidthHeightPx(DimensionPolicy.pixels(context, 76) + DimensionPolicy.pixels(context, 6)));
         TextView name = Ui.centeredLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
             ThemeColorPolicy.accent(context));
-        LinearLayout.LayoutParams nameParams = Ui.matchWidth();
+        LinearLayout.LayoutParams nameParams = LayoutPolicy.matchWidthWrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 8);
         cell.addView(name, nameParams);
         cell.setAccessibilityDelegate(KeyboardSheets.buttonDelegate("AI 设计皮肤，描述一句话生成"));

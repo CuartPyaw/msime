@@ -303,7 +303,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             if (on) cell.addView(Ui.label(this, samples[index][1], 11, ThemeColorPolicy.subText(this)));
             strip.addView(cell);
         }
-        column.addView(strip, Ui.matchWidth(this, 6));
+        column.addView(strip, LayoutPolicy.matchWidthWrapParams(this, 6));
 
         LinearLayout row = LayoutPolicy.row(this);
         ViewPolicy.setCenteredVertically(row);
@@ -319,7 +319,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         });
         row.addView(toggle);
         ViewPolicy.bindClick(row, toggle::toggle);
-        column.addView(row, Ui.matchWidth(this, 12));
+        column.addView(row, LayoutPolicy.matchWidthWrapParams(this, 12));
 
         if (note != null) {
             footnote(column, note);
@@ -466,20 +466,20 @@ public final class OnboardingActivity extends AppCompatActivity {
         TextView kick = Ui.label(this, kicker, 13, ThemeColorPolicy.accent(this));
         ViewPolicy.setTypefaceStyle(kick, 600);
         kick.setLetterSpacing(0.04f);
-        column.addView(kick, Ui.matchWidth(this, 14 + 6));
+        column.addView(kick, LayoutPolicy.matchWidthWrapParams(this, 14 + 6));
 
         TextView heading = Ui.headingLabel(this, title, 32, ThemeColorPolicy.text(this));
         ViewPolicy.setLineSpacing(heading, 0, 1.1f);
-        column.addView(heading, Ui.matchWidth(this, 14));
+        column.addView(heading, LayoutPolicy.matchWidthWrapParams(this, 14));
 
         TextView line = Ui.label(this, body, 16, ThemeColorPolicy.subText(this));
         ViewPolicy.setLineSpacing(line, 0, 1.35f);
-        column.addView(line, Ui.matchWidth(this, 14));
+        column.addView(line, LayoutPolicy.matchWidthWrapParams(this, 14));
     }
 
     private LinearLayout card(LinearLayout column, int top) {
         LinearLayout card = Ui.verticalCard(this, 20);
-        column.addView(card, Ui.matchWidth(this, 14 + top));
+        column.addView(card, LayoutPolicy.matchWidthWrapParams(this, 14 + top));
         return card;
     }
 
@@ -555,7 +555,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         // 偏好还读不到时也能点：选择先记下，偏好可读后再写（OnboardingChoices）。
         ViewPolicy.bindOptionalClick(card, selected ? null : () -> chooseScheme(option.scheme()));
         ViewPolicy.setClickable(card, true);
-        column.addView(card, Ui.matchWidth(this, top));
+        column.addView(card, LayoutPolicy.matchWidthWrapParams(this, top));
     }
 
     private void perk(LinearLayout column, @DrawableRes int icon, String label, int top) {
@@ -572,13 +572,13 @@ public final class OnboardingActivity extends AppCompatActivity {
         LinearLayout.LayoutParams textParams = LayoutPolicy.weightedWrapParams(1f);
         textParams.setMarginStart(DimensionPolicy.pixels(this, 12));
         row.addView(text, textParams);
-        column.addView(row, Ui.matchWidth(this, 14 + top - 10));
+        column.addView(row, LayoutPolicy.matchWidthWrapParams(this, 14 + top - 10));
     }
 
     private TextView footnote(LinearLayout column, String message) {
         TextView view = Ui.label(this, message, 13, ThemeColorPolicy.subText(this));
         ViewPolicy.setPoliteLiveRegion(view);
-        column.addView(view, Ui.matchWidth(this, 14));
+        column.addView(view, LayoutPolicy.matchWidthWrapParams(this, 14));
         return view;
     }
 
