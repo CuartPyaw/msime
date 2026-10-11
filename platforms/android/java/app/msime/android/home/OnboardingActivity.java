@@ -513,7 +513,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         if (!done) {
             TextView button = Ui.centeredLabel(this, action, 15, ThemeColorPolicy.accent(this));
             Ui.setHorizontalPaddingDp(button, this, 8);
-            ViewPolicy.setBackground(button, DrawablePolicy.ripple(this));
+            ViewPolicy.setBackground(button, ViewPolicy.ripple(this));
             ViewPolicy.bindClick(button, fix);
             row.addView(button, LayoutPolicy.linearParamsPx(
                 ViewGroup.LayoutParams.WRAP_CONTENT, DimensionPolicy.pixels(this, 40)));
