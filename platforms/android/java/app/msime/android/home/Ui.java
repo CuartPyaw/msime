@@ -257,7 +257,7 @@ public final class Ui {
                                        @ColorInt int color) {
         TextView view = new TextView(context);
         view.setText(text);
-        style(view, sizeSp, weight, color);
+        ViewPolicy.style(view, sizeSp, weight, color);
         return view;
     }
 
@@ -333,7 +333,7 @@ public final class Ui {
             }
         };
         view.setText(text);
-        style(view, sizeSp, 400, color);
+        ViewPolicy.style(view, sizeSp, 400, color);
         ViewPolicy.setSingleLineEllipsized(view);
         return view;
     }
@@ -341,7 +341,7 @@ public final class Ui {
     /** Create an editable field with the shared size, weight, and colour policy. */
     public static EditText styledInput(Context context, int sizeSp, int weight, @ColorInt int color) {
         EditText view = new EditText(context);
-        style(view, sizeSp, weight, color);
+        ViewPolicy.style(view, sizeSp, weight, color);
         return view;
     }
 
@@ -381,7 +381,7 @@ public final class Ui {
                                       float horizontalPaddingDp, float verticalPaddingDp,
                                       float minHeightDp, float minWidthDp, Runnable action) {
         TextView button = centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);
-        ViewPolicy.setBackground(button, pillRipple(context, fill));
+        ViewPolicy.setBackground(button, ViewPolicy.pillRipple(context, fill));
         setSymmetricPaddingDp(button, context, horizontalPaddingDp, verticalPaddingDp);
         setTextMinHeightDp(button, context, minHeightDp);
         if (minWidthDp > 0) ViewPolicy.setTextMinWidth(button, DimensionPolicy.pixels(context, minWidthDp));
