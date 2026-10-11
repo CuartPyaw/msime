@@ -81,6 +81,9 @@ public final class ProfilePage extends DetailPage {
         column = null;
         loaded = null;
         avatarPickerSessionId = null;
+        // Work results are fenced to the old view and will be dropped after recreation. Do not
+        // leave the rebuilt page permanently disabled while an abandoned operation finishes.
+        busy = false;
         super.onDestroyView();
     }
 
