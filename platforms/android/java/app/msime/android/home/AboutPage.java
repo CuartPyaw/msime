@@ -259,7 +259,7 @@ public final class AboutPage extends DetailPage {
         // 「已是最新版本」是结果而不是按钮，换成 accentSoft 底、强调色字，再点一次重新检查。
         boolean quiet = state == State.UP_TO_DATE || busy;
         ViewPolicy.setTextColor(button, quiet ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.onAccent(context));
-        ViewPolicy.setBackground(button, Ui.pillRipple(context, quiet ? ThemeColorPolicy.accentSoft(context) : ThemeColorPolicy.accent(context)));
+        ViewPolicy.setBackground(button, ViewPolicy.pillRipple(context, quiet ? ThemeColorPolicy.accentSoft(context) : ThemeColorPolicy.accent(context)));
     }
 
     private void onPill() {

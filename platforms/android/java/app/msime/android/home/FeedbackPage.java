@@ -204,7 +204,7 @@ public final class FeedbackPage extends DetailPage {
         ViewPolicy.setTextColor(submit, ready ? ThemeColorPolicy.onAccent(context) : ThemeColorPolicy.subText(context));
         int fill = ready ? ThemeColorPolicy.accent(context)
             : ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorSurfaceContainerHighest);
-        ViewPolicy.setBackground(submit, Ui.rippleOn(context, fill, DimensionPolicy.pixels(requireContext(), Ui.GROUP_RADIUS)));
+        ViewPolicy.setBackground(submit, ViewPolicy.ripple(context, fill, DimensionPolicy.pixels(requireContext(), Ui.GROUP_RADIUS)));
         if (addShot != null) ViewPolicy.setEnabledWithAlpha(addShot,
             screenshots.size() < FeedbackApi.MAX_SCREENSHOTS && !sending, 0.38f);
     }

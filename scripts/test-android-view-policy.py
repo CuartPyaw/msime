@@ -46,6 +46,8 @@ def main() -> None:
         "return new LinearLayout.LayoutParams(size, size);",
         "public static View newColorView(Context context, int color)",
         "setBackgroundColor(view, color);",
+        "public static Drawable ripple(Context context, int fill, float radiusPx)",
+        "public static Drawable pillRipple(Context context, int fill)",
     )
     missing = [snippet for snippet in required if snippet not in view_policy]
     if missing:
@@ -105,8 +107,11 @@ def main() -> None:
     for path in HOME.glob("*.java"):
         if "Ui.hairlineView(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享着色视图工厂")
-    if "ViewPolicy.newColorView(context, ThemeColorPolicy.hairline(context));" not in ui:
-        raise AssertionError("Ui 分隔线没有调用共享着色视图工厂")
+    if "public static Drawable pillRipple(" in ui or "public static Drawable rippleOn(" in ui:
+        raise AssertionError("Ui 仍保留主题 ripple 转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.pillRipple(" in path.read_text(encoding="utf-8") or "Ui.rippleOn(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享主题 ripple 工厂")
     feedback = (HOME / "FeedbackPage.java").read_text(encoding="utf-8")
     if "ViewPolicy.newColorView(context, ThemeColorPolicy.hairline(context));" not in feedback:
         raise AssertionError("FeedbackPage 没有调用共享着色视图工厂")
