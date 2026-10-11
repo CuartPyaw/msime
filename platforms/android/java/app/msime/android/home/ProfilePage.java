@@ -272,7 +272,7 @@ public final class ProfilePage extends DetailPage {
         GradientDrawable badge = DrawablePolicy.circle(ThemeColorPolicy.card(context));
         ViewPolicy.setBackground(camera, badge);
         int pad = DimensionPolicy.pixels(context, 6);
-        Ui.setSymmetricPaddingPx(camera, pad);
+        ViewPolicy.setSymmetricPadding(camera, pad);
         ViewPolicy.hideFromAccessibility(camera);
         FrameLayout.LayoutParams cameraParams = LayoutPolicy.squareFrameParams(context, 28);
         cameraParams.gravity = Gravity.BOTTOM | Gravity.END;

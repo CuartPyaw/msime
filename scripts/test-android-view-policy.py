@@ -141,6 +141,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.setSymmetricPaddingDp(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享对称 dp 内边距策略")
+    if "public static void setSymmetricPaddingPx(" in ui:
+        raise AssertionError("Ui 仍保留对称像素内边距转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.setSymmetricPaddingPx(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享对称像素内边距策略")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")

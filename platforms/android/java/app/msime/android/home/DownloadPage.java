@@ -67,7 +67,7 @@ public final class DownloadPage extends DetailPage {
         ViewPolicy.setCenteredVertically(card);
         ViewPolicy.setBackground(card, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), DimensionPolicy.pixels(context, 20)));
         int pad = DimensionPolicy.pixels(context, 16);
-        Ui.setSymmetricPaddingPx(card, pad);
+        ViewPolicy.setSymmetricPadding(card, pad);
 
         FrameLayout tile = new FrameLayout(context);
         ViewPolicy.setBackground(tile, DrawablePolicy.rounded(ThemeColorPolicy.accent(context), DimensionPolicy.pixels(context, 12)));
