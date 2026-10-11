@@ -276,7 +276,7 @@ final class KeyboardSheets {
 
     /** 页面底部的大按钮：主按钮是实心强调色，次按钮是卡片底、正文色；52dp 高、r16。 */
     static TextView bigButton(Context context, String label, boolean primary, Runnable action) {
-        TextView button = Ui.textButton(context, label, Ui.TEXT_ROW_TITLE, 600,
+        TextView button = ViewPolicy.textButton(context, label, Ui.TEXT_ROW_TITLE, 600,
             primary ? ThemeColorPolicy.onAccent(context) : ThemeColorPolicy.text(context),
             ViewPolicy.ripple(context, primary ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, 16)),
             Ui.ACTION_BUTTON_MIN_HEIGHT, action);

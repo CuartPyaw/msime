@@ -136,12 +136,12 @@ public final class ClipboardEditPage extends DetailPage {
         buttonsParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
         target.addView(buttons, buttonsParams);
         boolean editing = state == State.READY;
-        TextView cancel = Ui.textButton(context, editing ? "取消" : "返回", 16, 600, ThemeColorPolicy.accent(context),
+        TextView cancel = ViewPolicy.textButton(context, editing ? "取消" : "返回", 16, 600, ThemeColorPolicy.accent(context),
             ViewPolicy.ripple(context, ThemeColorPolicy.rowBackground(context), DimensionPolicy.pixels(context, Ui.GROUP_RADIUS)),
             Ui.ACTION_BUTTON_MIN_HEIGHT, this::leave);
         buttons.addView(cancel, LayoutPolicy.weightedHeightPxParams(DimensionPolicy.pixels(context, Ui.ACTION_BUTTON_MIN_HEIGHT), 1f));
         if (editing) {
-            TextView primary = Ui.textButton(context, "保存", 16, 600, ThemeColorPolicy.onAccent(context), null,
+            TextView primary = ViewPolicy.textButton(context, "保存", 16, 600, ThemeColorPolicy.onAccent(context), null,
                 Ui.ACTION_BUTTON_MIN_HEIGHT, this::submit);
             LinearLayout.LayoutParams primaryParams = LayoutPolicy.weightedHeightPxParams(DimensionPolicy.pixels(context, Ui.ACTION_BUTTON_MIN_HEIGHT), 1f);
             primaryParams.setMarginStart(DimensionPolicy.pixels(context, 12));

@@ -137,7 +137,7 @@ public final class FeedbackPage extends DetailPage {
         description.view().addView(count, LayoutPolicy.matchWidthWrapParams());
         counter = count;
 
-        TextView button = Ui.textButton(context, "", 16, 600, ThemeColorPolicy.onAccent(context), null,
+        TextView button = ViewPolicy.textButton(context, "", 16, 600, ThemeColorPolicy.onAccent(context), null,
             Ui.ACTION_BUTTON_MIN_HEIGHT, this::submit);
         ViewPolicy.setPoliteLiveRegion(button);
         LinearLayout.LayoutParams buttonParams = LayoutPolicy.matchWidthWrapParams();

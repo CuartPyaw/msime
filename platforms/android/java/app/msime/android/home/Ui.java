@@ -303,23 +303,6 @@ public final class Ui {
         return button;
     }
 
-    /** Create a centered, clickable text button with caller-supplied background and ink. */
-    public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,
-                                      @ColorInt int ink, Drawable background, float minHeightDp) {
-        return textButton(context, label, sizeSp, weight, ink, background, minHeightDp, null);
-    }
-
-    /** Create a centered text button and bind its action. */
-    public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,
-                                      @ColorInt int ink, Drawable background, float minHeightDp,
-                                      Runnable action) {
-        TextView button = ViewPolicy.centeredLabel(context, label, sizeSp, weight, ink);
-        ViewPolicy.setBackground(button, background);
-        setTextMinHeightDp(button, context, minHeightDp);
-        bindClick(button, action);
-        return button;
-    }
-
     private static void bindClick(View view, Runnable action) {
         ViewPolicy.setInteractive(view, true);
         ViewPolicy.bindOptionalClick(view, action);
