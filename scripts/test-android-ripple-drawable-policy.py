@@ -28,6 +28,13 @@ def main() -> int:
         source = path.read_text(encoding="utf-8")
         if path != POLICY and "new RippleDrawable(" in source:
             errors.append(f"{path}: 应复用 DrawablePolicy.ripple")
+        for forbidden in (
+            "DrawablePolicy.ripple(this)",
+            "DrawablePolicy.ripple(activity)",
+            "DrawablePolicy.ripple(view.getContext())",
+        ):
+            if forbidden in source:
+                errors.append(f"{path}: 主题波纹应复用 ViewPolicy.ripple")
         if path != UI and "Ui.ripple(" in source:
             errors.append(f"{path}: 不应调用已删除的 Ui ripple 转发")
     if errors:
