@@ -118,7 +118,7 @@ public final class ClipboardEditPage extends DetailPage {
                 Ui.setSymmetricPaddingDp(input, context, 16, 14);
                 input.setText(draft.text);
                 input.setContentDescription("剪贴板记录的文字");
-                card.card().addView(input, Ui.matchWidth());
+                card.card().addView(input, LayoutPolicy.matchWidthWrapParams());
                 Ui.afterTextChanged(input, text -> {
                     draft.text = text.toString();
                     refresh();
@@ -130,7 +130,7 @@ public final class ClipboardEditPage extends DetailPage {
         }
 
         LinearLayout buttons = LayoutPolicy.row(context);
-        LinearLayout.LayoutParams buttonsParams = Ui.matchWidth();
+        LinearLayout.LayoutParams buttonsParams = LayoutPolicy.matchWidthWrapParams();
         buttonsParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
         target.addView(buttons, buttonsParams);
         boolean editing = state == State.READY;

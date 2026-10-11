@@ -159,7 +159,7 @@ public final class AboutPage extends DetailPage {
         TextView footer = Ui.styledLabel(context, "© 2026 Metasequoia · 输入内容默认只在本机处理",
             13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setCentered(footer);
-        LinearLayout.LayoutParams footerParams = Ui.matchWidth();
+        LinearLayout.LayoutParams footerParams = LayoutPolicy.matchWidthWrapParams();
         footerParams.topMargin = DimensionPolicy.pixels(context, 24);
         column.addView(footer, footerParams);
 

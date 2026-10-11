@@ -38,6 +38,13 @@ public final class LayoutPolicy {
             LinearLayout.LayoutParams.WRAP_CONTENT);
     }
 
+    /** Create full-width content-sized parameters with a top margin expressed in dp. */
+    public static LinearLayout.LayoutParams matchWidthWrapParams(Context context, int topMarginDp) {
+        LinearLayout.LayoutParams params = matchWidthWrapParams();
+        params.topMargin = DimensionPolicy.pixels(context, topMarginDp);
+        return params;
+    }
+
     /** Create linear layout parameters that fill both dimensions. */
     public static LinearLayout.LayoutParams matchParentParams() {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
@@ -91,6 +98,11 @@ public final class LayoutPolicy {
     /** Create full-width linear layout parameters with an already pixel-sized height. */
     public static LinearLayout.LayoutParams matchWidthHeightPx(int heightPixels) {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, heightPixels);
+    }
+
+    /** Create full-width parameters with a height expressed in dp. */
+    public static LinearLayout.LayoutParams matchWidthHeightDp(Context context, int heightDp) {
+        return matchWidthHeightPx(DimensionPolicy.pixels(context, heightDp));
     }
 
     /** Create linear layout parameters with content-sized width and parent-sized height. */

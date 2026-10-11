@@ -58,7 +58,7 @@ public final class InputDialog {
 
         TextView heading = Ui.headingLabel(context, title, Ui.TEXT_DIALOG_TITLE, 600, ThemeColorPolicy.text(context));
         ViewPolicy.setCentered(heading);
-        LinearLayout.LayoutParams headingParams = Ui.matchWidth();
+        LinearLayout.LayoutParams headingParams = LayoutPolicy.matchWidthWrapParams();
         headingParams.topMargin = DimensionPolicy.pixels(context, 20);
         headingParams.leftMargin = DimensionPolicy.pixels(context, 20);
         headingParams.rightMargin = DimensionPolicy.pixels(context, 20);
@@ -67,7 +67,7 @@ public final class InputDialog {
         if (message != null && message.length() > 0) {
             TextView note = Ui.centeredLabel(context, message, Ui.TEXT_SHEET_HEADER, 400,
                 ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams params = Ui.matchWidth();
+            LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
             params.topMargin = DimensionPolicy.pixels(context, 4);
             params.leftMargin = DimensionPolicy.pixels(context, 20);
             params.rightMargin = DimensionPolicy.pixels(context, 20);
@@ -76,7 +76,7 @@ public final class InputDialog {
 
         fields = LayoutPolicy.column(context);
         Ui.setPaddingDp(fields, context, 16, 6, 16, 16);
-        root.addView(fields, Ui.matchWidth());
+        root.addView(fields, LayoutPolicy.matchWidthWrapParams());
 
         root.addView(Ui.divider(context, true));
         LinearLayout buttons = LayoutPolicy.row(context);
@@ -89,7 +89,7 @@ public final class InputDialog {
         ViewPolicy.bindClick(primary, this::submit);
         buttons.addView(primary,
             LayoutPolicy.weightedHeightPxParams(DimensionPolicy.pixels(context, 48), 1f));
-        root.addView(buttons, Ui.matchWidth());
+        root.addView(buttons, LayoutPolicy.matchWidthWrapParams());
 
         dialog.setContentView(root);
         Window window = dialog.getWindow();
@@ -128,7 +128,7 @@ public final class InputDialog {
             submit();
             return true;
         });
-        LinearLayout.LayoutParams params = Ui.matchWidthHeight(context, 40);
+        LinearLayout.LayoutParams params = LayoutPolicy.matchWidthHeightDp(context, 40);
         params.topMargin = DimensionPolicy.pixels(context, 8);
         fields.addView(input, params);
         // 前面的输入框回车跳到下一个，最后一个回车就是提交。

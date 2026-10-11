@@ -52,7 +52,7 @@ public final class CommunitySkinSheet {
             // 用当前的布局画：用九键的人要看的是九键，不是一张跟自己键盘对不上的图。角标说的是画的
             // 哪种布局，不是皮肤名——名字就在上面那行标题里。
             preview.setKeyboard(skin, nineKey, nineKey ? "九键" : "26 键");
-            LinearLayout.LayoutParams params = Ui.matchWidthHeight(context, 196);
+            LinearLayout.LayoutParams params = LayoutPolicy.matchWidthHeightDp(context, 196);
             params.topMargin = DimensionPolicy.pixels(context, 4);
             // add() fixes every row at WRAP_CONTENT, and this view measures to nothing under it.
             sheet.content().addView(preview, params);
@@ -61,7 +61,7 @@ public final class CommunitySkinSheet {
         TextView description = Ui.styledLabel(context,
             item.description().isEmpty() ? "作者没有写说明。" : item.description(),
             14, 400, ThemeColorPolicy.subText(context));
-        LinearLayout.LayoutParams text = Ui.matchWidth();
+        LinearLayout.LayoutParams text = LayoutPolicy.matchWidthWrapParams();
         text.topMargin = DimensionPolicy.pixels(context, 14);
         sheet.content().addView(description, text);
 
@@ -84,7 +84,7 @@ public final class CommunitySkinSheet {
                     onChangeCategory.accept(category);
                 });
             }
-            sheet.content().addView(categories, Ui.matchWidth());
+            sheet.content().addView(categories, LayoutPolicy.matchWidthWrapParams());
         }
 
         MaterialButton save = new MaterialButton(context);
@@ -96,7 +96,7 @@ public final class CommunitySkinSheet {
                 onAction.run();
             });
         }
-        LinearLayout.LayoutParams action = Ui.matchWidth();
+        LinearLayout.LayoutParams action = LayoutPolicy.matchWidthWrapParams();
         action.topMargin = DimensionPolicy.pixels(context, 18);
         sheet.content().addView(save, action);
 

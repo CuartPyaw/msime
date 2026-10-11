@@ -40,7 +40,7 @@ public final class SettingsSheet {
 
         if (subtitle != null && !subtitle.isEmpty()) {
             TextView note = Ui.styledLabel(context, subtitle, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams params = Ui.matchWidth(context, 4);
+            LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams(context, 4);
             root.addView(note, params);
         }
 
@@ -48,7 +48,7 @@ public final class SettingsSheet {
         NestedScrollView scroll = new NestedScrollView(context);
         scroll.addView(content, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
-        LinearLayout.LayoutParams scrollParams = Ui.matchWidth(context, 12);
+        LinearLayout.LayoutParams scrollParams = LayoutPolicy.matchWidthWrapParams(context, 12);
         root.addView(scroll, scrollParams);
         dialog.setContentView(root);
     }
@@ -59,7 +59,7 @@ public final class SettingsSheet {
     /** 行与行之间的 M3 组标题：强调色、14sp、500 字重。 */
     public void addHeading(String text) {
         TextView heading = Ui.groupHeading(context, text);
-        LinearLayout.LayoutParams params = Ui.matchWidth();
+        LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
         params.topMargin = DimensionPolicy.pixels(context, 16);
         params.bottomMargin = DimensionPolicy.pixels(context, 2);
         content.addView(heading, params);
@@ -68,7 +68,7 @@ public final class SettingsSheet {
     /** 这一列末尾的脚注。 */
     public void addNote(String text) {
         TextView note = Ui.styledLabel(context, text, 12, 400, ThemeColorPolicy.subText(context));
-        LinearLayout.LayoutParams params = Ui.matchWidth();
+        LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
         params.topMargin = DimensionPolicy.pixels(context, 14);
         content.addView(note, params);
     }
@@ -77,14 +77,14 @@ public final class SettingsSheet {
     public TextView addStatus() {
         TextView status = Ui.liveStatus(context, 12);
         ViewPolicy.setCenteredVertically(status);
-        LinearLayout.LayoutParams params = Ui.matchWidthHeight(context, 20);
+        LinearLayout.LayoutParams params = LayoutPolicy.matchWidthHeightDp(context, 20);
         params.topMargin = DimensionPolicy.pixels(context, 10);
         content.addView(status, params);
         return status;
     }
 
     public void add(View row) {
-        content.addView(row, Ui.matchWidth());
+        content.addView(row, LayoutPolicy.matchWidthWrapParams());
     }
 
     public void show() { dialog.show(); }

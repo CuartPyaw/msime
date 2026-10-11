@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.MainThreadPolicy;
@@ -138,7 +140,7 @@ public final class LexiconDetailPage extends DetailPage {
             search.setHint("搜索词条");
             search.field().setText(query);
             search.setOnQueryChange(this::onQuery);
-            LinearLayout.LayoutParams params = Ui.matchWidth();
+            LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
             params.topMargin = DimensionPolicy.pixels(requireContext(), Ui.GROUP_GAP);
             target.addView(search, params);
         }

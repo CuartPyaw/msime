@@ -250,7 +250,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         }
         TrendChart chart = new TrendChart(context);
         chart.setDays(overview.last7());
-        LinearLayout.LayoutParams chartParams = Ui.matchWidth();
+        LinearLayout.LayoutParams chartParams = LayoutPolicy.matchWidthWrapParams();
         chartParams.topMargin = DimensionPolicy.pixels(context, 18);
         hero.addView(chart, chartParams);
 
@@ -275,14 +275,14 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout heat = card(context, content, 16);
         HeatmapView heatmap = new HeatmapView(context);
         heatmap.setDays(habits.weeks12());
-        heat.addView(heatmap, Ui.matchWidth());
+        heat.addView(heatmap, LayoutPolicy.matchWidthWrapParams());
 
         String peak = TypingStatisticsSummary.peakLabel(habits.peakWindow());
         header(context, content, "活跃时段", peak == null ? null : "最常在 " + peak);
         LinearLayout hours = card(context, content, 16);
         HourHistogramView histogram = new HourHistogramView(context);
         histogram.setHours(habits.hours24(), habits.peakWindow(), peak);
-        hours.addView(histogram, Ui.matchWidth());
+        hours.addView(histogram, LayoutPolicy.matchWidthWrapParams());
 
         List<Share> mix = TypingStatisticsSummary.composition(habits.characters());
         header(context, content, "输入构成", null);
@@ -292,7 +292,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         } else {
             DistributionView bar = new DistributionView(context);
             bar.setShares(mix, DistributionView.Style.STACK);
-            composition.addView(bar, Ui.matchWidth());
+            composition.addView(bar, LayoutPolicy.matchWidthWrapParams());
         }
     }
 
@@ -311,7 +311,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         KeyHeatmapView heatmap = new KeyHeatmapView(context);
         heatmap.setNineKey(nine);
         heatmap.setKeys(presses);
-        board.addView(heatmap, Ui.matchWidth());
+        board.addView(heatmap, LayoutPolicy.matchWidthWrapParams());
         layout.setOnSelect(index -> {
             nineKey = index == 1;
             heatmap.setNineKey(nineKey);
@@ -343,7 +343,7 @@ public final class StatisticsFragment extends HomeTabFragment {
             }
             DistributionView bars = new DistributionView(context);
             bars.setShares(shares, DistributionView.Style.BARS);
-            positions.addView(bars, Ui.matchWidth());
+            positions.addView(bars, LayoutPolicy.matchWidthWrapParams());
         }
 
         List<Share> methods = TypingStatisticsSummary.methods(value.habits().sources());
@@ -352,7 +352,7 @@ public final class StatisticsFragment extends HomeTabFragment {
             LinearLayout card = card(context, content, 16);
             DistributionView donut = new DistributionView(context);
             donut.setShares(methods, DistributionView.Style.DONUT);
-            card.addView(donut, Ui.matchWidth());
+            card.addView(donut, LayoutPolicy.matchWidthWrapParams());
         }
     }
 
@@ -388,7 +388,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         progress.addView(count);
         View track = new View(context);
         track.setBackground(DrawablePolicy.pill(ThemeColorPolicy.hairline(context)));
-        LinearLayout.LayoutParams trackParams = Ui.matchWidthHeight(context, 6);
+        LinearLayout.LayoutParams trackParams = LayoutPolicy.matchWidthHeightDp(context, 6);
         trackParams.topMargin = DimensionPolicy.pixels(context, 12);
         android.widget.FrameLayout bar = new android.widget.FrameLayout(context);
         bar.addView(track, new android.widget.FrameLayout.LayoutParams(
@@ -408,7 +408,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         BadgeGridView grid = new BadgeGridView(context);
         grid.setBadges(badges);
         grid.setOnBadgeTap(badge -> MsToast.show(context, TypingStatisticsSummary.toast(badge)));
-        LinearLayout.LayoutParams gridParams = Ui.matchWidth();
+        LinearLayout.LayoutParams gridParams = LayoutPolicy.matchWidthWrapParams();
         gridParams.topMargin = DimensionPolicy.pixels(context, 10);
         content.addView(grid, gridParams);
     }
@@ -420,7 +420,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         LinearLayout card = Ui.verticalCard(context, 20);
         int pad = DimensionPolicy.pixels(context, padding);
         Ui.setSymmetricPaddingPx(card, pad);
-        LinearLayout.LayoutParams params = Ui.matchWidth();
+        LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
         params.topMargin = DimensionPolicy.pixels(context, parent.getChildCount() == 0 ? 16 : 10);
         parent.addView(card, params);
         return card;
@@ -435,7 +435,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         TextView heading = Ui.headingLabel(context, title, 13, ThemeColorPolicy.subText(context));
         row.addView(heading, LayoutPolicy.weightedWrapParams(1f));
         if (trailing != null) row.addView(Ui.label(context, trailing, 13, ThemeColorPolicy.subText(context)));
-        LinearLayout.LayoutParams params = Ui.matchWidth();
+        LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
         params.topMargin = DimensionPolicy.pixels(context, 22);
         // 最小 32 dp 而不是固定 32 dp：系统字体调大后标题和右侧的分段控件都比它高。
         ViewPolicy.setMinimumHeight(row, DimensionPolicy.pixels(context, 32));
@@ -451,7 +451,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         rightParams.setMarginStart(DimensionPolicy.pixels(context, 10));
         row.addView(left, leftParams);
         row.addView(right, rightParams);
-        LinearLayout.LayoutParams params = Ui.matchWidth();
+        LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
         params.topMargin = DimensionPolicy.pixels(context, 10);
         parent.addView(row, params);
     }

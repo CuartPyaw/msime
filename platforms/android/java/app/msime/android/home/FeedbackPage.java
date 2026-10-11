@@ -98,7 +98,7 @@ public final class FeedbackPage extends DetailPage {
         Ui.setSymmetricPaddingDp(input, requireContext(), 16, 14);
         input.setText(draft);
         input.setContentDescription("描述");
-        card.addView(input, Ui.matchWidth());
+        card.addView(input, LayoutPolicy.matchWidthWrapParams());
         detail = input;
 
         View rule = ViewPolicy.newColorView(context, ThemeColorPolicy.hairline(context));
@@ -112,7 +112,7 @@ public final class FeedbackPage extends DetailPage {
         LinearLayout shots = LayoutPolicy.row(context);
         Ui.setPaddingDp(shots, requireContext(), 16, 10, 16, 0);
         strip.addView(shots);
-        card.addView(strip, Ui.matchWidth());
+        card.addView(strip, LayoutPolicy.matchWidthWrapParams());
         thumbnails = shots;
 
         LinearLayout add = LayoutPolicy.row(context);
@@ -126,19 +126,19 @@ public final class FeedbackPage extends DetailPage {
         labelParams.setMarginStart(DimensionPolicy.pixels(requireContext(), 10));
         add.addView(label, labelParams);
         ViewPolicy.makeClickable(add, context, () -> picker.launch("image/*"));
-        card.addView(add, Ui.matchWidth());
+        card.addView(add, LayoutPolicy.matchWidthWrapParams());
         addShot = add;
 
         TextView count = Ui.styledLabel(context, "", 13, 400, ThemeColorPolicy.subText(context));
         Ui.setPaddingDp(count, requireContext(), Ui.GROUP_TITLE_INSET, 6,
             Ui.GROUP_TITLE_INSET, 0);
-        description.view().addView(count, Ui.matchWidth());
+        description.view().addView(count, LayoutPolicy.matchWidthWrapParams());
         counter = count;
 
         TextView button = Ui.textButton(context, "", 16, 600, ThemeColorPolicy.onAccent(context), null,
             Ui.ACTION_BUTTON_MIN_HEIGHT, this::submit);
         ViewPolicy.setPoliteLiveRegion(button);
-        LinearLayout.LayoutParams buttonParams = Ui.matchWidth();
+        LinearLayout.LayoutParams buttonParams = LayoutPolicy.matchWidthWrapParams();
         buttonParams.topMargin = DimensionPolicy.pixels(requireContext(), Ui.GROUP_GAP);
         column.addView(button, buttonParams);
         submit = button;
