@@ -145,7 +145,7 @@ public final class FeedbackPage extends DetailPage {
         column.addView(button, buttonParams);
         submit = button;
 
-        Ui.afterTextChanged(input, text -> {
+        ViewPolicy.afterTextChanged(input, text -> {
             draft = text.toString();
             if (sent) sent = false;
             refresh();

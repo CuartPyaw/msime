@@ -121,7 +121,7 @@ public final class InputDialog {
             DimensionPolicy.atLeastOnePixel(context, 1), ThemeColorPolicy.hairline(context));
         ViewPolicy.setBackground(input, field);
         Ui.setHorizontalPaddingDp(input, context, 12);
-        Ui.afterTextChanged(input, ignored -> refresh());
+        ViewPolicy.afterTextChanged(input, ignored -> refresh());
         input.setOnEditorActionListener((view, actionId, event) -> {
             int index = inputs.indexOf(input);
             if (index < inputs.size() - 1) return false;

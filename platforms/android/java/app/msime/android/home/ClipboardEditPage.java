@@ -119,7 +119,7 @@ public final class ClipboardEditPage extends DetailPage {
                 input.setText(draft.text);
                 input.setContentDescription("剪贴板记录的文字");
                 card.card().addView(input, LayoutPolicy.matchWidthWrapParams());
-                Ui.afterTextChanged(input, text -> {
+                ViewPolicy.afterTextChanged(input, text -> {
                     draft.text = text.toString();
                     refresh();
                 });

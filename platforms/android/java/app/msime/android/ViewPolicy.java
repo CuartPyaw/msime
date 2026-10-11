@@ -11,9 +11,12 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.util.TypedValue;
 import android.text.TextUtils;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.widget.Button;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import java.util.function.Consumer;
 import android.widget.PopupWindow;
 
 /** Shared view configuration for host controls whose widget defaults need resetting. */
@@ -185,6 +188,17 @@ public final class ViewPolicy {
     /** 创建像素尺寸的线性布局正方形参数。 */
     public static LinearLayout.LayoutParams newSquareParamsPx(int size) {
         return new LinearLayout.LayoutParams(size, size);
+    }
+
+    /** Invoke a listener only after text changes, without requiring unused watcher callbacks. */
+    public static void afterTextChanged(TextView view, Consumer<Editable> listener) {
+        view.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {}
+
+            @Override public void afterTextChanged(Editable text) { listener.accept(text); }
+        });
     }
 
     /** Bind a caller-supplied action to a view without changing any other interaction policy. */

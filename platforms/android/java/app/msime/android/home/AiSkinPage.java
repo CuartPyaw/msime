@@ -428,7 +428,7 @@ public final class AiSkinPage extends DetailPage {
             bindEnabled(input, again);
             ViewPolicy.setEnabledWithAlpha(use, !s.busy && !saving, 0.38f);
         }
-        Ui.afterTextChanged(input, text -> {
+        ViewPolicy.afterTextChanged(input, text -> {
             s.prompt = text.toString();
             styleChips(context, chipViews);
         });
@@ -443,7 +443,7 @@ public final class AiSkinPage extends DetailPage {
             ViewPolicy.setEnabledWithAlpha(button, enabled, 0.38f);
         };
         update.run();
-        Ui.afterTextChanged(input, ignored -> update.run());
+        ViewPolicy.afterTextChanged(input, ignored -> update.run());
     }
 
     /** 和描述相同的 chip 填强调色，其余是 accentSoft 底。 */
