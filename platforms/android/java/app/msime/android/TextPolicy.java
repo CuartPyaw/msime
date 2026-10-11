@@ -221,7 +221,6 @@ public final class TextPolicy {
         return new String(Character.toChars(Character.codePointAt(value, 0)));
     }
 
-    /** Return the number of Unicode code points in text, or zero for null. */
     /** Trim a name and return its first Unicode code point, or a fallback when empty. */
     public static String trimmedInitial(CharSequence value, String fallback) {
         return initial(trimmed(value == null ? null : value.toString()), fallback);
