@@ -45,7 +45,7 @@ final class SheetOptionView {
         if (selected) {
             ImageView check = ImageViewPolicy.decorative(context, R.drawable.ms_w1_a2_check,
                 ThemeColorPolicy.accent(context));
-            FrameLayout.LayoutParams checkParams = Ui.squareFrameParams(context, Ui.SHEET_CHECK_SIZE);
+            FrameLayout.LayoutParams checkParams = LayoutPolicy.squareFrameParams(context, Ui.SHEET_CHECK_SIZE);
             checkParams.gravity = Gravity.CENTER_VERTICAL | Gravity.END;
             checkParams.setMarginEnd(DimensionPolicy.pixels(context, Ui.SHEET_CHECK_END_MARGIN));
             row.addView(check, checkParams);

@@ -122,7 +122,7 @@ public final class FeedbackPage extends DetailPage {
         Ui.setPaddingDp(add, requireContext(), 16, 12, 16, 14);
         add.setContentDescription("添加截图，最多 " + FeedbackApi.MAX_SCREENSHOTS + " 张");
         ImageView icon = ImageViewPolicy.decorative(context, R.drawable.ms_w4_me2_image, ThemeColorPolicy.accent(context));
-        add.addView(icon, Ui.squareParams(requireContext(), 20));
+        add.addView(icon, LayoutPolicy.squareParams(requireContext(), 20));
         TextView label = Ui.styledLabel(context, "添加截图", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
         LinearLayout.LayoutParams labelParams = LayoutPolicy.wrapParams();
         labelParams.setMarginStart(DimensionPolicy.pixels(requireContext(), 10));
@@ -227,7 +227,7 @@ public final class FeedbackPage extends DetailPage {
             ViewPolicy.setBackground(image, DrawablePolicy.rounded(ThemeColorPolicy.rowBackground(context), DimensionPolicy.pixels(requireContext(), 10)));
             image.setClipToOutline(true);
             image.setContentDescription("截图 " + (index + 1));
-            frame.addView(image, Ui.squareFrameParams(requireContext(), Ui.THUMBNAIL_SIZE));
+            frame.addView(image, LayoutPolicy.squareFrameParams(requireContext(), Ui.THUMBNAIL_SIZE));
             ImageView remove = new ImageView(context);
             remove.setImageResource(R.drawable.ms_w4_me2_close);
             ImageViewPolicy.setTint(remove,
@@ -241,10 +241,10 @@ public final class FeedbackPage extends DetailPage {
                 renderThumbnails();
                 refresh();
             });
-            FrameLayout.LayoutParams removeParams = Ui.squareFrameParams(requireContext(), 20);
+            FrameLayout.LayoutParams removeParams = LayoutPolicy.squareFrameParams(requireContext(), 20);
             removeParams.gravity = Gravity.TOP | Gravity.END;
             frame.addView(remove, removeParams);
-            LinearLayout.LayoutParams params = Ui.squareParams(requireContext(), Ui.THUMBNAIL_SIZE);
+            LinearLayout.LayoutParams params = LayoutPolicy.squareParams(requireContext(), Ui.THUMBNAIL_SIZE);
             params.setMarginEnd(DimensionPolicy.pixels(requireContext(), 8));
             strip.addView(frame, params);
         }

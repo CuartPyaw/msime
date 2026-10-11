@@ -461,7 +461,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         ImageView glyph = ImageViewPolicy.decorative(this, icon, ThemeColorPolicy.accent(this));
         glyph.setScaleType(ImageView.ScaleType.FIT_START);
         Ui.hideFromAccessibility(glyph);
-        column.addView(glyph, Ui.squareParams(this, 36));
+        column.addView(glyph, LayoutPolicy.squareParams(this, 36));
 
         TextView kick = Ui.label(this, kicker, 13, ThemeColorPolicy.accent(this));
         ViewPolicy.setTypefaceStyle(kick, 600);
@@ -502,7 +502,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         // 字形画在固定 dp 的圆里，跟圆一起按 dp 定大小；按 sp 时系统字体一调大，对勾就被圆的边界切掉。
         ViewPolicy.setTextSizeDp(mark, 13);
         StatusMarkPolicy.apply(mark, this, done);
-        row.addView(mark, Ui.squareParams(this, 24));
+        row.addView(mark, LayoutPolicy.squareParams(this, 24));
 
         TextView text = Ui.label(this, label, 16, ThemeColorPolicy.text(this));
         LinearLayout.LayoutParams textParams = LayoutPolicy.weightedWrapParams(1f);
@@ -546,7 +546,7 @@ public final class OnboardingActivity extends AppCompatActivity {
             selected ? DimensionPolicy.pixels(this, 6) : DimensionPolicy.atLeastOnePixel(this, 1.5f),
             selected ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.subText(this));
         ViewPolicy.setBackground(radio, dot);
-        LinearLayout.LayoutParams radioParams = Ui.squareParams(this, 22);
+        LinearLayout.LayoutParams radioParams = LayoutPolicy.squareParams(this, 22);
         radioParams.setMarginStart(DimensionPolicy.pixels(this, 12));
         card.addView(radio, radioParams);
 
@@ -567,7 +567,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         Ui.setSymmetricPaddingDp(badge, this, 7, 7);
         ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(this), DimensionPolicy.pixels(this, 9)));
         Ui.hideFromAccessibility(badge);
-        row.addView(badge, Ui.squareParams(this, 32));
+        row.addView(badge, LayoutPolicy.squareParams(this, 32));
         TextView text = Ui.label(this, label, 15, ThemeColorPolicy.text(this));
         LinearLayout.LayoutParams textParams = LayoutPolicy.weightedWrapParams(1f);
         textParams.setMarginStart(DimensionPolicy.pixels(this, 12));

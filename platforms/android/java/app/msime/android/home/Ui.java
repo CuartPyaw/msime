@@ -275,23 +275,6 @@ public final class Ui {
         return params;
     }
 
-    /** Layout parameters for a square child with a size expressed in dp. */
-    public static LinearLayout.LayoutParams squareParams(Context context, float sizeDp) {
-        int size = DimensionPolicy.pixels(context, sizeDp);
-        return new LinearLayout.LayoutParams(size, size);
-    }
-
-    /** Frame layout parameters for a square child with a size expressed in dp. */
-    public static FrameLayout.LayoutParams squareFrameParams(Context context, float sizeDp) {
-        int size = DimensionPolicy.pixels(context, sizeDp);
-        return new FrameLayout.LayoutParams(size, size);
-    }
-
-    /** Frame layout parameters for a pixel-sized square with explicit gravity. */
-    public static FrameLayout.LayoutParams squareFrameParamsPx(int size, int gravity) {
-        return new FrameLayout.LayoutParams(size, size, gravity);
-    }
-
     /** Create a pill-shaped press ripple with a fully rounded mask. */
     public static Drawable pillRipple(Context context, @ColorInt int fill) {
         return rippleOn(context, fill, 9999f);

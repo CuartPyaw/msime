@@ -211,7 +211,7 @@ public final class AboutPage extends DetailPage {
         ViewPolicy.setBackground(disc, DrawablePolicy.pill(ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorTertiaryContainer)));
         ImageView mark = ImageViewPolicy.decorative(context, R.drawable.splash_mark);
         int markSize = DimensionPolicy.pixels(context, 60);
-        disc.addView(mark, Ui.squareFrameParamsPx(markSize, Gravity.CENTER));
+        disc.addView(mark, LayoutPolicy.squareFrameParamsPx(markSize, Gravity.CENTER));
         int discSize = DimensionPolicy.pixels(context, 116);
         header.addView(disc, ViewPolicy.newSquareParamsPx(discSize));
 

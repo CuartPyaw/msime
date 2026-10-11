@@ -124,7 +124,7 @@ final class LoginSheet {
         ImageView close = ImageViewPolicy.iconButton(activity,
             new PathIcon(24, new String[] {CLOSE_PATH}, new int[] {ThemeColorPolicy.text(activity)}),
             ThemeColorPolicy.text(activity), "关闭", Ui.BACK_BUTTON_SIZE, dialog::cancel);
-        header.addView(close, Ui.squareParams(activity, 40));
+        header.addView(close, LayoutPolicy.squareParams(activity, 40));
         root.addView(header);
 
         TextView subtitle = Ui.styledLabel(activity, "在手机、平板和电脑之间同步词库、皮肤和云剪贴板",
@@ -314,7 +314,7 @@ final class LoginSheet {
         ViewPolicy.setBackground(button, DrawablePolicy.ripple(pressed, face, mask));
         if (icon != null) {
             ImageView glyph = ImageViewPolicy.decorative(activity, icon);
-            LinearLayout.LayoutParams params = Ui.squareParams(activity, 20);
+            LinearLayout.LayoutParams params = LayoutPolicy.squareParams(activity, 20);
             params.setMarginEnd(DimensionPolicy.pixels(activity, 8));
             button.addView(glyph, params);
         }
