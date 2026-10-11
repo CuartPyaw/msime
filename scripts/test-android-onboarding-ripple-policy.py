@@ -18,8 +18,8 @@ def main() -> int:
         errors.append(f"{UI}: 不应保留主题按压反馈转发")
 
     onboarding = ONBOARDING.read_text(encoding="utf-8")
-    if "ViewPolicy.setBackground(button, DrawablePolicy.ripple(this));" not in onboarding:
-        errors.append(f"{ONBOARDING}: 操作按钮未复用 Ui.ripple")
+    if "ViewPolicy.setBackground(button, ViewPolicy.ripple(this));" not in onboarding:
+        errors.append(f"{ONBOARDING}: 操作按钮未复用 ViewPolicy.ripple")
 
     for path in HOME.glob("*.java"):
         source = path.read_text(encoding="utf-8")

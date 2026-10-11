@@ -33,14 +33,14 @@ public final class SearchPill extends LinearLayout {
         setOrientation(HORIZONTAL);
         ViewPolicy.setCenteredVertically(this);
         Ui.setMinimumHeightDp(this, context, Ui.SEARCH_HEIGHT);
-        Ui.setHorizontalPaddingDp(this, context, 18);
+        ViewPolicy.setHorizontalPaddingDp(context, this, 18);
         setBackground(DrawablePolicy.pill(ThemeColorPolicy.card(context)));
 
         ImageView glyph = ImageViewPolicy.decorative(context, R.drawable.ic_search, ThemeColorPolicy.subText(context));
         int icon = DimensionPolicy.pixels(context, 16);
         addView(glyph, new LayoutParams(icon, icon));
 
-        field = Ui.styledInput(context, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
+        field = ViewPolicy.styledInput(context, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
         ViewPolicy.clearBackground(field);
         ViewPolicy.clearPadding(field);
         ViewPolicy.setSingleLine(field);
@@ -68,6 +68,6 @@ public final class SearchPill extends LinearLayout {
 
     /** 每次输入变化回调去掉首尾空白后的查询。 */
     public void setOnQueryChange(Consumer<String> listener) {
-        Ui.afterTextChanged(field, ignored -> listener.accept(query()));
+        ViewPolicy.afterTextChanged(field, ignored -> listener.accept(query()));
     }
 }

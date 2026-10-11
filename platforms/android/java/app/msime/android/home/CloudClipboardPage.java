@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ImageViewPolicy;
@@ -131,12 +133,12 @@ public final class CloudClipboardPage extends DetailPage {
         GroupCard.Row toggle = settings.toggle("云剪贴板", DESCRIPTION, current != null && current.enabled(), this::setEnabled);
         toggle.setEnabled(current != null);
 
-        LinearLayout retention = Ui.row(context);
+        LinearLayout retention = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(retention);
-        Ui.setRowMinimumHeight(retention, context);
-        Ui.setRowPadding(retention, context);
-        TextView label = Ui.styledLabel(context, "保留时长", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
-        retention.addView(label, Ui.weightWrap(1f));
+        ViewPolicy.setRowMinimumHeight(context, retention);
+        ViewPolicy.setRowPadding(context, retention);
+        TextView label = ViewPolicy.styledLabel(context, "保留时长", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
+        retention.addView(label, LayoutPolicy.weightedWrapParams(1f));
         SegmentedControl segments = new SegmentedControl(context);
         int selected = current == null ? -1 : CloudClipboardApi.RETENTION_DAYS.indexOf(current.retentionDays());
         segments.setOptions(RETENTION_LABELS, selected);
@@ -153,33 +155,34 @@ public final class CloudClipboardPage extends DetailPage {
 
         if (current == null) return;
 
-        LinearLayout header = Ui.row(context);
+        LinearLayout header = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(header);
-        Ui.setPaddingDp(header, context, Ui.GROUP_TITLE_INSET, 0,
+        ViewPolicy.setPaddingDp(context, header, Ui.GROUP_TITLE_INSET, 0,
             Ui.GROUP_TITLE_INSET, 2);
-        TextView recent = Ui.groupHeading(context, "最近");
-        header.addView(recent, Ui.weightWrap(1f));
+        TextView recent = ViewPolicy.headingLabel(context, "最近", Ui.TEXT_GROUP_TITLE, 500,
+            ThemeColorPolicy.accent(context));
+        header.addView(recent, LayoutPolicy.weightedWrapParams(1f));
         if (!current.items().isEmpty()) {
-            TextView clear = Ui.styledLabel(context, "清空", Ui.TEXT_GROUP_TITLE, 500, ThemeColorPolicy.accent(context));
-        Ui.setPaddingDp(clear, context, 8, 4, 0, 4);
+            TextView clear = ViewPolicy.styledLabel(context, "清空", Ui.TEXT_GROUP_TITLE, 500, ThemeColorPolicy.accent(context));
+        ViewPolicy.setPaddingDp(context, clear, 8, 4, 0, 4);
             ViewPolicy.makeClickable(clear, context, this::confirmClear);
             header.addView(clear);
         }
-        LinearLayout.LayoutParams headerParams = Ui.matchWidth();
+        LinearLayout.LayoutParams headerParams = LayoutPolicy.matchWidthWrapParams();
         headerParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
         target.addView(header, headerParams);
 
         GroupCard list = GroupCard.add(target, null).withDividers(Ui.ROW_PADDING_H);
         ((LinearLayout.LayoutParams) list.view().getLayoutParams()).topMargin = DimensionPolicy.pixels(context, 2);
         if (current.items().isEmpty()) {
-            LinearLayout empty = Ui.column(context);
+            LinearLayout empty = LayoutPolicy.column(context);
             ViewPolicy.setCenteredHorizontally(empty);
-            Ui.setSymmetricPaddingDp(empty, context, 16, 32);
-            TextView title = Ui.styledLabel(context, "还没有同步内容", Ui.TEXT_ROW_TITLE, 500, ThemeColorPolicy.text(context));
+            ViewPolicy.setSymmetricPaddingDp(context, empty, 16, 32);
+            TextView title = ViewPolicy.styledLabel(context, "还没有同步内容", Ui.TEXT_ROW_TITLE, 500, ThemeColorPolicy.text(context));
             empty.addView(title);
-            TextView hint = Ui.centeredLabel(context, "在任一设备上复制文字，这里就会出现",
+            TextView hint = ViewPolicy.centeredLabel(context, "在任一设备上复制文字，这里就会出现",
                 Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams hintParams = Ui.wrap();
+            LinearLayout.LayoutParams hintParams = LayoutPolicy.wrapParams();
             hintParams.topMargin = DimensionPolicy.pixels(context, 4);
             empty.addView(hint, hintParams);
             list.addView(empty);
@@ -189,19 +192,19 @@ public final class CloudClipboardPage extends DetailPage {
     }
 
     private View itemRow(Context context, CloudClipboardApi.Item item) {
-        LinearLayout row = Ui.row(context);
+        LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
-        Ui.setPaddingDp(row, context, 16, 12, 8, 12);
+        ViewPolicy.setPaddingDp(context, row, 16, 12, 8, 12);
 
-        LinearLayout texts = Ui.column(context);
-        TextView text = Ui.styledLabel(context, item.text(), 15, 400, ThemeColorPolicy.text(context));
+        LinearLayout texts = LayoutPolicy.column(context);
+        TextView text = ViewPolicy.styledLabel(context, item.text(), 15, 400, ThemeColorPolicy.text(context));
         ViewPolicy.setMaxLinesEllipsized(text, 3);
         texts.addView(text);
-        TextView meta = Ui.styledLabel(context, meta(item), 12, 400, ThemeColorPolicy.subText(context));
-        LinearLayout.LayoutParams metaParams = Ui.wrap();
+        TextView meta = ViewPolicy.styledLabel(context, meta(item), 12, 400, ThemeColorPolicy.subText(context));
+        LinearLayout.LayoutParams metaParams = LayoutPolicy.wrapParams();
         metaParams.topMargin = DimensionPolicy.pixels(context, 4);
         texts.addView(meta, metaParams);
-        row.addView(texts, Ui.weightWrap(1f));
+        row.addView(texts, LayoutPolicy.weightedWrapParams(1f));
 
         row.addView(ImageViewPolicy.iconButton(context, R.drawable.ic_ms_keep,
             item.pinned() ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.subText(context),

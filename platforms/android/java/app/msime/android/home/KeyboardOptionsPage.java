@@ -250,19 +250,19 @@ public final class KeyboardOptionsPage extends DetailPage {
     /** 工具栏预览：用当前皮肤的底色和图标色，按开关列出会出现的按钮；隐藏时说明只剩候选条。 */
     private static View toolbarPreview(Context context, JSONObject toolbar, AndroidLocalSettings.Snapshot settings,
                                        KeyboardSkin skin) {
-        LinearLayout strip = Ui.row(context);
+        LinearLayout strip = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(strip);
         int pad = DimensionPolicy.pixels(context, 12);
-        Ui.setSymmetricPaddingPx(strip, pad);
-        LinearLayout plate = Ui.row(context);
+        ViewPolicy.setSymmetricPadding(strip, pad);
+        LinearLayout plate = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(plate);
-        Ui.setHorizontalPaddingDp(plate, context, 10);
+        ViewPolicy.setHorizontalPaddingDp(context, plate, 10);
         ViewPolicy.setBackground(plate, DrawablePolicy.rounded(ColorPolicy.parse(skin.background(), ThemeColorPolicy.page(context)), DimensionPolicy.pixels(context, 12)));
         ViewPolicy.setImportantForAccessibility(plate,
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         int icon = ColorPolicy.parse(skin.toolbarIcon(), ThemeColorPolicy.subText(context));
         if (settings.bool(AndroidLocalSettings.TOOLBAR_HIDDEN)) {
-            TextView note = Ui.styledLabel(context, "工具栏已隐藏，只显示候选条", 13, 400, icon);
+            TextView note = ViewPolicy.styledLabel(context, "工具栏已隐藏，只显示候选条", 13, 400, icon);
             plate.addView(note);
         } else {
             addChip(context, plate, "水杉", ColorPolicy.parse(skin.accentText(), ThemeColorPolicy.accent(context)));
@@ -270,15 +270,15 @@ public final class KeyboardOptionsPage extends DetailPage {
                 if (toolbarButton(toolbar, settings, button[0])) addChip(context, plate, button[1], icon);
             }
         }
-        strip.addView(plate, Ui.matchWidthHeight(context, 44));
+        strip.addView(plate, LayoutPolicy.matchWidthHeightDp(context, 44));
         strip.setContentDescription("工具栏预览");
         return strip;
     }
 
     private static void addChip(Context context, LinearLayout plate, String label, int colour) {
-        TextView chip = Ui.styledLabel(context, label, 12, 500, colour);
+        TextView chip = ViewPolicy.styledLabel(context, label, 12, 500, colour);
         ViewPolicy.setSingleLine(chip);
-        LinearLayout.LayoutParams params = Ui.wrap();
+        LinearLayout.LayoutParams params = LayoutPolicy.wrapParams();
         params.setMarginEnd(DimensionPolicy.pixels(context, 12));
         plate.addView(chip, params);
     }

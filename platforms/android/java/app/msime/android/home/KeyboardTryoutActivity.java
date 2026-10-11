@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.DimensionPolicy;
 
@@ -138,7 +140,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
             else ViewPolicy.hide(dismiss);
         });
 
-        Ui.afterTextChanged(field, text -> {
+        ViewPolicy.afterTextChanged(field, text -> {
             if (text.length() > DRAFT_LIMIT) text.delete(DRAFT_LIMIT, text.length());
             // 请求进行中按钮是「停止」，继续编辑或清空草稿都不能禁用取消操作。默认就能和 AI 对话：有字就能发，目录还没加载完时发出的那句等目录到了再发。
             ViewPolicy.setEnabled(sendAi, sending || text.length() > 0);
@@ -411,7 +413,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
     private TextView appendBubble(String text, boolean mine) {
         LinearLayout chat = findViewById(R.id.tryout_chat);
         while (chat.getChildCount() >= BUBBLE_LIMIT) chat.removeViewAt(0);
-        TextView bubble = Ui.styledLabel(this, text, 15, 400,
+        TextView bubble = ViewPolicy.styledLabel(this, text, 15, 400,
             mine ? ThemeColorPolicy.onAccent(this) : ThemeColorPolicy.text(this));
         // 先设可选再放文字：setTextIsSelectable 会换成 ArrowKeyMovementMethod，放在后面就把 Markwon 装好的 LinkMovementMethod 冲掉，回复里的链接点不动。AI 的气泡再显式装上链接的点按处理，之后流式更新的 setMarkdown 会沿用它。
         bubble.setTextIsSelectable(true);
@@ -419,9 +421,9 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
         if (!mine) bubble.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
         ViewPolicy.setLineSpacing(bubble, DimensionPolicy.pixels(this, 3), 1f);
         ViewPolicy.setBackground(bubble, DrawablePolicy.rounded(mine ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 18)));
-        Ui.setSymmetricPaddingDp(bubble, this, 14, 10);
+        ViewPolicy.setSymmetricPaddingDp(this, bubble, 14, 10);
         bubble.setMaxWidth(Math.round(DimensionPolicy.screenWidthPixels(this) * 0.8f));
-        LinearLayout.LayoutParams params = Ui.wrap();
+        LinearLayout.LayoutParams params = LayoutPolicy.wrapParams();
         params.gravity = mine ? Gravity.END : Gravity.START;
         if (chat.getChildCount() > 0) params.topMargin = DimensionPolicy.pixels(this, 10);
         chat.addView(bubble, params);

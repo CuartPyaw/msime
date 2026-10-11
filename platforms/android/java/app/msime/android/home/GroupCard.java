@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ImageViewPolicy;
@@ -37,23 +39,24 @@ public final class GroupCard {
 
     private GroupCard(ViewGroup parent, @Nullable CharSequence title) {
         context = parent.getContext();
-        group = Ui.column(context);
-        LinearLayout.LayoutParams groupParams = Ui.matchWidth();
+        group = LayoutPolicy.column(context);
+        LinearLayout.LayoutParams groupParams = LayoutPolicy.matchWidthWrapParams();
         if (parent.getChildCount() > 0) groupParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
 
         if (title != null && title.length() > 0) {
-            TextView heading = Ui.groupHeading(context, title);
-            Ui.setPaddingDp(heading, context, Ui.GROUP_TITLE_INSET, 0,
+            TextView heading = ViewPolicy.headingLabel(context, title, Ui.TEXT_GROUP_TITLE, 500,
+                ThemeColorPolicy.accent(context));
+            ViewPolicy.setPaddingDp(context, heading, Ui.GROUP_TITLE_INSET, 0,
                 Ui.GROUP_TITLE_INSET, 2);
-            LinearLayout.LayoutParams params = Ui.matchWidth();
+            LinearLayout.LayoutParams params = LayoutPolicy.matchWidthWrapParams();
             params.bottomMargin = DimensionPolicy.pixels(context, 2);
             group.addView(heading, params);
         }
 
-        card = Ui.verticalCard(context, Ui.GROUP_RADIUS);
+        card = LayoutPolicy.roundedColumn(context, ThemeColorPolicy.card(context), Ui.GROUP_RADIUS);
         // 行的按压波纹裁在卡片圆角里，首尾两行不会露出直角。
         card.setClipToOutline(true);
-        group.addView(card, Ui.matchWidth());
+        group.addView(card, LayoutPolicy.matchWidthWrapParams());
         parent.addView(group, groupParams);
     }
 
@@ -80,7 +83,7 @@ public final class GroupCard {
         Row row = new Row(this, title, subtitle, false);
         row.value = trailingValue(row, value);
         ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
-        LinearLayout.LayoutParams params = Ui.squareParams(context, Ui.CHEVRON_SIZE);
+        LinearLayout.LayoutParams params = LayoutPolicy.squareParams(context, Ui.CHEVRON_SIZE);
         params.setMarginStart(DimensionPolicy.pixels(context, 6));
         row.view.addView(chevron, params);
         row.setAction(action);
@@ -101,8 +104,8 @@ public final class GroupCard {
         MsSwitch control = new MsSwitch(context);
         control.setChecked(checked);
         ViewPolicy.setInteractive(control, false);
-        Ui.hideFromAccessibility(control);
-        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
+        ViewPolicy.hideFromAccessibility(control);
+        LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         row.view.addView(control, params);
         row.toggle = control;
         ViewPolicy.bindClick(row.view, () -> {
@@ -140,10 +143,10 @@ public final class GroupCard {
         sliderParams.setMarginStart(DimensionPolicy.pixels(context, Ui.ROW_GAP));
         row.view.addView(control, sliderParams);
 
-        TextView text = Ui.styledLabel(context, label.apply(control.value()), 13, 400, ThemeColorPolicy.subText(context));
+        TextView text = ViewPolicy.styledLabel(context, label.apply(control.value()), 13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setEndCenteredVertically(text);
         ViewPolicy.setSingleLine(text);
-            Ui.hideFromAccessibility(text);
+            ViewPolicy.hideFromAccessibility(text);
         row.view.addView(text, new LinearLayout.LayoutParams(DimensionPolicy.pixels(context, Ui.SLIDER_LABEL_WIDTH),
             ViewGroup.LayoutParams.WRAP_CONTENT));
         control.setOnValueChange(current -> {
@@ -162,7 +165,7 @@ public final class GroupCard {
     public Row button(CharSequence title, @Nullable CharSequence subtitle, CharSequence label, Runnable action) {
         Row row = new Row(this, title, subtitle, false);
         TextView button = KeyboardSheets.tonalButton(context, label, label + "，" + title, 500, action);
-        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
+        LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         row.view.addView(button, params);
         row.button = button;
         return add(row);
@@ -170,46 +173,46 @@ public final class GroupCard {
 
     /** 卡片里的一段说明文字，14sp 次要文字色。 */
     public TextView note(CharSequence text) {
-        TextView note = Ui.styledLabel(context, text, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
-        Ui.setSymmetricPaddingDp(note, context, Ui.ROW_PADDING_H, 12);
+        TextView note = ViewPolicy.styledLabel(context, text, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
+        ViewPolicy.setSymmetricPaddingDp(context, note, Ui.ROW_PADDING_H, 12);
         addDivider();
-        card.addView(note, Ui.matchWidth());
+        card.addView(note, LayoutPolicy.matchWidthWrapParams());
         return note;
     }
 
     /** 卡片下方的脚注，13sp 次要文字色，与组标题同样缩进。 */
     public TextView footer(CharSequence text) {
-        TextView note = Ui.styledLabel(context, text, 13, 400, ThemeColorPolicy.subText(context));
-        Ui.setPaddingDp(note, context, Ui.GROUP_TITLE_INSET, 8,
+        TextView note = ViewPolicy.styledLabel(context, text, 13, 400, ThemeColorPolicy.subText(context));
+        ViewPolicy.setPaddingDp(context, note, Ui.GROUP_TITLE_INSET, 8,
             Ui.GROUP_TITLE_INSET, 0);
-        group.addView(note, Ui.matchWidth());
+        group.addView(note, LayoutPolicy.matchWidthWrapParams());
         return note;
     }
 
     /** 放一个自定义的行（例如语言卡的行、词条行），按需要在它前面画分隔线。 */
     public <T extends View> T addView(T row) {
         addDivider();
-        card.addView(row, Ui.matchWidth());
+        card.addView(row, LayoutPolicy.matchWidthWrapParams());
         return row;
     }
 
     private Row add(Row row) {
         addDivider();
-        card.addView(row.view, Ui.matchWidth());
+        card.addView(row.view, LayoutPolicy.matchWidthWrapParams());
         return row;
     }
 
     private void addDivider() {
         if (dividerInset < 0 || card.getChildCount() == 0) return;
-        View rule = Ui.divider(context, true);
+        View rule = LayoutPolicy.divider(context, ThemeColorPolicy.hairline(context), true);
         LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) rule.getLayoutParams();
         params.setMarginStart(DimensionPolicy.pixels(context, dividerInset));
         card.addView(rule, params);
     }
 
     private TextView trailingValue(Row row, @Nullable CharSequence value) {
-        TextView text = Ui.trailingValue(context, "", Ui.TEXT_ROW_TITLE, ThemeColorPolicy.subText(context));
-        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
+        TextView text = ViewPolicy.trailingValue(context, "", Ui.TEXT_ROW_TITLE, ThemeColorPolicy.subText(context));
+        LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         row.view.addView(text, params);
         setText(text, value);
         return text;
@@ -238,22 +241,22 @@ public final class GroupCard {
             } : new LinearLayout(context);
             view.setOrientation(LinearLayout.HORIZONTAL);
             ViewPolicy.setCenteredVertically(view);
-            Ui.setRowMinimumHeight(view, owner.context);
-            Ui.setRowPadding(view, owner.context);
+            ViewPolicy.setRowMinimumHeight(owner.context, view);
+            ViewPolicy.setRowPadding(owner.context, view);
 
-            LinearLayout texts = Ui.column(context);
-            title = Ui.styledLabel(context, titleText, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
+            LinearLayout texts = LayoutPolicy.column(context);
+            title = ViewPolicy.styledLabel(context, titleText, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
             texts.addView(title);
-            subtitle = Ui.styledLabel(context, subtitleText, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams subtitleParams = Ui.wrap();
+            subtitle = ViewPolicy.styledLabel(context, subtitleText, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
+            LinearLayout.LayoutParams subtitleParams = LayoutPolicy.wrapParams();
             subtitleParams.topMargin = DimensionPolicy.pixels(owner.context, 1);
             texts.addView(subtitle, subtitleParams);
             setText(subtitle, subtitleText);
-            view.addView(texts, Ui.weightWrap(1f));
+            view.addView(texts, LayoutPolicy.weightedWrapParams(1f));
         }
 
         private void setAction(@Nullable Runnable action) {
-            ViewPolicy.setBackground(view, action == null ? null : DrawablePolicy.ripple(view.getContext()));
+            ViewPolicy.setBackground(view, action == null ? null : ViewPolicy.ripple(view.getContext()));
             ViewPolicy.setInteractive(view, action != null);
             ViewPolicy.bindOptionalClick(view, action);
             ViewPolicy.setEnabledWithAlpha(view, action != null, 0.38f);

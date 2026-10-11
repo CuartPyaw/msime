@@ -29,13 +29,13 @@ public final class OptionSheet {
     public OptionSheet(Context context, CharSequence title, @Nullable CharSequence subtitle) {
         this.context = context;
         dialog = new BottomSheetDialog(context);
-        LinearLayout root = Ui.column(context);
-        root.addView(Ui.sheetDragHandle(context));
+        LinearLayout root = LayoutPolicy.column(context);
+        root.addView(LayoutPolicy.sheetDragHandle(context));
 
         LinearLayout header = SheetHeaderView.create(context, title, subtitle);
         root.addView(header);
 
-        options = Ui.column(context);
+        options = LayoutPolicy.column(context);
         NestedScrollView scroll = new NestedScrollView(context);
         scroll.addView(options, new ViewGroup.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT));
@@ -43,7 +43,7 @@ public final class OptionSheet {
         root.addView(scroll, LayoutPolicy.weightedWidthParams(1f));
 
         // 「取消」与选项之间一条页面底色的带子，代替设计里分开的两块卡片。
-        root.addView(Ui.sheetSeparator(context));
+        root.addView(LayoutPolicy.colorBand(context, ThemeColorPolicy.page(context), 8));
         root.addView(SheetOptionView.create(context, "取消", false, false, ThemeColorPolicy.accent(context), true,
             dialog::cancel));
         dialog.setContentView(root);
@@ -83,7 +83,7 @@ public final class OptionSheet {
 
     private void addOption(View view) {
         if (count > 0) {
-            options.addView(Ui.divider(context, true));
+            options.addView(LayoutPolicy.divider(context, ThemeColorPolicy.hairline(context), true));
         }
         options.addView(view);
         count++;

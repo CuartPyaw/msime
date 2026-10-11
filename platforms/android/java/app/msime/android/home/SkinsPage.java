@@ -120,23 +120,23 @@ public final class SkinsPage extends ReloadingDetailPage {
         holder.setClipToOutline(false);
         Context context = target.getContext();
         for (int start = 0; start < cards.size(); start += 2) {
-            LinearLayout row = Ui.row(context);
+            LinearLayout row = LayoutPolicy.row(context);
             row.setBaselineAligned(false);
             for (int slot = 0; slot < 2; slot++) {
                 int index = start + slot;
                 View cell = index < cards.size() ? cards.get(index) : new View(context);
-                LinearLayout.LayoutParams params = Ui.weightWrap(1f);
+                LinearLayout.LayoutParams params = LayoutPolicy.weightedWrapParams(1f);
                 if (slot == 1) params.setMarginStart(DimensionPolicy.pixels(context, 12));
                 row.addView(cell, params);
             }
-            LinearLayout.LayoutParams rowParams = Ui.matchWidth();
+            LinearLayout.LayoutParams rowParams = LayoutPolicy.matchWidthWrapParams();
             if (start > 0) rowParams.topMargin = DimensionPolicy.pixels(context, 14);
             holder.addView(row, rowParams);
         }
     }
 
     private View card(Context context, Card card) {
-        LinearLayout cell = Ui.column(context);
+        LinearLayout cell = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(cell);
 
         FrameLayout tile = new FrameLayout(context);
@@ -149,16 +149,16 @@ public final class SkinsPage extends ReloadingDetailPage {
         ViewPolicy.setPadding(tile, inset, inset, inset, inset);
         SkinSwatchView swatch = new SkinSwatchView(context);
         swatch.setSkin(card.skin());
-        Ui.hideFromAccessibility(swatch);
+        ViewPolicy.hideFromAccessibility(swatch);
         tile.addView(swatch,
             LayoutPolicy.frameMatchWidthHeightPx(DimensionPolicy.pixels(context, 76)));
-        cell.addView(tile, Ui.matchWidth());
+        cell.addView(tile, LayoutPolicy.matchWidthWrapParams());
 
-        TextView name = Ui.centeredLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
+        TextView name = ViewPolicy.centeredLabel(context, card.selected() ? "✓ " + card.title() : card.title(),
             Ui.TEXT_ROW_SUBTITLE + 1, card.selected() ? 600 : 400,
             card.selected() ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.text(context));
         ViewPolicy.setSingleLineEllipsized(name);
-        LinearLayout.LayoutParams nameParams = Ui.matchWidth();
+        LinearLayout.LayoutParams nameParams = LayoutPolicy.matchWidthWrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 8);
         cell.addView(name, nameParams);
 
@@ -172,22 +172,22 @@ public final class SkinsPage extends ReloadingDetailPage {
 
     /** 虚线卡：「✦ 描述一句话生成」，名字是「AI 设计皮肤」，点了进 AI 设计页。 */
     private View aiCard(Context context) {
-        LinearLayout cell = Ui.column(context);
+        LinearLayout cell = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(cell);
-        LinearLayout tile = Ui.column(context);
+        LinearLayout tile = LayoutPolicy.column(context);
         ViewPolicy.setCentered(tile);
         GradientDrawable dashed = DrawablePolicy.outlinedDashed(ThemeColorPolicy.accentSoft(context), DimensionPolicy.pixels(context, 14),
             DimensionPolicy.atLeastOnePixel(context, 1.5f), ThemeColorPolicy.accent(context), DimensionPolicy.pixels(context, 6),
             DimensionPolicy.pixels(context, 4));
         ViewPolicy.setBackground(tile, dashed);
-        TextView spark = Ui.centeredLabel(context, "✦", 22, 400, ThemeColorPolicy.accent(context));
+        TextView spark = ViewPolicy.centeredLabel(context, "✦", 22, 400, ThemeColorPolicy.accent(context));
         tile.addView(spark);
-        TextView hint = Ui.centeredLabel(context, "描述一句话生成", 12, 400, ThemeColorPolicy.accent(context));
+        TextView hint = ViewPolicy.centeredLabel(context, "描述一句话生成", 12, 400, ThemeColorPolicy.accent(context));
         tile.addView(hint);
         cell.addView(tile, LayoutPolicy.matchWidthHeightPx(DimensionPolicy.pixels(context, 76) + DimensionPolicy.pixels(context, 6)));
-        TextView name = Ui.centeredLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
+        TextView name = ViewPolicy.centeredLabel(context, "AI 设计皮肤", Ui.TEXT_ROW_SUBTITLE + 1, 500,
             ThemeColorPolicy.accent(context));
-        LinearLayout.LayoutParams nameParams = Ui.matchWidth();
+        LinearLayout.LayoutParams nameParams = LayoutPolicy.matchWidthWrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 8);
         cell.addView(name, nameParams);
         cell.setAccessibilityDelegate(KeyboardSheets.buttonDelegate("AI 设计皮肤，描述一句话生成"));

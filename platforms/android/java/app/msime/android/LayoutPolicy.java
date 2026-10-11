@@ -6,6 +6,7 @@ import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
+import android.graphics.drawable.GradientDrawable;
 
 /** Shared Android containers and layout parameter factories. */
 public final class LayoutPolicy {
@@ -32,10 +33,60 @@ public final class LayoutPolicy {
         return new LinearLayout.LayoutParams(widthPixels, heightPixels);
     }
 
+    /** Create the full-width Material bottom-sheet drag handle when the Material AAR is present. */
+    public static View sheetDragHandle(Context context) {
+        View handle;
+        try {
+            Class<?> type = Class.forName(
+                "com.google.android.material.bottomsheet.BottomSheetDragHandleView");
+            handle = (View) type.getConstructor(Context.class).newInstance(context);
+        } catch (ReflectiveOperationException | RuntimeException unavailable) {
+            // Host policy compilation and pure JVM checks do not include the Material AAR.
+            handle = new View(context);
+        }
+        handle.setLayoutParams(matchWidthWrapParams());
+        return handle;
+    }
+
+    /** Create a vertical rounded container with a caller-supplied fill colour. */
+    public static LinearLayout roundedColumn(Context context, int color, float radiusDp) {
+        LinearLayout column = column(context);
+        GradientDrawable background = new GradientDrawable();
+        background.setShape(GradientDrawable.RECTANGLE);
+        background.setColor(color);
+        background.setCornerRadius(DimensionPolicy.pixels(context, radiusDp));
+        ViewPolicy.setBackground(column, background);
+        return column;
+    }
+
+    /** Create a full-width solid colour band with a dp height. */
+    public static View colorBand(Context context, int color, float heightDp) {
+        View view = ViewPolicy.newColorView(context, color);
+        view.setLayoutParams(matchWidthHeightDp(context, (int) heightDp));
+        return view;
+    }
+
+    /** Create a theme-coloured one-pixel divider in either orientation. */
+    public static View divider(Context context, int color, boolean horizontal) {
+        View view = ViewPolicy.newColorView(context, color);
+        int thin = DimensionPolicy.atLeastOnePixel(context, 0.5f);
+        view.setLayoutParams(horizontal
+            ? matchWidthHeightPx(thin)
+            : new LinearLayout.LayoutParams(thin, ViewGroup.LayoutParams.MATCH_PARENT));
+        return view;
+    }
+
     /** Create full-width linear layout parameters with content-sized height. */
     public static LinearLayout.LayoutParams matchWidthWrapParams() {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT,
             LinearLayout.LayoutParams.WRAP_CONTENT);
+    }
+
+    /** Create full-width content-sized parameters with a top margin expressed in dp. */
+    public static LinearLayout.LayoutParams matchWidthWrapParams(Context context, int topMarginDp) {
+        LinearLayout.LayoutParams params = matchWidthWrapParams();
+        params.topMargin = DimensionPolicy.pixels(context, topMarginDp);
+        return params;
     }
 
     /** Create linear layout parameters that fill both dimensions. */
@@ -93,6 +144,18 @@ public final class LayoutPolicy {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, heightPixels);
     }
 
+    /** Create full-width parameters with a height expressed in dp. */
+    public static LinearLayout.LayoutParams matchWidthHeightDp(Context context, int heightDp) {
+        return matchWidthHeightPx(DimensionPolicy.pixels(context, heightDp));
+    }
+
+    /** Create wrap-content parameters with a standard start margin expressed in dp. */
+    public static LinearLayout.LayoutParams rowGapParams(Context context, float gapDp) {
+        LinearLayout.LayoutParams params = wrapParams();
+        params.setMarginStart(DimensionPolicy.pixels(context, gapDp));
+        return params;
+    }
+
     /** Create linear layout parameters with content-sized width and parent-sized height. */
     public static LinearLayout.LayoutParams wrapMatchParentParams() {
         return new LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,
@@ -116,9 +179,26 @@ public final class LayoutPolicy {
         return new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, heightPixels);
     }
 
+    /** Create linear layout parameters for a square child sized in dp. */
+    public static LinearLayout.LayoutParams squareParams(Context context, float sizeDp) {
+        int size = DimensionPolicy.pixels(context, sizeDp);
+        return new LinearLayout.LayoutParams(size, size);
+    }
+
+    /** Create frame layout parameters for a square child sized in dp. */
+    public static FrameLayout.LayoutParams squareFrameParams(Context context, float sizeDp) {
+        int size = DimensionPolicy.pixels(context, sizeDp);
+        return squareFrameParamsPx(size);
+    }
+
     /** Create frame layout parameters for a pixel-sized square. */
     public static FrameLayout.LayoutParams squareFrameParamsPx(int size) {
         return new FrameLayout.LayoutParams(size, size);
+    }
+
+    /** Create frame layout parameters for a pixel-sized square with explicit gravity. */
+    public static FrameLayout.LayoutParams squareFrameParamsPx(int size, int gravity) {
+        return new FrameLayout.LayoutParams(size, size, gravity);
     }
 
     /** Create frame layout parameters from already pixel-sized dimensions. */

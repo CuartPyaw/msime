@@ -405,7 +405,9 @@ pub struct PreferencesChange {
     pub wubi_profile: Option<WubiVersion>,
     pub wubi_mixed_pinyin: Option<bool>,
     pub wubi_code_hint: Option<bool>,
-    pub shuangpin_keymap_hint: Option<bool>,
+    /// `null` clears the shared choice so macOS can again consult its legacy host preference.
+    #[serde(default, deserialize_with = "present")]
+    pub shuangpin_keymap_hint: Option<Option<bool>>,
     pub wubi_auto_commit_unique: Option<bool>,
     /// Turn on to look into a problem the user reports, and off again once it is understood.
     pub diagnostic_log_server: Option<bool>,
@@ -524,7 +526,7 @@ impl PreferencesChange {
             preferences.wubi_code_hint = value;
         }
         if let Some(value) = self.shuangpin_keymap_hint {
-            preferences.shuangpin_keymap_hint = Some(value);
+            preferences.shuangpin_keymap_hint = value;
         }
         if let Some(value) = self.wubi_auto_commit_unique {
             preferences.wubi_auto_commit_unique = value;
@@ -1092,14 +1094,25 @@ mod tests {
             2
         );
 
-        let cleared: PreferencesChange = serde_json::from_value(json!({
+        let untouched: PreferencesChange = serde_json::from_value(json!({
             "expected_revision": updated.revision,
             "app_input_mode_rules": {},
         }))
         .unwrap();
+        assert_eq!(untouched.shuangpin_keymap_hint, None);
+        let untouched = update(directory.path(), &options, Edition::full(), &untouched).unwrap();
+        assert_eq!(untouched.shuangpin_keymap_hint, Some(true));
+
+        let cleared: PreferencesChange = serde_json::from_value(json!({
+            "expected_revision": untouched.revision,
+            "shuangpin_keymap_hint": null,
+            "app_input_mode_rules": {},
+        }))
+        .unwrap();
+        assert_eq!(cleared.shuangpin_keymap_hint, Some(None));
         let cleared = update(directory.path(), &options, Edition::full(), &cleared).unwrap();
         assert!(cleared.app_input_mode_rules.is_empty());
-        assert_eq!(cleared.shuangpin_keymap_hint, Some(true));
+        assert_eq!(cleared.shuangpin_keymap_hint, None);
     }
 
     #[test]

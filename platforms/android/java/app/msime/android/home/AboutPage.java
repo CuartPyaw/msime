@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ImageViewPolicy;
@@ -154,10 +156,10 @@ public final class AboutPage extends DetailPage {
             links.nav("在管理界面中查看", "更新日志、致谢与更多信息", null, this::openTauriAbout);
         }
 
-        TextView footer = Ui.styledLabel(context, "© 2026 Metasequoia · 输入内容默认只在本机处理",
+        TextView footer = ViewPolicy.styledLabel(context, "© 2026 Metasequoia · 输入内容默认只在本机处理",
             13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setCentered(footer);
-        LinearLayout.LayoutParams footerParams = Ui.matchWidth();
+        LinearLayout.LayoutParams footerParams = LayoutPolicy.matchWidthWrapParams();
         footerParams.topMargin = DimensionPolicy.pixels(context, 24);
         column.addView(footer, footerParams);
 
@@ -201,37 +203,38 @@ public final class AboutPage extends DetailPage {
 
     /** 居中的标、应用名、版本，以及检查更新药丸（Play 安装时没有）。 */
     private View header(Context context, boolean play) {
-        LinearLayout header = Ui.column(context);
+        LinearLayout header = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(header);
-        Ui.setPaddingDp(header, context, 0, 8, 0, 20);
+        ViewPolicy.setPaddingDp(context, header, 0, 8, 0, 20);
 
         FrameLayout disc = new FrameLayout(context);
         ViewPolicy.setBackground(disc, DrawablePolicy.pill(ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorTertiaryContainer)));
         ImageView mark = ImageViewPolicy.decorative(context, R.drawable.splash_mark);
         int markSize = DimensionPolicy.pixels(context, 60);
-        disc.addView(mark, Ui.squareFrameParamsPx(markSize, Gravity.CENTER));
+        disc.addView(mark, LayoutPolicy.squareFrameParamsPx(markSize, Gravity.CENTER));
         int discSize = DimensionPolicy.pixels(context, 116);
         header.addView(disc, ViewPolicy.newSquareParamsPx(discSize));
 
-        TextView name = Ui.styledLabel(context, getString(R.string.app_name), 22, 700, ThemeColorPolicy.text(context));
+        TextView name = ViewPolicy.styledLabel(context, getString(R.string.app_name), 22, 700, ThemeColorPolicy.text(context));
         ViewPolicy.setCentered(name);
         name.setAccessibilityHeading(true);
-        LinearLayout.LayoutParams nameParams = Ui.wrap();
+        LinearLayout.LayoutParams nameParams = LayoutPolicy.wrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 18);
         header.addView(name, nameParams);
 
-        TextView version = Ui.styledLabel(context,
+        TextView version = ViewPolicy.styledLabel(context,
             "版本 " + UpdateJobService.currentVersion(context) + " · Android", 13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setCentered(version);
-        LinearLayout.LayoutParams versionParams = Ui.wrap();
+        LinearLayout.LayoutParams versionParams = LayoutPolicy.wrapParams();
         versionParams.topMargin = DimensionPolicy.pixels(context, 6);
         header.addView(version, versionParams);
 
         if (!play) {
-            TextView button = Ui.pillButton(context, "检查更新", 15, 600, ThemeColorPolicy.onAccent(context),
+            TextView button = ViewPolicy.pillButton(context, "检查更新", 15, 600, ThemeColorPolicy.accent(context),
+                ThemeColorPolicy.onAccent(context),
                 20, 0, 36, 96, this::onPill);
             ViewPolicy.setPoliteLiveRegion(button);
-            LinearLayout.LayoutParams pillParams = Ui.wrap();
+            LinearLayout.LayoutParams pillParams = LayoutPolicy.wrapParams();
             pillParams.topMargin = DimensionPolicy.pixels(context, 14);
             header.addView(button, pillParams);
             pill = button;
@@ -257,7 +260,7 @@ public final class AboutPage extends DetailPage {
         // 「已是最新版本」是结果而不是按钮，换成 accentSoft 底、强调色字，再点一次重新检查。
         boolean quiet = state == State.UP_TO_DATE || busy;
         ViewPolicy.setTextColor(button, quiet ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.onAccent(context));
-        ViewPolicy.setBackground(button, Ui.pillRipple(context, quiet ? ThemeColorPolicy.accentSoft(context) : ThemeColorPolicy.accent(context)));
+        ViewPolicy.setBackground(button, ViewPolicy.pillRipple(context, quiet ? ThemeColorPolicy.accentSoft(context) : ThemeColorPolicy.accent(context)));
     }
 
     private void onPill() {

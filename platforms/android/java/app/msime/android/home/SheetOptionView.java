@@ -31,7 +31,7 @@ final class SheetOptionView {
         Ui.setMinimumHeightDp(row, context, Ui.SHEET_OPTION_HEIGHT);
         ViewPolicy.makeClickable(row, context, action);
 
-        TextView text = Ui.centeredLabel(context, nested ? label + " ›" : label,
+        TextView text = ViewPolicy.centeredLabel(context, nested ? label + " ›" : label,
             Ui.TEXT_SHEET_OPTION, bold ? 600 : 400, color);
         FrameLayout.LayoutParams textParams = LayoutPolicy.frameParamsPx(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
@@ -45,7 +45,7 @@ final class SheetOptionView {
         if (selected) {
             ImageView check = ImageViewPolicy.decorative(context, R.drawable.ms_w1_a2_check,
                 ThemeColorPolicy.accent(context));
-            FrameLayout.LayoutParams checkParams = Ui.squareFrameParams(context, Ui.SHEET_CHECK_SIZE);
+            FrameLayout.LayoutParams checkParams = LayoutPolicy.squareFrameParams(context, Ui.SHEET_CHECK_SIZE);
             checkParams.gravity = Gravity.CENTER_VERTICAL | Gravity.END;
             checkParams.setMarginEnd(DimensionPolicy.pixels(context, Ui.SHEET_CHECK_END_MARGIN));
             row.addView(check, checkParams);

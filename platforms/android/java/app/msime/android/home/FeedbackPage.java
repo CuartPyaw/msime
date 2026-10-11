@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Future;
 import org.json.JSONObject;
 
 /**
@@ -66,6 +67,7 @@ public final class FeedbackPage extends DetailPage {
     private final List<byte[]> screenshots = new ArrayList<>(FeedbackApi.MAX_SCREENSHOTS);
     private boolean sending;
     private boolean sent;
+    @Nullable private Future<?> submitTask;
 
     @Nullable private EditText detail;
     @Nullable private TextView counter;
@@ -87,7 +89,7 @@ public final class FeedbackPage extends DetailPage {
 
         GroupCard description = GroupCard.add(column, "描述");
         LinearLayout card = description.card();
-        EditText input = Ui.styledInput(context, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
+        EditText input = ViewPolicy.styledInput(context, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
         input.setHint("遇到了什么问题？可以写复现步骤、出错的词或期望的结果");
         input.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE
             | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
@@ -95,10 +97,10 @@ public final class FeedbackPage extends DetailPage {
         ViewPolicy.setMinLines(input, 4);
         ViewPolicy.clearBackground(input);
         input.setHintTextColor(ThemeColorPolicy.subText(context));
-        Ui.setSymmetricPaddingDp(input, requireContext(), 16, 14);
+        ViewPolicy.setSymmetricPaddingDp(requireContext(), input, 16, 14);
         input.setText(draft);
         input.setContentDescription("描述");
-        card.addView(input, Ui.matchWidth());
+        card.addView(input, LayoutPolicy.matchWidthWrapParams());
         detail = input;
 
         View rule = ViewPolicy.newColorView(context, ThemeColorPolicy.hairline(context));
@@ -109,41 +111,41 @@ public final class FeedbackPage extends DetailPage {
 
         HorizontalScrollView strip = new HorizontalScrollView(context);
         strip.setHorizontalScrollBarEnabled(false);
-        LinearLayout shots = Ui.row(context);
-        Ui.setPaddingDp(shots, requireContext(), 16, 10, 16, 0);
+        LinearLayout shots = LayoutPolicy.row(context);
+        ViewPolicy.setPaddingDp(requireContext(), shots, 16, 10, 16, 0);
         strip.addView(shots);
-        card.addView(strip, Ui.matchWidth());
+        card.addView(strip, LayoutPolicy.matchWidthWrapParams());
         thumbnails = shots;
 
-        LinearLayout add = Ui.row(context);
+        LinearLayout add = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(add);
-        Ui.setPaddingDp(add, requireContext(), 16, 12, 16, 14);
+        ViewPolicy.setPaddingDp(requireContext(), add, 16, 12, 16, 14);
         add.setContentDescription("添加截图，最多 " + FeedbackApi.MAX_SCREENSHOTS + " 张");
         ImageView icon = ImageViewPolicy.decorative(context, R.drawable.ms_w4_me2_image, ThemeColorPolicy.accent(context));
-        add.addView(icon, Ui.squareParams(requireContext(), 20));
-        TextView label = Ui.styledLabel(context, "添加截图", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
-        LinearLayout.LayoutParams labelParams = Ui.wrap();
+        add.addView(icon, LayoutPolicy.squareParams(requireContext(), 20));
+        TextView label = ViewPolicy.styledLabel(context, "添加截图", Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
+        LinearLayout.LayoutParams labelParams = LayoutPolicy.wrapParams();
         labelParams.setMarginStart(DimensionPolicy.pixels(requireContext(), 10));
         add.addView(label, labelParams);
         ViewPolicy.makeClickable(add, context, () -> picker.launch("image/*"));
-        card.addView(add, Ui.matchWidth());
+        card.addView(add, LayoutPolicy.matchWidthWrapParams());
         addShot = add;
 
-        TextView count = Ui.styledLabel(context, "", 13, 400, ThemeColorPolicy.subText(context));
-        Ui.setPaddingDp(count, requireContext(), Ui.GROUP_TITLE_INSET, 6,
+        TextView count = ViewPolicy.styledLabel(context, "", 13, 400, ThemeColorPolicy.subText(context));
+        ViewPolicy.setPaddingDp(requireContext(), count, Ui.GROUP_TITLE_INSET, 6,
             Ui.GROUP_TITLE_INSET, 0);
-        description.view().addView(count, Ui.matchWidth());
+        description.view().addView(count, LayoutPolicy.matchWidthWrapParams());
         counter = count;
 
-        TextView button = Ui.textButton(context, "", 16, 600, ThemeColorPolicy.onAccent(context), null,
+        TextView button = ViewPolicy.textButton(context, "", 16, 600, ThemeColorPolicy.onAccent(context), null,
             Ui.ACTION_BUTTON_MIN_HEIGHT, this::submit);
         ViewPolicy.setPoliteLiveRegion(button);
-        LinearLayout.LayoutParams buttonParams = Ui.matchWidth();
+        LinearLayout.LayoutParams buttonParams = LayoutPolicy.matchWidthWrapParams();
         buttonParams.topMargin = DimensionPolicy.pixels(requireContext(), Ui.GROUP_GAP);
         column.addView(button, buttonParams);
         submit = button;
 
-        Ui.afterTextChanged(input, text -> {
+        ViewPolicy.afterTextChanged(input, text -> {
             draft = text.toString();
             if (sent) sent = false;
             refresh();
@@ -162,6 +164,13 @@ public final class FeedbackPage extends DetailPage {
     }
 
     @Override public void onDestroyView() {
+        if (submitTask != null) {
+            submitTask.cancel(true);
+            submitTask = null;
+        }
+        // The submission result is fenced to this view; reset its transient state so a rebuilt
+        // page does not keep the submit button disabled after the old callback is dropped.
+        sending = false;
         detail = null;
         counter = null;
         submit = null;
@@ -195,7 +204,7 @@ public final class FeedbackPage extends DetailPage {
         ViewPolicy.setTextColor(submit, ready ? ThemeColorPolicy.onAccent(context) : ThemeColorPolicy.subText(context));
         int fill = ready ? ThemeColorPolicy.accent(context)
             : ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorSurfaceContainerHighest);
-        ViewPolicy.setBackground(submit, Ui.rippleOn(context, fill, DimensionPolicy.pixels(requireContext(), Ui.GROUP_RADIUS)));
+        ViewPolicy.setBackground(submit, ViewPolicy.ripple(context, fill, DimensionPolicy.pixels(requireContext(), Ui.GROUP_RADIUS)));
         if (addShot != null) ViewPolicy.setEnabledWithAlpha(addShot,
             screenshots.size() < FeedbackApi.MAX_SCREENSHOTS && !sending, 0.38f);
     }
@@ -218,13 +227,13 @@ public final class FeedbackPage extends DetailPage {
             ViewPolicy.setBackground(image, DrawablePolicy.rounded(ThemeColorPolicy.rowBackground(context), DimensionPolicy.pixels(requireContext(), 10)));
             image.setClipToOutline(true);
             image.setContentDescription("截图 " + (index + 1));
-            frame.addView(image, Ui.squareFrameParams(requireContext(), Ui.THUMBNAIL_SIZE));
+            frame.addView(image, LayoutPolicy.squareFrameParams(requireContext(), Ui.THUMBNAIL_SIZE));
             ImageView remove = new ImageView(context);
             remove.setImageResource(R.drawable.ms_w4_me2_close);
             ImageViewPolicy.setTint(remove,
                 ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorOnSurfaceInverse));
             ViewPolicy.setBackground(remove, DrawablePolicy.pill(ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorSurfaceInverse)));
-            Ui.setSymmetricPaddingDp(remove, requireContext(), 3, 3);
+            ViewPolicy.setSymmetricPaddingDp(requireContext(), remove, 3, 3);
             remove.setContentDescription("移除截图 " + (index + 1));
             ViewPolicy.bindClick(remove, () -> {
                 if (sending) return;
@@ -232,10 +241,10 @@ public final class FeedbackPage extends DetailPage {
                 renderThumbnails();
                 refresh();
             });
-            FrameLayout.LayoutParams removeParams = Ui.squareFrameParams(requireContext(), 20);
+            FrameLayout.LayoutParams removeParams = LayoutPolicy.squareFrameParams(requireContext(), 20);
             removeParams.gravity = Gravity.TOP | Gravity.END;
             frame.addView(remove, removeParams);
-            LinearLayout.LayoutParams params = Ui.squareParams(requireContext(), Ui.THUMBNAIL_SIZE);
+            LinearLayout.LayoutParams params = LayoutPolicy.squareParams(requireContext(), Ui.THUMBNAIL_SIZE);
             params.setMarginEnd(DimensionPolicy.pixels(requireContext(), 8));
             strip.addView(frame, params);
         }
@@ -301,9 +310,10 @@ public final class FeedbackPage extends DetailPage {
         boolean withDiagnostics = diagnostics;
         List<FeedbackApi.Screenshot> shots = new ArrayList<>(screenshots.size());
         for (byte[] bytes : screenshots) shots.add(new FeedbackApi.Screenshot("image/jpeg", bytes));
-        AboutPage.network(this, () -> new FeedbackApi(new CloudApi(application)).submit(kind, text,
+        submitTask = AboutPage.network(this, () -> new FeedbackApi(new CloudApi(application)).submit(kind, text,
             UpdateJobService.currentVersion(application), AppEdition.current().id(),
             withDiagnostics ? collectDiagnostics(application) : null, shots), outcome -> {
+            submitTask = null;
             sending = false;
             if (outcome.error() != null) {
                 refresh();

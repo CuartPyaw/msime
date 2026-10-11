@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.DrawablePolicy;
@@ -65,7 +67,7 @@ public final class AccountFragment extends HomeTabFragment {
 
     @Override public void onViewCreated(@NonNull View view, @Nullable Bundle state) {
         View card = view.findViewById(R.id.account_card);
-        ViewPolicy.setBackground(card, Ui.rippleOn(requireContext(), ThemeColorPolicy.card(requireContext()), DimensionPolicy.pixels(requireContext(), 20)));
+        ViewPolicy.setBackground(card, ViewPolicy.ripple(requireContext(), ThemeColorPolicy.card(requireContext()), DimensionPolicy.pixels(requireContext(), 20)));
         ViewPolicy.bindClick(card, this::openProfile);
         render();
     }
@@ -253,8 +255,8 @@ public final class AccountFragment extends HomeTabFragment {
         MsSwitch toggle = new MsSwitch(context);
         toggle.setChecked(real && state.syncEnabled());
         ViewPolicy.setInteractive(toggle, false);
-        Ui.hideFromAccessibility(toggle);
-            LinearLayout.LayoutParams switchParams = Ui.rowGapParams(context);
+        ViewPolicy.hideFromAccessibility(toggle);
+            LinearLayout.LayoutParams switchParams = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         sync.addView(toggle, switchParams);
         sync.setAccessibilityDelegate(new View.AccessibilityDelegate() {
             @Override public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {

@@ -287,30 +287,30 @@ public final class OnboardingActivity extends AppCompatActivity {
             : preferences != null && preferences.optBoolean(OnboardingChoices.GLOSS, false);
 
         // A still of the candidate strip, drawn from the design's sample: what the switch below changes, before anyone has to open a text field to see it.
-        LinearLayout strip = Ui.row(this);
-        Ui.setSymmetricPaddingDp(strip, this, 10, 12);
+        LinearLayout strip = LayoutPolicy.row(this);
+        ViewPolicy.setSymmetricPaddingDp(this, strip, 10, 12);
         ViewPolicy.setBackground(strip, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(this), DimensionPolicy.pixels(this, 20)));
         ViewPolicy.setImportantForAccessibility(strip,
             View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
         String[][] samples = {{"候选", "candidate"}, {"后选", "choice"}, {"侯选", "option"}, {"候", "wait"}};
         for (int index = 0; index < samples.length; index++) {
-            LinearLayout cell = Ui.column(this);
+            LinearLayout cell = LayoutPolicy.column(this);
             ViewPolicy.setCenteredHorizontally(cell);
-            Ui.setHorizontalPaddingDp(cell, this, 10);
-            TextView word = Ui.label(this, samples[index][0], 19, index == 0 ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.text(this));
+            ViewPolicy.setHorizontalPaddingDp(this, cell, 10);
+            TextView word = ViewPolicy.label(this, samples[index][0], 19, index == 0 ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.text(this));
             if (index == 0) ViewPolicy.setTypefaceStyle(word, 600);
             cell.addView(word);
-            if (on) cell.addView(Ui.label(this, samples[index][1], 11, ThemeColorPolicy.subText(this)));
+            if (on) cell.addView(ViewPolicy.label(this, samples[index][1], 11, ThemeColorPolicy.subText(this)));
             strip.addView(cell);
         }
-        column.addView(strip, Ui.matchWidth(this, 6));
+        column.addView(strip, LayoutPolicy.matchWidthWrapParams(this, 6));
 
-        LinearLayout row = Ui.row(this);
+        LinearLayout row = LayoutPolicy.row(this);
         ViewPolicy.setCenteredVertically(row);
-        Ui.setSymmetricPaddingDp(row, this, 14, 12);
+        ViewPolicy.setSymmetricPaddingDp(this, row, 14, 12);
         ViewPolicy.setBackground(row, DrawablePolicy.rounded(ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 20)));
-        TextView label = Ui.label(this, "显示译文", 16, ThemeColorPolicy.text(this));
-        row.addView(label, Ui.weightWrap(1f));
+        TextView label = ViewPolicy.label(this, "显示译文", 16, ThemeColorPolicy.text(this));
+        row.addView(label, LayoutPolicy.weightedWrapParams(1f));
         MaterialSwitch toggle = new MaterialSwitch(this);
         toggle.setChecked(on);
         toggle.setContentDescription("显示译文");
@@ -319,7 +319,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         });
         row.addView(toggle);
         ViewPolicy.bindClick(row, toggle::toggle);
-        column.addView(row, Ui.matchWidth(this, 12));
+        column.addView(row, LayoutPolicy.matchWidthWrapParams(this, 12));
 
         if (note != null) {
             footnote(column, note);
@@ -460,26 +460,26 @@ public final class OnboardingActivity extends AppCompatActivity {
             String body) {
         ImageView glyph = ImageViewPolicy.decorative(this, icon, ThemeColorPolicy.accent(this));
         glyph.setScaleType(ImageView.ScaleType.FIT_START);
-        Ui.hideFromAccessibility(glyph);
-        column.addView(glyph, Ui.squareParams(this, 36));
+        ViewPolicy.hideFromAccessibility(glyph);
+        column.addView(glyph, LayoutPolicy.squareParams(this, 36));
 
-        TextView kick = Ui.label(this, kicker, 13, ThemeColorPolicy.accent(this));
+        TextView kick = ViewPolicy.label(this, kicker, 13, ThemeColorPolicy.accent(this));
         ViewPolicy.setTypefaceStyle(kick, 600);
         kick.setLetterSpacing(0.04f);
-        column.addView(kick, Ui.matchWidth(this, 14 + 6));
+        column.addView(kick, LayoutPolicy.matchWidthWrapParams(this, 14 + 6));
 
-        TextView heading = Ui.headingLabel(this, title, 32, ThemeColorPolicy.text(this));
+        TextView heading = ViewPolicy.headingLabel(this, title, 32, ThemeColorPolicy.text(this));
         ViewPolicy.setLineSpacing(heading, 0, 1.1f);
-        column.addView(heading, Ui.matchWidth(this, 14));
+        column.addView(heading, LayoutPolicy.matchWidthWrapParams(this, 14));
 
-        TextView line = Ui.label(this, body, 16, ThemeColorPolicy.subText(this));
+        TextView line = ViewPolicy.label(this, body, 16, ThemeColorPolicy.subText(this));
         ViewPolicy.setLineSpacing(line, 0, 1.35f);
-        column.addView(line, Ui.matchWidth(this, 14));
+        column.addView(line, LayoutPolicy.matchWidthWrapParams(this, 14));
     }
 
     private LinearLayout card(LinearLayout column, int top) {
-        LinearLayout card = Ui.verticalCard(this, 20);
-        column.addView(card, Ui.matchWidth(this, 14 + top));
+        LinearLayout card = LayoutPolicy.roundedColumn(this, ThemeColorPolicy.card(this), 20);
+        column.addView(card, LayoutPolicy.matchWidthWrapParams(this, 14 + top));
         return card;
     }
 
@@ -492,28 +492,28 @@ public final class OnboardingActivity extends AppCompatActivity {
             card.addView(line, LayoutPolicy.matchWidthHeightPx(
                 BoundsPolicy.bounded(DimensionPolicy.pixels(this, 1) / 2, 1, Integer.MAX_VALUE)));
         }
-        LinearLayout row = Ui.row(this);
+        LinearLayout row = LayoutPolicy.row(this);
         ViewPolicy.setCenteredVertically(row);
         Ui.setMinimumHeightDp(row, this, Ui.COMPACT_ROW_MIN_HEIGHT);
-        Ui.setPaddingDp(row, this, 14, 6, 8, 6);
+        ViewPolicy.setPaddingDp(this, row, 14, 6, 8, 6);
 
-        TextView mark = Ui.centeredLabel(this, done ? "✓" : "!", 13,
+        TextView mark = ViewPolicy.centeredLabel(this, done ? "✓" : "!", 13,
             done ? ThemeColorPolicy.onAccent(this) : 0xFFFFFFFF);
         // 字形画在固定 dp 的圆里，跟圆一起按 dp 定大小；按 sp 时系统字体一调大，对勾就被圆的边界切掉。
         ViewPolicy.setTextSizeDp(mark, 13);
         StatusMarkPolicy.apply(mark, this, done);
-        row.addView(mark, Ui.squareParams(this, 24));
+        row.addView(mark, LayoutPolicy.squareParams(this, 24));
 
-        TextView text = Ui.label(this, label, 16, ThemeColorPolicy.text(this));
-        LinearLayout.LayoutParams textParams = Ui.weightWrap(1f);
+        TextView text = ViewPolicy.label(this, label, 16, ThemeColorPolicy.text(this));
+        LinearLayout.LayoutParams textParams = LayoutPolicy.weightedWrapParams(1f);
         textParams.setMarginStart(DimensionPolicy.pixels(this, 12));
         row.addView(text, textParams);
         text.setContentDescription(label + (done ? "，已完成" : "，未完成"));
 
         if (!done) {
-            TextView button = Ui.centeredLabel(this, action, 15, ThemeColorPolicy.accent(this));
-            Ui.setHorizontalPaddingDp(button, this, 8);
-            ViewPolicy.setBackground(button, DrawablePolicy.ripple(this));
+            TextView button = ViewPolicy.centeredLabel(this, action, 15, ThemeColorPolicy.accent(this));
+            ViewPolicy.setHorizontalPaddingDp(this, button, 8);
+            ViewPolicy.setBackground(button, ViewPolicy.ripple(this));
             ViewPolicy.bindClick(button, fix);
             row.addView(button, LayoutPolicy.linearParamsPx(
                 ViewGroup.LayoutParams.WRAP_CONTENT, DimensionPolicy.pixels(this, 40)));
@@ -523,30 +523,30 @@ public final class OnboardingActivity extends AppCompatActivity {
 
     /** A scheme card: label and supporting line, a radio disc on the right, a 2dp accent ring when chosen. */
     private void schemeCard(LinearLayout column, SchemeCard option, boolean selected, int top) {
-        LinearLayout card = Ui.row(this);
+        LinearLayout card = LayoutPolicy.row(this);
         ViewPolicy.setCenteredVertically(card);
-        Ui.setSymmetricPaddingDp(card, this, 16, 14);
+        ViewPolicy.setSymmetricPaddingDp(this, card, 16, 14);
         GradientDrawable face = selected
             ? DrawablePolicy.outlined(ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 20), DimensionPolicy.pixels(this, 2), ThemeColorPolicy.accent(this))
             : DrawablePolicy.rounded(ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 20));
         ViewPolicy.setBackground(card, face);
 
-        LinearLayout text = Ui.column(this);
-        TextView heading = Ui.label(this, option.label(), 16, ThemeColorPolicy.text(this));
+        LinearLayout text = LayoutPolicy.column(this);
+        TextView heading = ViewPolicy.label(this, option.label(), 16, ThemeColorPolicy.text(this));
         ViewPolicy.setTypefaceStyle(heading, 600);
         text.addView(heading);
-        TextView detail = Ui.label(this, option.detail(), 13, ThemeColorPolicy.subText(this));
-        LinearLayout.LayoutParams detailParams = Ui.wrap();
+        TextView detail = ViewPolicy.label(this, option.detail(), 13, ThemeColorPolicy.subText(this));
+        LinearLayout.LayoutParams detailParams = LayoutPolicy.wrapParams();
         detailParams.topMargin = DimensionPolicy.pixels(this, 2);
         text.addView(detail, detailParams);
-        card.addView(text, Ui.weightWrap(1f));
+        card.addView(text, LayoutPolicy.weightedWrapParams(1f));
 
         View radio = new View(this);
         GradientDrawable dot = DrawablePolicy.circleOutlined(selected ? ThemeColorPolicy.page(this) : 0,
             selected ? DimensionPolicy.pixels(this, 6) : DimensionPolicy.atLeastOnePixel(this, 1.5f),
             selected ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.subText(this));
         ViewPolicy.setBackground(radio, dot);
-        LinearLayout.LayoutParams radioParams = Ui.squareParams(this, 22);
+        LinearLayout.LayoutParams radioParams = LayoutPolicy.squareParams(this, 22);
         radioParams.setMarginStart(DimensionPolicy.pixels(this, 12));
         card.addView(radio, radioParams);
 
@@ -555,30 +555,30 @@ public final class OnboardingActivity extends AppCompatActivity {
         // 偏好还读不到时也能点：选择先记下，偏好可读后再写（OnboardingChoices）。
         ViewPolicy.bindOptionalClick(card, selected ? null : () -> chooseScheme(option.scheme()));
         ViewPolicy.setClickable(card, true);
-        column.addView(card, Ui.matchWidth(this, top));
+        column.addView(card, LayoutPolicy.matchWidthWrapParams(this, top));
     }
 
     private void perk(LinearLayout column, @DrawableRes int icon, String label, int top) {
-        LinearLayout row = Ui.row(this);
+        LinearLayout row = LayoutPolicy.row(this);
         ViewPolicy.setCenteredVertically(row);
-        Ui.setSymmetricPaddingDp(row, this, 14, 12);
+        ViewPolicy.setSymmetricPaddingDp(this, row, 14, 12);
         ViewPolicy.setBackground(row, DrawablePolicy.rounded(ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 20)));
         ImageView badge = ImageViewPolicy.decorative(this, icon, ThemeColorPolicy.accent(this));
-        Ui.setSymmetricPaddingDp(badge, this, 7, 7);
+        ViewPolicy.setSymmetricPaddingDp(this, badge, 7, 7);
         ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(this), DimensionPolicy.pixels(this, 9)));
-        Ui.hideFromAccessibility(badge);
-        row.addView(badge, Ui.squareParams(this, 32));
-        TextView text = Ui.label(this, label, 15, ThemeColorPolicy.text(this));
-        LinearLayout.LayoutParams textParams = Ui.weightWrap(1f);
+        ViewPolicy.hideFromAccessibility(badge);
+        row.addView(badge, LayoutPolicy.squareParams(this, 32));
+        TextView text = ViewPolicy.label(this, label, 15, ThemeColorPolicy.text(this));
+        LinearLayout.LayoutParams textParams = LayoutPolicy.weightedWrapParams(1f);
         textParams.setMarginStart(DimensionPolicy.pixels(this, 12));
         row.addView(text, textParams);
-        column.addView(row, Ui.matchWidth(this, 14 + top - 10));
+        column.addView(row, LayoutPolicy.matchWidthWrapParams(this, 14 + top - 10));
     }
 
     private TextView footnote(LinearLayout column, String message) {
-        TextView view = Ui.label(this, message, 13, ThemeColorPolicy.subText(this));
+        TextView view = ViewPolicy.label(this, message, 13, ThemeColorPolicy.subText(this));
         ViewPolicy.setPoliteLiveRegion(view);
-        column.addView(view, Ui.matchWidth(this, 14));
+        column.addView(view, LayoutPolicy.matchWidthWrapParams(this, 14));
         return view;
     }
 

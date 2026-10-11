@@ -15,6 +15,7 @@ class AndroidDeveloperViewLifecycleContract(unittest.TestCase):
         end = source.index("\n    private void reload()", start)
         body = source[start:end]
         self.assertIn("busy = false;", body)
+        self.assertIn("confirming = false;", body)
         self.assertIn("freshToken = null;", body)
 
 

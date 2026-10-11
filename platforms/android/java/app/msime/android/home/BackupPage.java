@@ -44,6 +44,9 @@ public final class BackupPage extends DetailPage {
     @Override public void onDestroyView() {
         exportRow = null;
         restoreRow = null;
+        // HostTask drops results bound to the old view; do not carry its transient lock into a
+        // rebuilt page when an export or restore finishes after teardown.
+        busy = false;
         super.onDestroyView();
     }
 

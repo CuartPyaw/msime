@@ -3,20 +3,28 @@ package app.msime.android;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Paint;
+import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.View;
 import android.view.ViewGroup;
 import android.util.TypedValue;
 import android.text.TextUtils;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
+import java.util.function.Consumer;
 import android.widget.PopupWindow;
 
 /** Shared view configuration for host controls whose widget defaults need resetting. */
 public final class ViewPolicy {
+    private static final float TRAILING_VALUE_MAX_SHARE = 0.5f;
     private ViewPolicy() {}
 
     /** Remove both legacy and platform minimum-height constraints from a view. */
@@ -28,6 +36,147 @@ public final class ViewPolicy {
     public static void clearMinimumHeight(TextView view) {
         view.setMinHeight(0);
         view.setMinimumHeight(0);
+    }
+
+    /** Apply shared text size, weight and colour styling to a text view. */
+    public static void style(TextView view, int sizeSp, int weight, int color) {
+        setTextSizeSp(view, sizeSp);
+        setTypefaceWeight(view, weight);
+        setTextColor(view, color);
+    }
+
+    /** Create a text label with the shared size, weight, and colour policy. */
+    public static TextView styledLabel(Context context, CharSequence text, int sizeSp,
+                                       int weight, int color) {
+        TextView view = newTextView(context, text);
+        style(view, sizeSp, weight, color);
+        return view;
+    }
+
+    /** Create a styled text label constrained to one line. */
+    public static TextView singleLineLabel(Context context, CharSequence text, int sizeSp,
+                                           int weight, int color) {
+        TextView view = newTextView(context, text);
+        style(view, sizeSp, weight, color);
+        setSingleLine(view);
+        return view;
+    }
+
+    /** Create a text label centered on both axes. */
+    public static TextView centeredLabel(Context context, CharSequence text, float sizeSp,
+                                         int color) {
+        TextView view = label(context, text, sizeSp, color);
+        setCentered(view);
+        return view;
+    }
+
+    /** Create a styled text label centered on both axes. */
+    public static TextView centeredLabel(Context context, CharSequence text, int sizeSp,
+                                         int weight, int color) {
+        TextView view = newTextView(context, text);
+        style(view, sizeSp, weight, color);
+        setCentered(view);
+        return view;
+    }
+
+    /** Create a text label carrying accessibility heading semantics. */
+    public static TextView headingLabel(Context context, CharSequence text, float sizeSp,
+                                        int color) {
+        TextView view = label(context, text, sizeSp, color);
+        view.setAccessibilityHeading(true);
+        return view;
+    }
+
+    /** Create a styled text label carrying accessibility heading semantics. */
+    public static TextView headingLabel(Context context, CharSequence text, int sizeSp,
+                                        int weight, int color) {
+        TextView view = newTextView(context, text);
+        style(view, sizeSp, weight, color);
+        view.setAccessibilityHeading(true);
+        return view;
+    }
+
+    /** Create a centered styled text label constrained to one line. */
+    public static TextView centeredSingleLineLabel(Context context, CharSequence text, int sizeSp,
+                                                   int weight, int color) {
+        TextView view = centeredLabel(context, text, sizeSp, weight, color);
+        setSingleLine(view);
+        return view;
+    }
+
+    /** Create a polite live-region status label for accessibility announcements. */
+    public static TextView liveStatus(Context context, int sizeSp, int color) {
+        TextView view = newTextView(context, "");
+        style(view, sizeSp, 400, color);
+        setPoliteLiveRegion(view);
+        return view;
+    }
+
+    /** Create an editable field with the shared size, weight, and colour policy. */
+    public static EditText styledInput(Context context, int sizeSp, int weight, int color) {
+        EditText view = new EditText(context);
+        style(view, sizeSp, weight, color);
+        return view;
+    }
+
+    /** Create a centered, clickable text button with caller-supplied background and ink. */
+    public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,
+                                      int ink, Drawable background, float minHeightDp) {
+        return textButton(context, label, sizeSp, weight, ink, background, minHeightDp, null);
+    }
+
+    /** Create a centered text button and bind its action. */
+    public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,
+                                      int ink, Drawable background, float minHeightDp,
+                                      Runnable action) {
+        TextView button = centeredLabel(context, label, sizeSp, weight, ink);
+        setBackground(button, background);
+        setTextMinHeight(button, DimensionPolicy.pixels(context, minHeightDp));
+        setInteractive(button, true);
+        bindOptionalClick(button, action);
+        return button;
+    }
+
+    /** Create a filled accent pill button with caller-selected dimensions. */
+    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
+                                      int fill, int ink, float horizontalPaddingDp,
+                                      float verticalPaddingDp, float minHeightDp, float minWidthDp) {
+        return pillButton(context, label, sizeSp, weight, fill, ink, horizontalPaddingDp,
+            verticalPaddingDp, minHeightDp, minWidthDp, null);
+    }
+
+    /** Create a filled pill button and bind its optional action. */
+    public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,
+                                      int fill, int ink, float horizontalPaddingDp,
+                                      float verticalPaddingDp, float minHeightDp, float minWidthDp,
+                                      Runnable action) {
+        TextView button = centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);
+        setBackground(button, pillRipple(context, fill));
+        int horizontal = DimensionPolicy.pixels(context, horizontalPaddingDp);
+        int vertical = DimensionPolicy.pixels(context, verticalPaddingDp);
+        setPadding(button, horizontal, vertical, horizontal, vertical);
+        setTextMinHeight(button, DimensionPolicy.pixels(context, minHeightDp));
+        if (minWidthDp > 0) setTextMinWidth(button, DimensionPolicy.pixels(context, minWidthDp));
+        setInteractive(button, true);
+        bindOptionalClick(button, action);
+        return button;
+    }
+
+    /** Create a single-line trailing value capped to half of its available row width. */
+    public static TextView trailingValue(Context context, CharSequence text, int sizeSp, int color) {
+        TextView view = new TextView(context) {
+            @Override protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                if (MeasureSpec.getMode(widthMeasureSpec) != MeasureSpec.UNSPECIFIED) {
+                    int limit = Math.round(MeasureSpec.getSize(widthMeasureSpec) * TRAILING_VALUE_MAX_SHARE);
+                    widthMeasureSpec = MeasureSpec.makeMeasureSpec(limit, MeasureSpec.AT_MOST);
+                }
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+            }
+        };
+        view.setText(text);
+        style(view, sizeSp, 400, color);
+        setSingleLineEllipsized(view);
+        return view;
     }
 
     /** Apply a minimum height to a generic view. */
@@ -90,9 +239,43 @@ public final class ViewPolicy {
         view.setPadding(horizontal, vertical, horizontal, vertical);
     }
 
+    /** Apply the same pixel inset on all four sides. */
+    public static void setSymmetricPadding(View view, int padding) {
+        setSymmetricPadding(view, padding, padding);
+    }
+
+    /** Apply equal padding expressed in density-independent pixels. */
+    public static void setSymmetricPaddingDp(Context context, View view, float horizontalDp,
+                                             float verticalDp) {
+        setSymmetricPadding(view, DimensionPolicy.pixels(context, horizontalDp),
+            DimensionPolicy.pixels(context, verticalDp));
+    }
+
     /** Apply equal horizontal pixel padding while leaving vertical padding unset. */
     public static void setHorizontalPadding(View view, int horizontal) {
         view.setPadding(horizontal, 0, horizontal, 0);
+    }
+
+    /** Apply equal horizontal padding expressed in density-independent pixels. */
+    public static void setHorizontalPaddingDp(Context context, View view, float horizontalDp) {
+        setHorizontalPadding(view, DimensionPolicy.pixels(context, horizontalDp));
+    }
+
+    /** Apply four-sided padding expressed in density-independent pixels. */
+    public static void setPaddingDp(Context context, View view, float leftDp, float topDp,
+                                    float rightDp, float bottomDp) {
+        setPadding(view, DimensionPolicy.pixels(context, leftDp), DimensionPolicy.pixels(context, topDp),
+            DimensionPolicy.pixels(context, rightDp), DimensionPolicy.pixels(context, bottomDp));
+    }
+
+    /** Apply the standard detail-row horizontal and vertical insets. */
+    public static void setRowPadding(Context context, View view) {
+        setSymmetricPaddingDp(context, view, 16, 8);
+    }
+
+    /** Apply the standard detail-row minimum height. */
+    public static void setRowMinimumHeight(Context context, View view) {
+        setMinimumHeight(view, DimensionPolicy.pixels(context, 64));
     }
 
     /** Clear all view padding. */
@@ -140,6 +323,14 @@ public final class ViewPolicy {
     }
 
     /** Create a text view with its initial content assigned. */
+    public static TextView label(Context context, CharSequence text, float sizeSp, int color) {
+        TextView view = newTextView(context, text);
+        setTextSizeSp(view, sizeSp);
+        setTextColor(view, color);
+        return view;
+    }
+
+    /** Create a text view with its initial content assigned. */
     public static TextView newTextView(Context context, CharSequence text) {
         TextView view = new TextView(context);
         view.setText(text);
@@ -179,6 +370,17 @@ public final class ViewPolicy {
         return new LinearLayout.LayoutParams(size, size);
     }
 
+    /** Invoke a listener only after text changes, without requiring unused watcher callbacks. */
+    public static void afterTextChanged(TextView view, Consumer<Editable> listener) {
+        view.addTextChangedListener(new TextWatcher() {
+            @Override public void beforeTextChanged(CharSequence text, int start, int count, int after) {}
+
+            @Override public void onTextChanged(CharSequence text, int start, int before, int count) {}
+
+            @Override public void afterTextChanged(Editable text) { listener.accept(text); }
+        });
+    }
+
     /** Bind a caller-supplied action to a view without changing any other interaction policy. */
     public static void bindClick(View view, Runnable action) {
         view.setOnClickListener(ignored -> action.run());
@@ -196,6 +398,42 @@ public final class ViewPolicy {
             return null;
         }
         return context.getDrawable(value.resourceId);
+    }
+
+    /** Resolve a theme ripple over a caller-supplied rounded fill and mask. */
+    public static Drawable ripple(Context context, int fill, float radiusPx) {
+        int pressed = ColorPolicy.withAlpha(primaryTextColor(context), 0.10f);
+        return new RippleDrawable(ColorStateList.valueOf(pressed), rounded(fill, radiusPx),
+            rounded(Color.WHITE, radiusPx));
+    }
+
+    private static GradientDrawable rounded(int color, float radiusPx) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setShape(GradientDrawable.RECTANGLE);
+        shape.setColor(color);
+        shape.setCornerRadius(radiusPx);
+        return shape;
+    }
+
+    /** Resolve the framework primary text colour without depending on the Material host layer. */
+    private static int primaryTextColor(Context context) {
+        TypedValue value = new TypedValue();
+        if (!context.getTheme().resolveAttribute(android.R.attr.textColorPrimary, value, true)) {
+            return Color.BLACK;
+        }
+        if (value.type >= TypedValue.TYPE_FIRST_COLOR_INT && value.type <= TypedValue.TYPE_LAST_COLOR_INT) {
+            return value.data;
+        }
+        try {
+            return context.getColorStateList(value.resourceId).getDefaultColor();
+        } catch (RuntimeException ignored) {
+            return Color.BLACK;
+        }
+    }
+
+    /** Resolve a theme ripple over a fully rounded fill. */
+    public static Drawable pillRipple(Context context, int fill) {
+        return ripple(context, fill, 9999f);
     }
 
     /** Apply the standard theme ripple and optional click behavior to a view. */

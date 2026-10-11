@@ -17,12 +17,12 @@ def main() -> int:
     required = (
         "public final class SheetHeaderView",
         "public static LinearLayout create(Context context, CharSequence title,",
-        "LinearLayout header = Ui.column(context);",
+        "LinearLayout header = LayoutPolicy.column(context);",
         "ViewPolicy.setCenteredHorizontally(header);",
         "ViewPolicy.setPadding(header, horizontal, 0, horizontal, DimensionPolicy.pixels(context, 12));",
-        "TextView heading = Ui.headingLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,",
+        "TextView heading = ViewPolicy.headingLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,",
         "if (subtitle != null && subtitle.length() > 0)",
-        "TextView note = Ui.centeredLabel(context, subtitle, Ui.TEXT_SHEET_HEADER, 400,",
+        "TextView note = ViewPolicy.centeredLabel(context, subtitle, Ui.TEXT_SHEET_HEADER, 400,",
         "params.topMargin = DimensionPolicy.pixels(context, 2);",
     )
     for snippet in required:

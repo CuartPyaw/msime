@@ -263,7 +263,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
         // 「已添加」是终态：没有底色、正文色、不响应；皮肤拿到之后的「使用」仍是可点的 tonal 按钮。
         boolean enabled = action == Action.AVAILABLE || (skin && action == Action.DONE);
         boolean filled = action != Action.DONE || skin;
-        ViewPolicy.setBackground(pill, filled ? Ui.pillRipple(context, ThemeColorPolicy.accentSoft(context)) : null);
+        ViewPolicy.setBackground(pill, filled ? ViewPolicy.pillRipple(context, ThemeColorPolicy.accentSoft(context)) : null);
         ViewPolicy.setTextColor(pill, filled ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.text(context));
         ViewPolicy.setEnabled(pill, enabled);
         ViewPolicy.setInteractive(pill, enabled);
@@ -300,7 +300,7 @@ public final class CommunityAdapter extends RecyclerView.Adapter<CommunityAdapte
 
     /** The glyph in the badge: the first character of the name, as the design's 网/码/医 boxes. */
     static String glyph(CommunityCatalog.Item item) {
-        return Ui.trimmedInitial(item.name(), "?");
+        return TextPolicy.trimmedInitial(item.name(), "?");
     }
 
     /** The slice of the grouped card behind one row: rounded where the group starts and ends. */

@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DrawablePolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
@@ -73,6 +75,7 @@ public final class LexiconPage extends DetailPage {
 
     @Override public void onDestroyView() {
         column = null;
+        installing.clear();
         super.onDestroyView();
     }
 
@@ -194,26 +197,26 @@ public final class LexiconPage extends DetailPage {
         if (parts.isEmpty() && !item.description().isEmpty()) parts.add(item.description());
         row.addView(KeyboardSheets.texts(context, item.name(), parts.isEmpty() ? null : String.join(" · ", parts),
                 ThemeColorPolicy.text(context)),
-            Ui.weightWrap(1f));
+            LayoutPolicy.weightedWrapParams(1f));
         boolean added = view.installed(item.id());
         boolean busy = installing.contains(item.id());
         boolean enabled = !added && !busy;
         TextView button;
         if (enabled) {
-            button = Ui.pillButton(context, "添加", Ui.TEXT_BUTTON_SMALL, 500,
+            button = ViewPolicy.pillButton(context, "添加", Ui.TEXT_BUTTON_SMALL, 500,
                 ThemeColorPolicy.accentSoft(context), ThemeColorPolicy.accent(context), Ui.BUTTON_PADDING_H, Ui.BUTTON_PADDING_V,
                 Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, () -> install(item));
         } else {
-            button = Ui.centeredSingleLineLabel(context, added ? "已添加" : "添加中",
+            button = ViewPolicy.centeredSingleLineLabel(context, added ? "已添加" : "添加中",
                 Ui.TEXT_BUTTON_SMALL, 500, ThemeColorPolicy.subText(context));
-            ViewPolicy.setBackground(button, Ui.pillRipple(context,
+            ViewPolicy.setBackground(button, ViewPolicy.pillRipple(context,
                 added ? ThemeColorPolicy.rowBackground(context) : ThemeColorPolicy.accentSoft(context)));
             Ui.setButtonPadding(button, context);
             Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
             ViewPolicy.setEnabled(button, false);
         }
         button.setAccessibilityDelegate(KeyboardSheets.buttonDelegate(button.getText() + "，" + item.name()));
-        LinearLayout.LayoutParams params = Ui.rowGapParams(context);
+        LinearLayout.LayoutParams params = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         row.addView(button, params);
         return row;
     }

@@ -1,5 +1,9 @@
 package app.msime.android.home;
 
+import app.msime.android.TextPolicy;
+
+import app.msime.android.LayoutPolicy;
+
 import app.msime.android.DimensionPolicy;
 
 import app.msime.android.ImageViewPolicy;
@@ -81,6 +85,9 @@ public final class ProfilePage extends DetailPage {
         column = null;
         loaded = null;
         avatarPickerSessionId = null;
+        // Work results are fenced to the old view and will be dropped after recreation. Do not
+        // leave the rebuilt page permanently disabled while an abandoned operation finishes.
+        busy = false;
         super.onDestroyView();
     }
 
@@ -187,14 +194,14 @@ public final class ProfilePage extends DetailPage {
             picture.setScaleType(ImageView.ScaleType.CENTER_CROP);
             ViewPolicy.setBackground(picture, circle);
             picture.setClipToOutline(true);
-            Ui.hideFromAccessibility(picture);
-            frame.addView(picture, Ui.squareFrameParams(context, sizeDp));
+            ViewPolicy.hideFromAccessibility(picture);
+            frame.addView(picture, LayoutPolicy.squareFrameParams(context, sizeDp));
         } else {
-            TextView letter = Ui.centeredLabel(context, Ui.trimmedInitial(name, "?"),
+            TextView letter = ViewPolicy.centeredLabel(context, TextPolicy.trimmedInitial(name, "?"),
                 Math.round(sizeDp * 0.4f), 600, ThemeColorPolicy.onAccent(context));
             ViewPolicy.setBackground(letter, circle);
-            Ui.hideFromAccessibility(letter);
-            frame.addView(letter, Ui.squareFrameParams(context, sizeDp));
+            ViewPolicy.hideFromAccessibility(letter);
+            frame.addView(letter, LayoutPolicy.squareFrameParams(context, sizeDp));
         }
         return frame;
     }
@@ -254,9 +261,9 @@ public final class ProfilePage extends DetailPage {
     }
 
     private View header(Context context, DeviceDataApi.Profile profile, @Nullable Bitmap image) {
-        LinearLayout header = Ui.column(context);
+        LinearLayout header = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(header);
-        Ui.setPaddingDp(header, context, 0, 8, 0, 4);
+        ViewPolicy.setPaddingDp(context, header, 0, 8, 0, 4);
 
         FrameLayout avatar = new FrameLayout(context);
         avatar.addView(avatarView(context, 88, profile.displayName(), image));
@@ -265,25 +272,25 @@ public final class ProfilePage extends DetailPage {
         GradientDrawable badge = DrawablePolicy.circle(ThemeColorPolicy.card(context));
         ViewPolicy.setBackground(camera, badge);
         int pad = DimensionPolicy.pixels(context, 6);
-        Ui.setSymmetricPaddingPx(camera, pad);
-        Ui.hideFromAccessibility(camera);
-        FrameLayout.LayoutParams cameraParams = Ui.squareFrameParams(context, 28);
+        ViewPolicy.setSymmetricPadding(camera, pad);
+        ViewPolicy.hideFromAccessibility(camera);
+        FrameLayout.LayoutParams cameraParams = LayoutPolicy.squareFrameParams(context, 28);
         cameraParams.gravity = Gravity.BOTTOM | Gravity.END;
         avatar.addView(camera, cameraParams);
         ViewPolicy.setInteractive(avatar, true);
         avatar.setContentDescription("更换头像");
         ViewPolicy.bindClick(avatar, this::chooseAvatar);
-        header.addView(avatar, Ui.squareParams(context, 92));
+        header.addView(avatar, LayoutPolicy.squareParams(context, 92));
 
-        TextView name = Ui.styledLabel(context, profile.displayName(), 22, 700, ThemeColorPolicy.text(context));
-        LinearLayout.LayoutParams nameParams = Ui.wrap();
+        TextView name = ViewPolicy.styledLabel(context, profile.displayName(), 22, 700, ThemeColorPolicy.text(context));
+        LinearLayout.LayoutParams nameParams = LayoutPolicy.wrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 10);
         header.addView(name, nameParams);
 
         if (!profile.email().isEmpty()) {
-            TextView email = Ui.styledLabel(context, profile.email(), Ui.TEXT_ROW_SUBTITLE, 400,
+            TextView email = ViewPolicy.styledLabel(context, profile.email(), Ui.TEXT_ROW_SUBTITLE, 400,
                 ThemeColorPolicy.subText(context));
-            LinearLayout.LayoutParams emailParams = Ui.wrap();
+            LinearLayout.LayoutParams emailParams = LayoutPolicy.wrapParams();
             emailParams.topMargin = DimensionPolicy.pixels(context, 2);
             header.addView(email, emailParams);
         }
@@ -291,11 +298,11 @@ public final class ProfilePage extends DetailPage {
         String kind = SyncSwitch.validLoginKind(SyncSwitch.loginKind(context)) ? SyncSwitch.loginKind(context)
             : profile.loginKind();
         if (!kind.isEmpty()) {
-            TextView chip = Ui.styledLabel(context, "通过 " + providerName(kind) + " 登录", 12, 500,
+            TextView chip = ViewPolicy.styledLabel(context, "通过 " + providerName(kind) + " 登录", 12, 500,
                 ThemeColorPolicy.accent(context));
             ViewPolicy.setBackground(chip, DrawablePolicy.pill(ThemeColorPolicy.accentSoft(context)));
-            Ui.setSymmetricPaddingDp(chip, context, 10, 3);
-            LinearLayout.LayoutParams chipParams = Ui.wrap();
+            ViewPolicy.setSymmetricPaddingDp(context, chip, 10, 3);
+            LinearLayout.LayoutParams chipParams = LayoutPolicy.wrapParams();
             chipParams.topMargin = DimensionPolicy.pixels(context, 8);
             header.addView(chip, chipParams);
         }
@@ -303,7 +310,7 @@ public final class ProfilePage extends DetailPage {
     }
 
     private static View dangerButton(Context context, CharSequence label, Runnable action) {
-        TextView button = Ui.textButton(context, label, Ui.TEXT_ROW_TITLE, 500, ThemeColorPolicy.danger(context),
+        TextView button = ViewPolicy.textButton(context, label, Ui.TEXT_ROW_TITLE, 500, ThemeColorPolicy.danger(context),
             ViewPolicy.ripple(context), Ui.ACTION_BUTTON_MIN_HEIGHT, action);
         return button;
     }
