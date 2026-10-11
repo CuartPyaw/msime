@@ -497,7 +497,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         Ui.setMinimumHeightDp(row, this, Ui.COMPACT_ROW_MIN_HEIGHT);
         Ui.setPaddingDp(row, this, 14, 6, 8, 6);
 
-        TextView mark = Ui.centeredLabel(this, done ? "✓" : "!", 13,
+        TextView mark = ViewPolicy.centeredLabel(this, done ? "✓" : "!", 13,
             done ? ThemeColorPolicy.onAccent(this) : 0xFFFFFFFF);
         // 字形画在固定 dp 的圆里，跟圆一起按 dp 定大小；按 sp 时系统字体一调大，对勾就被圆的边界切掉。
         ViewPolicy.setTextSizeDp(mark, 13);
@@ -511,7 +511,7 @@ public final class OnboardingActivity extends AppCompatActivity {
         text.setContentDescription(label + (done ? "，已完成" : "，未完成"));
 
         if (!done) {
-            TextView button = Ui.centeredLabel(this, action, 15, ThemeColorPolicy.accent(this));
+            TextView button = ViewPolicy.centeredLabel(this, action, 15, ThemeColorPolicy.accent(this));
             Ui.setHorizontalPaddingDp(button, this, 8);
             ViewPolicy.setBackground(button, ViewPolicy.ripple(this));
             ViewPolicy.bindClick(button, fix);

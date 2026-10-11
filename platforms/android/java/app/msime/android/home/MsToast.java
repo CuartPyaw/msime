@@ -43,7 +43,7 @@ public final class MsToast {
             frame.removeView(previous);
         }
 
-        TextView toast = Ui.centeredLabel(activity, text, Ui.TEXT_TOAST, 400,
+        TextView toast = ViewPolicy.centeredLabel(activity, text, Ui.TEXT_TOAST, 400,
             ThemeColorPolicy.color(activity, com.google.android.material.R.attr.colorOnSurfaceInverse));
         toast.setTag(TAG);
         ViewPolicy.setMaxLines(toast, 3);
