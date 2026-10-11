@@ -5,6 +5,8 @@ import android.content.res.ColorStateList;
 import android.graphics.Paint;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
+import android.graphics.drawable.GradientDrawable;
+import android.graphics.drawable.RippleDrawable;
 import android.graphics.Typeface;
 import android.view.Gravity;
 import android.view.View;
@@ -222,9 +224,33 @@ public final class ViewPolicy {
 
     /** Resolve a theme ripple over a caller-supplied rounded fill and mask. */
     public static Drawable ripple(Context context, int fill, float radiusPx) {
-        int pressed = ColorPolicy.withAlpha(ThemeColorPolicy.text(context), 0.10f);
-        return DrawablePolicy.ripple(pressed, DrawablePolicy.rounded(fill, radiusPx),
-            DrawablePolicy.rounded(Color.WHITE, radiusPx));
+        int pressed = ColorPolicy.withAlpha(primaryTextColor(context), 0.10f);
+        return new RippleDrawable(ColorStateList.valueOf(pressed), rounded(fill, radiusPx),
+            rounded(Color.WHITE, radiusPx));
+    }
+
+    private static GradientDrawable rounded(int color, float radiusPx) {
+        GradientDrawable shape = new GradientDrawable();
+        shape.setShape(GradientDrawable.RECTANGLE);
+        shape.setColor(color);
+        shape.setCornerRadius(radiusPx);
+        return shape;
+    }
+
+    /** Resolve the framework primary text colour without depending on the Material host layer. */
+    private static int primaryTextColor(Context context) {
+        TypedValue value = new TypedValue();
+        if (!context.getTheme().resolveAttribute(android.R.attr.textColorPrimary, value, true)) {
+            return Color.BLACK;
+        }
+        if (value.type >= TypedValue.TYPE_FIRST_COLOR_INT && value.type <= TypedValue.TYPE_LAST_COLOR_INT) {
+            return value.data;
+        }
+        try {
+            return context.getColorStateList(value.resourceId).getDefaultColor();
+        } catch (RuntimeException ignored) {
+            return Color.BLACK;
+        }
     }
 
     /** Resolve a theme ripple over a fully rounded fill. */
