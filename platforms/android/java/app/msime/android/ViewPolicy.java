@@ -239,6 +239,11 @@ public final class ViewPolicy {
         view.setPadding(horizontal, vertical, horizontal, vertical);
     }
 
+    /** Apply the same pixel inset on all four sides. */
+    public static void setSymmetricPadding(View view, int padding) {
+        setSymmetricPadding(view, padding, padding);
+    }
+
     /** Apply equal padding expressed in density-independent pixels. */
     public static void setSymmetricPaddingDp(Context context, View view, float horizontalDp,
                                              float verticalDp) {

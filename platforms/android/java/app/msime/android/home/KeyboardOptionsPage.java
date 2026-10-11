@@ -253,7 +253,7 @@ public final class KeyboardOptionsPage extends DetailPage {
         LinearLayout strip = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(strip);
         int pad = DimensionPolicy.pixels(context, 12);
-        Ui.setSymmetricPaddingPx(strip, pad);
+        ViewPolicy.setSymmetricPadding(strip, pad);
         LinearLayout plate = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(plate);
         Ui.setHorizontalPaddingDp(plate, context, 10);

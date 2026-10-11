@@ -195,11 +195,6 @@ public final class Ui {
         ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
     }
 
-    /** Apply equal padding on all sides when the value is already in pixels. */
-    public static void setSymmetricPaddingPx(View view, int padding) {
-        ViewPolicy.setPadding(view, padding, padding, padding, padding);
-    }
-
     /** Apply equal horizontal dp padding with no vertical padding. */
     public static void setHorizontalPaddingDp(View view, Context context, float horizontalDp) {
         int horizontal = DimensionPolicy.pixels(context, horizontalDp);
