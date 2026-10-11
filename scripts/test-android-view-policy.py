@@ -64,6 +64,7 @@ def main() -> None:
         "public static void setSymmetricPaddingDp(Context context, View view, float horizontalDp,",
         "public static void setHorizontalPaddingDp(Context context, View view, float horizontalDp)",
         "public static void setPaddingDp(Context context, View view, float leftDp, float topDp,",
+        "public static void setRowPadding(Context context, View view)",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -158,6 +159,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.setPaddingDp(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享四边 dp 内边距策略")
+    if "public static void setRowPadding(" in ui:
+        raise AssertionError("Ui 仍保留标准行内边距转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.setRowPadding(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享行内边距策略")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")
