@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.DrawablePolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
@@ -63,7 +65,7 @@ public final class AccountFragment extends HomeTabFragment {
 
     @Override public void onViewCreated(@NonNull View view, @Nullable Bundle state) {
         View card = view.findViewById(R.id.account_card);
-        ViewPolicy.setBackground(card, Ui.rippleOn(requireContext(), ThemeColorPolicy.card(requireContext()), Ui.dp(requireContext(), 20)));
+        ViewPolicy.setBackground(card, Ui.rippleOn(requireContext(), ThemeColorPolicy.card(requireContext()), DimensionPolicy.pixels(requireContext(), 20)));
         ViewPolicy.bindClick(card, this::openProfile);
         render();
     }

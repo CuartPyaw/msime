@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
@@ -262,7 +264,7 @@ public final class ProfilePage extends DetailPage {
             ThemeColorPolicy.text(context));
         GradientDrawable badge = DrawablePolicy.circle(ThemeColorPolicy.card(context));
         ViewPolicy.setBackground(camera, badge);
-        int pad = Ui.dp(context, 6);
+        int pad = DimensionPolicy.pixels(context, 6);
         Ui.setSymmetricPaddingPx(camera, pad);
         Ui.hideFromAccessibility(camera);
         FrameLayout.LayoutParams cameraParams = Ui.squareFrameParams(context, 28);
@@ -275,14 +277,14 @@ public final class ProfilePage extends DetailPage {
 
         TextView name = Ui.styledLabel(context, profile.displayName(), 22, 700, ThemeColorPolicy.text(context));
         LinearLayout.LayoutParams nameParams = Ui.wrap();
-        nameParams.topMargin = Ui.dp(context, 10);
+        nameParams.topMargin = DimensionPolicy.pixels(context, 10);
         header.addView(name, nameParams);
 
         if (!profile.email().isEmpty()) {
             TextView email = Ui.styledLabel(context, profile.email(), Ui.TEXT_ROW_SUBTITLE, 400,
                 ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams emailParams = Ui.wrap();
-            emailParams.topMargin = Ui.dp(context, 2);
+            emailParams.topMargin = DimensionPolicy.pixels(context, 2);
             header.addView(email, emailParams);
         }
 
@@ -294,7 +296,7 @@ public final class ProfilePage extends DetailPage {
             ViewPolicy.setBackground(chip, DrawablePolicy.pill(ThemeColorPolicy.accentSoft(context)));
             Ui.setSymmetricPaddingDp(chip, context, 10, 3);
             LinearLayout.LayoutParams chipParams = Ui.wrap();
-            chipParams.topMargin = Ui.dp(context, 8);
+            chipParams.topMargin = DimensionPolicy.pixels(context, 8);
             header.addView(chip, chipParams);
         }
         return header;

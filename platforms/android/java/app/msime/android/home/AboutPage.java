@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.DrawablePolicy;
 import app.msime.android.ThemeColorPolicy;
@@ -156,7 +158,7 @@ public final class AboutPage extends DetailPage {
             13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setCentered(footer);
         LinearLayout.LayoutParams footerParams = Ui.matchWidth();
-        footerParams.topMargin = Ui.dp(context, 24);
+        footerParams.topMargin = DimensionPolicy.pixels(context, 24);
         column.addView(footer, footerParams);
 
         if (notices == null) {
@@ -206,23 +208,23 @@ public final class AboutPage extends DetailPage {
         FrameLayout disc = new FrameLayout(context);
         ViewPolicy.setBackground(disc, DrawablePolicy.pill(ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorTertiaryContainer)));
         ImageView mark = ImageViewPolicy.decorative(context, R.drawable.splash_mark);
-        int markSize = Ui.dp(context, 60);
+        int markSize = DimensionPolicy.pixels(context, 60);
         disc.addView(mark, Ui.squareFrameParamsPx(markSize, Gravity.CENTER));
-        int discSize = Ui.dp(context, 116);
+        int discSize = DimensionPolicy.pixels(context, 116);
         header.addView(disc, ViewPolicy.newSquareParamsPx(discSize));
 
         TextView name = Ui.styledLabel(context, getString(R.string.app_name), 22, 700, ThemeColorPolicy.text(context));
         ViewPolicy.setCentered(name);
         name.setAccessibilityHeading(true);
         LinearLayout.LayoutParams nameParams = Ui.wrap();
-        nameParams.topMargin = Ui.dp(context, 18);
+        nameParams.topMargin = DimensionPolicy.pixels(context, 18);
         header.addView(name, nameParams);
 
         TextView version = Ui.styledLabel(context,
             "版本 " + UpdateJobService.currentVersion(context) + " · Android", 13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setCentered(version);
         LinearLayout.LayoutParams versionParams = Ui.wrap();
-        versionParams.topMargin = Ui.dp(context, 6);
+        versionParams.topMargin = DimensionPolicy.pixels(context, 6);
         header.addView(version, versionParams);
 
         if (!play) {
@@ -230,7 +232,7 @@ public final class AboutPage extends DetailPage {
                 20, 0, 36, 96, this::onPill);
             ViewPolicy.setPoliteLiveRegion(button);
             LinearLayout.LayoutParams pillParams = Ui.wrap();
-            pillParams.topMargin = Ui.dp(context, 14);
+            pillParams.topMargin = DimensionPolicy.pixels(context, 14);
             header.addView(button, pillParams);
             pill = button;
         }

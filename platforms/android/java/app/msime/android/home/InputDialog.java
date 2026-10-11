@@ -53,24 +53,24 @@ public final class InputDialog {
         dialog.supportRequestWindowFeature(Window.FEATURE_NO_TITLE);
 
         LinearLayout root = Ui.column(context);
-        ViewPolicy.setBackground(root, DrawablePolicy.rounded(ThemeColorPolicy.sheetBackground(context), Ui.dp(context, Ui.DIALOG_RADIUS)));
+        ViewPolicy.setBackground(root, DrawablePolicy.rounded(ThemeColorPolicy.sheetBackground(context), DimensionPolicy.pixels(context, Ui.DIALOG_RADIUS)));
         root.setClipToOutline(true);
 
         TextView heading = Ui.headingLabel(context, title, Ui.TEXT_DIALOG_TITLE, 600, ThemeColorPolicy.text(context));
         ViewPolicy.setCentered(heading);
         LinearLayout.LayoutParams headingParams = Ui.matchWidth();
-        headingParams.topMargin = Ui.dp(context, 20);
-        headingParams.leftMargin = Ui.dp(context, 20);
-        headingParams.rightMargin = Ui.dp(context, 20);
+        headingParams.topMargin = DimensionPolicy.pixels(context, 20);
+        headingParams.leftMargin = DimensionPolicy.pixels(context, 20);
+        headingParams.rightMargin = DimensionPolicy.pixels(context, 20);
         root.addView(heading, headingParams);
 
         if (message != null && message.length() > 0) {
             TextView note = Ui.centeredLabel(context, message, Ui.TEXT_SHEET_HEADER, 400,
                 ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams params = Ui.matchWidth();
-            params.topMargin = Ui.dp(context, 4);
-            params.leftMargin = Ui.dp(context, 20);
-            params.rightMargin = Ui.dp(context, 20);
+            params.topMargin = DimensionPolicy.pixels(context, 4);
+            params.leftMargin = DimensionPolicy.pixels(context, 20);
+            params.rightMargin = DimensionPolicy.pixels(context, 20);
             root.addView(note, params);
         }
 
@@ -83,20 +83,20 @@ public final class InputDialog {
         TextView cancel = button("取消", 400, ThemeColorPolicy.accent(context));
         ViewPolicy.bindClick(cancel, dialog::cancel);
         buttons.addView(cancel,
-            LayoutPolicy.weightedHeightPxParams(Ui.dp(context, 48), 1f));
+            LayoutPolicy.weightedHeightPxParams(DimensionPolicy.pixels(context, 48), 1f));
         buttons.addView(Ui.divider(context, false));
         primary = button("确定", 600, ThemeColorPolicy.text(context));
         ViewPolicy.bindClick(primary, this::submit);
         buttons.addView(primary,
-            LayoutPolicy.weightedHeightPxParams(Ui.dp(context, 48), 1f));
+            LayoutPolicy.weightedHeightPxParams(DimensionPolicy.pixels(context, 48), 1f));
         root.addView(buttons, Ui.matchWidth());
 
         dialog.setContentView(root);
         Window window = dialog.getWindow();
         if (window != null) {
             window.setBackgroundDrawable(new ColorDrawable(Color.TRANSPARENT));
-            window.setLayout(BoundsPolicy.atMost(Ui.dp(context, Ui.DIALOG_WIDTH),
-                DimensionPolicy.screenWidthPixels(context) - Ui.dp(context, 48)),
+            window.setLayout(BoundsPolicy.atMost(DimensionPolicy.pixels(context, Ui.DIALOG_WIDTH),
+                DimensionPolicy.screenWidthPixels(context) - DimensionPolicy.pixels(context, 48)),
                 ViewGroup.LayoutParams.WRAP_CONTENT);
             window.setDimAmount(0.35f);
             window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE
@@ -117,7 +117,7 @@ public final class InputDialog {
         ViewPolicy.setSingleLine(input);
         input.setInputType(inputType == 0 ? InputType.TYPE_CLASS_TEXT : inputType);
         input.setHintTextColor(ThemeColorPolicy.subText(context));
-        GradientDrawable field = DrawablePolicy.outlined(ThemeColorPolicy.rowBackground(context), Ui.dp(context, 10),
+        GradientDrawable field = DrawablePolicy.outlined(ThemeColorPolicy.rowBackground(context), DimensionPolicy.pixels(context, 10),
             DimensionPolicy.atLeastOnePixel(context, 1), ThemeColorPolicy.hairline(context));
         ViewPolicy.setBackground(input, field);
         Ui.setHorizontalPaddingDp(input, context, 12);
@@ -129,7 +129,7 @@ public final class InputDialog {
             return true;
         });
         LinearLayout.LayoutParams params = Ui.matchWidthHeight(context, 40);
-        params.topMargin = Ui.dp(context, 8);
+        params.topMargin = DimensionPolicy.pixels(context, 8);
         fields.addView(input, params);
         // 前面的输入框回车跳到下一个，最后一个回车就是提交。
         for (EditText earlier : inputs) earlier.setImeOptions(EditorInfo.IME_ACTION_NEXT);

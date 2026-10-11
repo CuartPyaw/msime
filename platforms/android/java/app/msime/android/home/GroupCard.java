@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.DrawablePolicy;
 import app.msime.android.ThemeColorPolicy;
@@ -37,14 +39,14 @@ public final class GroupCard {
         context = parent.getContext();
         group = Ui.column(context);
         LinearLayout.LayoutParams groupParams = Ui.matchWidth();
-        if (parent.getChildCount() > 0) groupParams.topMargin = Ui.dp(context, Ui.GROUP_GAP);
+        if (parent.getChildCount() > 0) groupParams.topMargin = DimensionPolicy.pixels(context, Ui.GROUP_GAP);
 
         if (title != null && title.length() > 0) {
             TextView heading = Ui.groupHeading(context, title);
             Ui.setPaddingDp(heading, context, Ui.GROUP_TITLE_INSET, 0,
                 Ui.GROUP_TITLE_INSET, 2);
             LinearLayout.LayoutParams params = Ui.matchWidth();
-            params.bottomMargin = Ui.dp(context, 2);
+            params.bottomMargin = DimensionPolicy.pixels(context, 2);
             group.addView(heading, params);
         }
 
@@ -79,7 +81,7 @@ public final class GroupCard {
         row.value = trailingValue(row, value);
         ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams params = Ui.squareParams(context, Ui.CHEVRON_SIZE);
-        params.setMarginStart(Ui.dp(context, 6));
+        params.setMarginStart(DimensionPolicy.pixels(context, 6));
         row.view.addView(chevron, params);
         row.setAction(action);
         return add(row);
@@ -134,15 +136,15 @@ public final class GroupCard {
         control.setValue(value);
         control.setContentDescription(title);
         LinearLayout.LayoutParams sliderParams = new LinearLayout.LayoutParams(
-            Ui.dp(context, Ui.SLIDER_WIDTH), Ui.dp(context, Ui.SLIDER_TOUCH_HEIGHT));
-        sliderParams.setMarginStart(Ui.dp(context, Ui.ROW_GAP));
+            DimensionPolicy.pixels(context, Ui.SLIDER_WIDTH), DimensionPolicy.pixels(context, Ui.SLIDER_TOUCH_HEIGHT));
+        sliderParams.setMarginStart(DimensionPolicy.pixels(context, Ui.ROW_GAP));
         row.view.addView(control, sliderParams);
 
         TextView text = Ui.styledLabel(context, label.apply(control.value()), 13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setEndCenteredVertically(text);
         ViewPolicy.setSingleLine(text);
             Ui.hideFromAccessibility(text);
-        row.view.addView(text, new LinearLayout.LayoutParams(Ui.dp(context, Ui.SLIDER_LABEL_WIDTH),
+        row.view.addView(text, new LinearLayout.LayoutParams(DimensionPolicy.pixels(context, Ui.SLIDER_LABEL_WIDTH),
             ViewGroup.LayoutParams.WRAP_CONTENT));
         control.setOnValueChange(current -> {
             CharSequence shown = label.apply(current);
@@ -201,7 +203,7 @@ public final class GroupCard {
         if (dividerInset < 0 || card.getChildCount() == 0) return;
         View rule = Ui.divider(context, true);
         LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) rule.getLayoutParams();
-        params.setMarginStart(Ui.dp(context, dividerInset));
+        params.setMarginStart(DimensionPolicy.pixels(context, dividerInset));
         card.addView(rule, params);
     }
 
@@ -244,7 +246,7 @@ public final class GroupCard {
             texts.addView(title);
             subtitle = Ui.styledLabel(context, subtitleText, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams subtitleParams = Ui.wrap();
-            subtitleParams.topMargin = Ui.dp(owner.context, 1);
+            subtitleParams.topMargin = DimensionPolicy.pixels(owner.context, 1);
             texts.addView(subtitle, subtitleParams);
             setText(subtitle, subtitleText);
             view.addView(texts, Ui.weightWrap(1f));

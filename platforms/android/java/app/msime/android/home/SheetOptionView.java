@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.LayoutPolicy;
@@ -34,10 +36,10 @@ final class SheetOptionView {
         FrameLayout.LayoutParams textParams = LayoutPolicy.frameParamsPx(
             ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
             Gravity.CENTER);
-        textParams.leftMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
-        textParams.rightMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_INSET);
-        textParams.topMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_VERTICAL_INSET);
-        textParams.bottomMargin = Ui.dp(context, Ui.SHEET_OPTION_TEXT_VERTICAL_INSET);
+        textParams.leftMargin = DimensionPolicy.pixels(context, Ui.SHEET_OPTION_TEXT_INSET);
+        textParams.rightMargin = DimensionPolicy.pixels(context, Ui.SHEET_OPTION_TEXT_INSET);
+        textParams.topMargin = DimensionPolicy.pixels(context, Ui.SHEET_OPTION_TEXT_VERTICAL_INSET);
+        textParams.bottomMargin = DimensionPolicy.pixels(context, Ui.SHEET_OPTION_TEXT_VERTICAL_INSET);
         row.addView(text, textParams);
 
         if (selected) {
@@ -45,7 +47,7 @@ final class SheetOptionView {
                 ThemeColorPolicy.accent(context));
             FrameLayout.LayoutParams checkParams = Ui.squareFrameParams(context, Ui.SHEET_CHECK_SIZE);
             checkParams.gravity = Gravity.CENTER_VERTICAL | Gravity.END;
-            checkParams.setMarginEnd(Ui.dp(context, Ui.SHEET_CHECK_END_MARGIN));
+            checkParams.setMarginEnd(DimensionPolicy.pixels(context, Ui.SHEET_CHECK_END_MARGIN));
             row.addView(check, checkParams);
         }
 

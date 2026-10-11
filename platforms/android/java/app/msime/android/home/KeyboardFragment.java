@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import app.msime.android.NumberPolicy;
 
@@ -63,7 +65,7 @@ public final class KeyboardFragment extends HomeTabFragment {
     @Override public void onViewCreated(@NonNull View view, @Nullable Bundle state) {
         View card = view.findViewById(R.id.keyboard_status_card);
         ViewPolicy.setBackground(card, DrawablePolicy.rounded(ThemeColorPolicy.card(requireContext()),
-            Ui.dp(requireContext(), Ui.NAV_GROUP_RADIUS)));
+            DimensionPolicy.pixels(requireContext(), Ui.NAV_GROUP_RADIUS)));
 
         MaterialButton trial = view.findViewById(R.id.keyboard_try);
         // The Apple app opens an editor here rather than the system picker: trying the keyboard
@@ -83,7 +85,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         search.setOnQueryChange(query -> applySearch());
 
         View bar = view.findViewById(R.id.keyboard_bar);
-        int threshold = Ui.dp(requireContext(), Ui.COLLAPSE_THRESHOLD);
+        int threshold = DimensionPolicy.pixels(requireContext(), Ui.COLLAPSE_THRESHOLD);
         NestedScrollView scroll = view.findViewById(R.id.keyboard_scroll);
         scroll.setOnScrollChangeListener(
             (NestedScrollView.OnScrollChangeListener) (scrolled, x, y, oldX, oldY) -> {
@@ -107,7 +109,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         // Preparation is silent while it works out and while it is done; it only takes the screen
         // when the keyboard cannot reach the Engine, which is the one case the user has to know.
         TextView preparation = view.findViewById(R.id.keyboard_preparation);
-        ViewPolicy.setBackground(preparation, DrawablePolicy.rounded(ThemeColorPolicy.page(requireContext()), Ui.dp(requireContext(), 12)));
+        ViewPolicy.setBackground(preparation, DrawablePolicy.rounded(ThemeColorPolicy.page(requireContext()), DimensionPolicy.pixels(requireContext(), 12)));
         ViewPolicy.bindClick(preparation, () -> FirstRunPreparation.retry(requireContext()));
         preparationListener = status -> {
             if (!isAdded()) return;

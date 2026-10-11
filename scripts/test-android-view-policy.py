@@ -72,11 +72,11 @@ def main() -> None:
         raise AssertionError("ImeBottomBar 没有调用共享条件可见性策略")
     if "view.setMinHeight(dp(context, heightDp));" in ui:
         raise AssertionError("Ui 仍直接实现文本最小高度策略")
-    if "ViewPolicy.setTextMinHeight(view, dp(context, heightDp));" not in ui:
+    if "ViewPolicy.setTextMinHeight(view, DimensionPolicy.pixels(context, heightDp));" not in ui:
         raise AssertionError("Ui 没有调用共享文本最小高度策略")
     if "public static void setTextMinWidthDp(" in ui:
         raise AssertionError("Ui 仍保留文本最小宽度转发方法")
-    if "ViewPolicy.setTextMinWidth(button, dp(context, minWidthDp));" not in ui:
+    if "ViewPolicy.setTextMinWidth(button, DimensionPolicy.pixels(context, minWidthDp));" not in ui:
         raise AssertionError("Ui 按钮没有直接调用共享文本最小宽度策略")
     if "public static void setEnabledLook(" in ui:
         raise AssertionError("Ui 仍保留无调用方的启用状态转发方法")

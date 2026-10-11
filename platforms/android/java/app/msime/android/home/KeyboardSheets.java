@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
@@ -195,7 +197,7 @@ final class KeyboardSheets {
         }
         ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
-        chevronParams.setMarginStart(Ui.dp(context, 6));
+        chevronParams.setMarginStart(DimensionPolicy.pixels(context, 6));
         row.addView(chevron, chevronParams);
         row.setContentDescription(title
             + (subtitle == null || subtitle.isEmpty() ? "" : "，" + subtitle)
@@ -227,12 +229,12 @@ final class KeyboardSheets {
             ViewPolicy.setCentered(icon);
             Ui.hideFromAccessibility(icon);
             LinearLayout.LayoutParams iconParams = Ui.squareParams(context, iconSize);
-            iconParams.setMarginEnd(Ui.dp(context, iconMarginEnd));
+            iconParams.setMarginEnd(DimensionPolicy.pixels(context, iconMarginEnd));
             row.addView(icon, iconParams);
         }
         TextView label = Ui.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
         LinearLayout.LayoutParams labelParams = Ui.weightWrap(1f);
-        labelParams.setMarginStart(Ui.dp(context, labelMarginStart));
+        labelParams.setMarginStart(DimensionPolicy.pixels(context, labelMarginStart));
         row.addView(label, labelParams);
         ViewPolicy.makeClickable(row, context, action);
         row.setAccessibilityDelegate(buttonDelegate(title));
@@ -274,7 +276,7 @@ final class KeyboardSheets {
     static TextView bigButton(Context context, String label, boolean primary, Runnable action) {
         TextView button = Ui.textButton(context, label, Ui.TEXT_ROW_TITLE, 600,
             primary ? ThemeColorPolicy.onAccent(context) : ThemeColorPolicy.text(context),
-            Ui.rippleOn(context, primary ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.card(context), Ui.dp(context, 16)),
+            Ui.rippleOn(context, primary ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, 16)),
             Ui.ACTION_BUTTON_MIN_HEIGHT, action);
         Ui.setHorizontalPaddingDp(button, context, 16);
         button.setAccessibilityDelegate(buttonDelegate(label));
@@ -293,10 +295,10 @@ final class KeyboardSheets {
     static TextView badge(Context context, String text) {
         TextView badge = Ui.styledLabel(context, text, 15, 600, ThemeColorPolicy.accent(context));
         ViewPolicy.setCentered(badge);
-        ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), Ui.dp(context, 8)));
+        ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), DimensionPolicy.pixels(context, 8)));
             Ui.hideFromAccessibility(badge);
         LinearLayout.LayoutParams params = Ui.squareParams(context, 32);
-        params.setMarginEnd(Ui.dp(context, Ui.ROW_GAP));
+        params.setMarginEnd(DimensionPolicy.pixels(context, Ui.ROW_GAP));
         badge.setLayoutParams(params);
         return badge;
     }
@@ -336,7 +338,7 @@ final class KeyboardSheets {
 
         ImageView glyph = ImageViewPolicy.decorative(context, icon, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams glyphParams = Ui.squareParams(context, 22);
-        glyphParams.setMarginEnd(Ui.dp(context, 18));
+        glyphParams.setMarginEnd(DimensionPolicy.pixels(context, 18));
         row.addView(glyph, glyphParams);
 
         LinearLayout texts = Ui.column(context);
@@ -356,7 +358,7 @@ final class KeyboardSheets {
         if (action != null) {
             ImageView chevron = ImageViewPolicy.chevron(context, ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams chevronParams = Ui.squareParams(context, Ui.CHEVRON_SIZE);
-            chevronParams.setMarginStart(Ui.dp(context, 6));
+            chevronParams.setMarginStart(DimensionPolicy.pixels(context, 6));
             row.addView(chevron, chevronParams);
             ViewPolicy.makeClickable(row, context, action);
         }

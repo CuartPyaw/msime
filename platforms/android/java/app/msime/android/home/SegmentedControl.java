@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
 import android.graphics.Color;
@@ -36,9 +38,9 @@ public final class SegmentedControl extends LinearLayout {
         super(context, attrs);
         setOrientation(HORIZONTAL);
         ViewPolicy.setCenteredVertically(this);
-        int pad = Ui.dp(context, 2);
+        int pad = DimensionPolicy.pixels(context, 2);
         Ui.setSymmetricPaddingPx(this, pad);
-        GradientDrawable frame = DrawablePolicy.outlined(Color.TRANSPARENT, 9999f, Ui.dp(context, 1),
+        GradientDrawable frame = DrawablePolicy.outlined(Color.TRANSPARENT, 9999f, DimensionPolicy.pixels(context, 1),
             ThemeColorPolicy.outline(context));
         setBackground(frame);
     }
@@ -69,7 +71,7 @@ public final class SegmentedControl extends LinearLayout {
             LayoutParams params = fill
                 ? new LayoutParams(0, LayoutParams.MATCH_PARENT, 1f)
                 : new LayoutParams(LayoutParams.WRAP_CONTENT, LayoutParams.MATCH_PARENT);
-            if (i > 0) params.setMarginStart(Ui.dp(context, 2));
+            if (i > 0) params.setMarginStart(DimensionPolicy.pixels(context, 2));
             addView(segment, params);
             segments.add(segment);
         }

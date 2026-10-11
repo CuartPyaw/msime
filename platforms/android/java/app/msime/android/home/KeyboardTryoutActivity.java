@@ -105,7 +105,7 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
         ViewPolicy.setBackgroundColor(inputBar, ThemeColorPolicy.card(this));
         // 固定 20 dp 圆角而不是全圆：单行 40 dp 高时看起来仍是胶囊，长到几行时是圆角矩形，不会撑成一个椭圆。
         android.graphics.drawable.GradientDrawable pill = DrawablePolicy.outlined(ThemeColorPolicy.page(this),
-            Ui.dp(this, 20), Ui.dp(this, 1), ThemeColorPolicy.hairline(this));
+            DimensionPolicy.pixels(this, 20), DimensionPolicy.pixels(this, 1), ThemeColorPolicy.hairline(this));
         ViewPolicy.setBackground(field, pill);
         // 聊天页的回车是发送：键盘回车显示「发送」，按下等同右边的发送键，不再插入换行把输入框越撑越高。长句仍会折行显示，最多 4 行。
         field.setHorizontallyScrolling(false);
@@ -417,13 +417,13 @@ public final class KeyboardTryoutActivity extends AppCompatActivity {
         bubble.setTextIsSelectable(true);
         setBubbleText(bubble, text, !mine);
         if (!mine) bubble.setMovementMethod(android.text.method.LinkMovementMethod.getInstance());
-        ViewPolicy.setLineSpacing(bubble, Ui.dp(this, 3), 1f);
-        ViewPolicy.setBackground(bubble, DrawablePolicy.rounded(mine ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.card(this), Ui.dp(this, 18)));
+        ViewPolicy.setLineSpacing(bubble, DimensionPolicy.pixels(this, 3), 1f);
+        ViewPolicy.setBackground(bubble, DrawablePolicy.rounded(mine ? ThemeColorPolicy.accent(this) : ThemeColorPolicy.card(this), DimensionPolicy.pixels(this, 18)));
         Ui.setSymmetricPaddingDp(bubble, this, 14, 10);
         bubble.setMaxWidth(Math.round(DimensionPolicy.screenWidthPixels(this) * 0.8f));
         LinearLayout.LayoutParams params = Ui.wrap();
         params.gravity = mine ? Gravity.END : Gravity.START;
-        if (chat.getChildCount() > 0) params.topMargin = Ui.dp(this, 10);
+        if (chat.getChildCount() > 0) params.topMargin = DimensionPolicy.pixels(this, 10);
         chat.addView(bubble, params);
         scrollToEnd();
         return bubble;

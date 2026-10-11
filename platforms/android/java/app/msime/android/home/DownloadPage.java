@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ImageViewPolicy;
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
@@ -61,16 +63,16 @@ public final class DownloadPage extends DetailPage {
     private View hero(Context context) {
         LinearLayout card = Ui.row(context);
         ViewPolicy.setCenteredVertically(card);
-        ViewPolicy.setBackground(card, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), Ui.dp(context, 20)));
-        int pad = Ui.dp(context, 16);
+        ViewPolicy.setBackground(card, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), DimensionPolicy.pixels(context, 20)));
+        int pad = DimensionPolicy.pixels(context, 16);
         Ui.setSymmetricPaddingPx(card, pad);
 
         FrameLayout tile = new FrameLayout(context);
-        ViewPolicy.setBackground(tile, DrawablePolicy.rounded(ThemeColorPolicy.accent(context), Ui.dp(context, 12)));
+        ViewPolicy.setBackground(tile, DrawablePolicy.rounded(ThemeColorPolicy.accent(context), DimensionPolicy.pixels(context, 12)));
         ImageView icon = ImageViewPolicy.decorative(context, R.drawable.ic_ms_link, ThemeColorPolicy.onAccent(context));
-        int iconSize = Ui.dp(context, 24);
+        int iconSize = DimensionPolicy.pixels(context, 24);
         tile.addView(icon, Ui.squareFrameParamsPx(iconSize, Gravity.CENTER));
-        int tileSize = Ui.dp(context, 44);
+        int tileSize = DimensionPolicy.pixels(context, 44);
         card.addView(tile, ViewPolicy.newSquareParamsPx(tileSize));
 
         LinearLayout texts = Ui.column(context);
@@ -79,14 +81,14 @@ public final class DownloadPage extends DetailPage {
         TextView link = Ui.styledLabel(context, DOWNLOAD_LABEL, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
         texts.addView(link);
         LinearLayout.LayoutParams textParams = Ui.weightWrap(1f);
-        textParams.setMarginStart(Ui.dp(context, 14));
+        textParams.setMarginStart(DimensionPolicy.pixels(context, 14));
         card.addView(texts, textParams);
 
         TextView copy = Ui.pillButton(context, "复制链接", Ui.TEXT_BUTTON_SMALL, 600, ThemeColorPolicy.onAccent(context),
             14, 6, Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, () -> copyLink(context));
         copy.setContentDescription("复制下载页链接");
         LinearLayout.LayoutParams copyParams = Ui.wrap();
-        copyParams.setMarginStart(Ui.dp(context, 12));
+        copyParams.setMarginStart(DimensionPolicy.pixels(context, 12));
         card.addView(copy, copyParams);
         return card;
     }
@@ -100,9 +102,9 @@ public final class DownloadPage extends DetailPage {
         GroupCard.Row row = group.value(title, subtitle, null);
         Context context = row.view().getContext();
         ImageView image = ImageViewPolicy.decorative(context, icon, ThemeColorPolicy.text(context));
-        int size = Ui.dp(context, 24);
+        int size = DimensionPolicy.pixels(context, 24);
         LinearLayout.LayoutParams params = ViewPolicy.newSquareParamsPx(size);
-        params.setMarginEnd(Ui.dp(context, 18));
+        params.setMarginEnd(DimensionPolicy.pixels(context, 18));
         ((LinearLayout) row.view()).addView(image, 0, params);
         return row;
     }

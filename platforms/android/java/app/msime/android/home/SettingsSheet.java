@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
 import android.view.View;
@@ -56,8 +58,8 @@ public final class SettingsSheet {
     public void addHeading(String text) {
         TextView heading = Ui.groupHeading(context, text);
         LinearLayout.LayoutParams params = Ui.matchWidth();
-        params.topMargin = Ui.dp(context, 16);
-        params.bottomMargin = Ui.dp(context, 2);
+        params.topMargin = DimensionPolicy.pixels(context, 16);
+        params.bottomMargin = DimensionPolicy.pixels(context, 2);
         content.addView(heading, params);
     }
 
@@ -65,7 +67,7 @@ public final class SettingsSheet {
     public void addNote(String text) {
         TextView note = Ui.styledLabel(context, text, 12, 400, ThemeColorPolicy.subText(context));
         LinearLayout.LayoutParams params = Ui.matchWidth();
-        params.topMargin = Ui.dp(context, 14);
+        params.topMargin = DimensionPolicy.pixels(context, 14);
         content.addView(note, params);
     }
 
@@ -74,7 +76,7 @@ public final class SettingsSheet {
         TextView status = Ui.liveStatus(context, 12);
         ViewPolicy.setCenteredVertically(status);
         LinearLayout.LayoutParams params = Ui.matchWidthHeight(context, 20);
-        params.topMargin = Ui.dp(context, 10);
+        params.topMargin = DimensionPolicy.pixels(context, 10);
         content.addView(status, params);
         return status;
     }

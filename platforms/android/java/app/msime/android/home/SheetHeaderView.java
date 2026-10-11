@@ -1,5 +1,7 @@
 package app.msime.android.home;
 
+import app.msime.android.DimensionPolicy;
+
 import app.msime.android.ThemeColorPolicy;
 import android.content.Context;
 import android.widget.LinearLayout;
@@ -16,8 +18,8 @@ public final class SheetHeaderView {
             @Nullable CharSequence subtitle) {
         LinearLayout header = Ui.column(context);
         ViewPolicy.setCenteredHorizontally(header);
-        int horizontal = Ui.dp(context, 16);
-        ViewPolicy.setPadding(header, horizontal, 0, horizontal, Ui.dp(context, 12));
+        int horizontal = DimensionPolicy.pixels(context, 16);
+        ViewPolicy.setPadding(header, horizontal, 0, horizontal, DimensionPolicy.pixels(context, 12));
 
         TextView heading = Ui.headingLabel(context, title, Ui.TEXT_SHEET_HEADER, 600,
             ThemeColorPolicy.subText(context));
@@ -28,7 +30,7 @@ public final class SheetHeaderView {
             TextView note = Ui.centeredLabel(context, subtitle, Ui.TEXT_SHEET_HEADER, 400,
                 ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams params = Ui.wrap();
-            params.topMargin = Ui.dp(context, 2);
+            params.topMargin = DimensionPolicy.pixels(context, 2);
             header.addView(note, params);
         }
         return header;
