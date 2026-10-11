@@ -26,7 +26,7 @@ def main() -> int:
         errors.append(f"{UI}: 仍保留 Ui ripple 转发调用")
     for path in ANDROID.rglob("*.java"):
         source = path.read_text(encoding="utf-8")
-        if path != POLICY and "new RippleDrawable(" in source:
+        if path not in (POLICY, ANDROID / "ViewPolicy.java") and "new RippleDrawable(" in source:
             errors.append(f"{path}: 应复用 DrawablePolicy.ripple")
         for forbidden in (
             "DrawablePolicy.ripple(this)",

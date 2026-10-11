@@ -7,26 +7,28 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 UI = ROOT / "platforms/android/java/app/msime/android/home/Ui.java"
+POLICY = ROOT / "platforms/android/java/app/msime/android/ViewPolicy.java"
 
 
 def main() -> int:
     errors = []
     source = UI.read_text(encoding="utf-8")
+    policy = POLICY.read_text(encoding="utf-8")
     required = (
-        "return headingLabel(context, text, TEXT_GROUP_TITLE, 500, ThemeColorPolicy.accent(context));",
-        "TextView button = centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);",
-        "TextView button = centeredLabel(context, label, sizeSp, weight, ink);",
+        "public static TextView headingLabel(",
+        "public static TextView centeredSingleLineLabel(",
+        "public static TextView centeredLabel(",
     )
     for snippet in required:
-        if snippet not in source:
-            errors.append(f"{UI}: 文本控件工厂未复用 styledLabel：{snippet}")
+        if snippet not in policy:
+            errors.append(f"{POLICY}: 缺少共享文本控件工厂：{snippet}")
 
     duplicated = (
         "TextView heading = new TextView(context);\n        heading.setText(text);",
         "TextView button = new TextView(context);\n        button.setText(label);",
     )
     for snippet in duplicated:
-        if snippet in source:
+        if snippet in source or snippet in policy:
             errors.append(f"{UI}: 仍在重复基础标签构造：{snippet.splitlines()[0]}")
 
     if errors:

@@ -8,30 +8,29 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 HOME = ROOT / "platforms/android/java/app/msime/android/home"
-UI = HOME / "Ui.java"
+POLICY = ROOT / "platforms/android/java/app/msime/android/ViewPolicy.java"
 
 
 def main() -> int:
     errors = []
-    ui = UI.read_text(encoding="utf-8")
+    policy = POLICY.read_text(encoding="utf-8")
     required = (
-        "public static TextView singleLineLabel(Context context, CharSequence text, int sizeSp, int weight,",
-        "TextView singleLine = styledLabel(context, text, sizeSp, weight, color);",
-        "public static TextView centeredSingleLineLabel(Context context, CharSequence text, int sizeSp,",
-        "TextView singleLine = centeredLabel(context, text, sizeSp, weight, color);",
-        "TextView button = centeredSingleLineLabel(context, label, Math.round(sizeSp), weight, ink);",
+        "public static TextView singleLineLabel(Context context, CharSequence text, int sizeSp,\n                                           int weight, int color)",
+        "TextView view = newTextView(context, text);",
+        "public static TextView centeredSingleLineLabel(Context context, CharSequence text, int sizeSp,\n                                                   int weight, int color)",
+        "setSingleLine(view);",
     )
     for snippet in required:
-        if snippet not in ui:
-            errors.append(f"{UI}: 单行标签工厂缺少：{snippet}")
+        if snippet not in policy:
+            errors.append(f"{POLICY}: 单行标签工厂缺少：{snippet}")
 
     consumers = {
-        "AiSkinPage.java": ("Ui.singleLineLabel(", 2),
-        "LexiconPage.java": ("Ui.centeredSingleLineLabel(", 1),
-        "SegmentedControl.java": ("Ui.centeredSingleLineLabel(", 1),
+        "AiSkinPage.java": ("ViewPolicy.singleLineLabel(", 2),
+        "LexiconPage.java": ("ViewPolicy.centeredSingleLineLabel(", 1),
+        "SegmentedControl.java": ("ViewPolicy.centeredSingleLineLabel(", 1),
     }
     duplicated = re.compile(
-        r"Ui\.(?:styledLabel|centeredLabel)\([^;]{0,300};\s*ViewPolicy\.setSingleLine\(",
+        r"ViewPolicy\.(?:styledLabel|centeredLabel)\([^;]{0,300};\s*ViewPolicy\.setSingleLine\(",
         re.DOTALL,
     )
     for name, (factory, minimum) in consumers.items():

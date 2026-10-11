@@ -14,7 +14,7 @@ class KeyboardTryoutSourceContract(unittest.TestCase):
     def test_editing_during_chat_keeps_stop_enabled(self):
         source = SOURCE.read_text()
         watcher = re.search(
-            r"Ui\.afterTextChanged\(field,\s*text\s*->\s*\{(?P<body>.*?)\n\s*\}\);",
+            r"ViewPolicy\.afterTextChanged\(field,\s*text\s*->\s*\{(?P<body>.*?)\n\s*\}\);",
             source,
             re.S,
         )
