@@ -9,6 +9,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[1]
 HOME = ROOT / "platforms/android/java/app/msime/android/home"
 UI = HOME / "Ui.java"
+PAGE_INSETS = HOME / "PageInsetsPolicy.java"
 EXPECTED_CALLERS = (
     "AiSkinPage.java",
     "FeedbackPage.java",
@@ -42,10 +43,11 @@ def main() -> int:
         errors.append(f"{UI}: 不应保留 hairlinePx 转发方法")
     if "public static int bottomContentInset(" in ui:
         errors.append(f"{UI}: 不应保留 bottomContentInset 转发方法")
-    if "public static void bindPageBottomInsets(View view)" not in ui:
-        errors.append(f"{UI}: 缺少页面底部避让监听绑定方法")
-    if "WindowInsetsPolicy.bottomContentInset(" not in ui:
-        errors.append(f"{UI}: 页面底部避让监听未复用 WindowInsetsPolicy")
+    page_insets = PAGE_INSETS.read_text(encoding="utf-8") if PAGE_INSETS.exists() else ""
+    if "public static void bind(View view)" not in page_insets:
+        errors.append(f"{PAGE_INSETS}: 缺少页面底部避让监听绑定方法")
+    if "WindowInsetsPolicy.bottomContentInset(" not in page_insets:
+        errors.append(f"{PAGE_INSETS}: 页面底部避让监听未复用 WindowInsetsPolicy")
     if "public static LinearLayout.LayoutParams matchWidthHeightPx(" in ui:
         errors.append(f"{UI}: 不应保留 matchWidthHeightPx 转发方法")
     if re.search(r"(?<![.\w])matchWidthHeightPx\(", ui):
@@ -120,7 +122,7 @@ def main() -> int:
     for name in PAGE_BOTTOM_INSET_CALLERS:
         path = HOME / name
         source = path.read_text(encoding="utf-8")
-        if "Ui.bindPageBottomInsets(scroll);" not in source:
+        if "PageInsetsPolicy.bind(scroll);" not in source:
             errors.append(f"{path}: 未复用页面底部避让监听绑定方法")
         if "ViewCompat.setOnApplyWindowInsetsListener(" in source:
             errors.append(f"{path}: 不应重复绑定页面底部避让监听")
