@@ -288,7 +288,7 @@ final class KeyboardSheets {
     static LinearLayout baseRow(Context context) {
         LinearLayout row = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(row);
-        Ui.setRowMinimumHeight(row, context);
+        ViewPolicy.setRowMinimumHeight(context, row);
         ViewPolicy.setRowPadding(context, row);
         return row;
     }

@@ -65,6 +65,7 @@ def main() -> None:
         "public static void setHorizontalPaddingDp(Context context, View view, float horizontalDp)",
         "public static void setPaddingDp(Context context, View view, float leftDp, float topDp,",
         "public static void setRowPadding(Context context, View view)",
+        "public static void setRowMinimumHeight(Context context, View view)",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -164,6 +165,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.setRowPadding(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享行内边距策略")
+    if "public static void setRowMinimumHeight(" in ui:
+        raise AssertionError("Ui 仍保留标准行最小高度转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.setRowMinimumHeight(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享行最小高度策略")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")
