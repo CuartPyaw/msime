@@ -205,7 +205,7 @@ public final class AboutPage extends DetailPage {
     private View header(Context context, boolean play) {
         LinearLayout header = LayoutPolicy.column(context);
         ViewPolicy.setCenteredHorizontally(header);
-        Ui.setPaddingDp(header, context, 0, 8, 0, 20);
+        ViewPolicy.setPaddingDp(context, header, 0, 8, 0, 20);
 
         FrameLayout disc = new FrameLayout(context);
         ViewPolicy.setBackground(disc, DrawablePolicy.pill(ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorTertiaryContainer)));

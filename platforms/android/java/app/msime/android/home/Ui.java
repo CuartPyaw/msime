@@ -195,13 +195,6 @@ public final class Ui {
         ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
     }
 
-    /** Apply four-sided padding expressed in density-independent pixels. */
-    public static void setPaddingDp(View view, Context context, float leftDp, float topDp,
-                                    float rightDp, float bottomDp) {
-        ViewPolicy.setPadding(view, DimensionPolicy.pixels(context, leftDp), DimensionPolicy.pixels(context, topDp),
-            DimensionPolicy.pixels(context, rightDp), DimensionPolicy.pixels(context, bottomDp));
-    }
-
     /** 让页面底部避开导航栏、底部标签栏和输入法，并保留标准内容留白。 */
     public static void bindPageBottomInsets(View view) {
         Context context = view.getContext();

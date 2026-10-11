@@ -261,6 +261,13 @@ public final class ViewPolicy {
         setHorizontalPadding(view, DimensionPolicy.pixels(context, horizontalDp));
     }
 
+    /** Apply four-sided padding expressed in density-independent pixels. */
+    public static void setPaddingDp(Context context, View view, float leftDp, float topDp,
+                                    float rightDp, float bottomDp) {
+        setPadding(view, DimensionPolicy.pixels(context, leftDp), DimensionPolicy.pixels(context, topDp),
+            DimensionPolicy.pixels(context, rightDp), DimensionPolicy.pixels(context, bottomDp));
+    }
+
     /** Clear all view padding. */
     public static void clearPadding(View view) {
         view.setPadding(0, 0, 0, 0);

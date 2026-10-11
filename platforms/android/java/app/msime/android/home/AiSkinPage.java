@@ -290,7 +290,7 @@ public final class AiSkinPage extends DetailPage {
 
         GroupCard previewGroup = GroupCard.add(target, null);
         LinearLayout card = previewGroup.card();
-        Ui.setPaddingDp(card, context, 14, 14, 14, 12);
+        ViewPolicy.setPaddingDp(context, card, 14, 14, 14, 12);
         LinearLayout header = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(header);
         LinearLayout heading = LayoutPolicy.column(context);
@@ -364,13 +364,13 @@ public final class AiSkinPage extends DetailPage {
         ViewPolicy.setTopStart(input);
         input.setFilters(new InputFilter[] {new InputFilter.LengthFilter(SkinJobsApi.MAX_PROMPT_CHARACTERS)});
         ViewPolicy.clearBackground(input);
-        Ui.setPaddingDp(input, context, 16, 12, 16, 4);
+        ViewPolicy.setPaddingDp(context, input, 16, 12, 16, 4);
         ViewPolicy.setEnabled(input, !s.busy);
         describe.card().addView(input, LayoutPolicy.matchWidthWrapParams());
         HorizontalScrollView chipScroll = new HorizontalScrollView(context);
         chipScroll.setHorizontalScrollBarEnabled(false);
         LinearLayout chips = LayoutPolicy.row(context);
-        Ui.setPaddingDp(chips, context, 12, 4, 12, 12);
+        ViewPolicy.setPaddingDp(context, chips, 12, 4, 12, 12);
         List<TextView> chipViews = new ArrayList<>(SUGGESTIONS.length);
         for (String suggestion : SUGGESTIONS) {
             TextView chip = ViewPolicy.singleLineLabel(context, suggestion, 13, 400, ThemeColorPolicy.text(context));

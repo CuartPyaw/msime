@@ -239,13 +239,13 @@ public final class StatisticsFragment extends HomeTabFragment {
         TextView total = ViewPolicy.label(context,
             figure(context, NumberPolicy.grouped(overview.weekTotal()), 40, "字"),
             40, ThemeColorPolicy.text(context));
-        Ui.setPaddingDp(total, context, 0, 4, 0, 0);
+        ViewPolicy.setPaddingDp(context, total, 0, 4, 0, 0);
         hero.addView(total);
         String delta = TypingStatisticsSummary.weekDelta(overview.weekTotal(), overview.previousWeekTotal());
         if (delta != null) {
             TextView change = ViewPolicy.label(context, delta, 13, ThemeColorPolicy.accent(context));
             ViewPolicy.setTypefaceStyle(change, Typeface.BOLD);
-        Ui.setPaddingDp(change, context, 0, 4, 0, 0);
+        ViewPolicy.setPaddingDp(context, change, 0, 4, 0, 0);
             hero.addView(change);
         }
         TrendChart chart = new TrendChart(context);
@@ -466,7 +466,7 @@ public final class StatisticsFragment extends HomeTabFragment {
         tile.addView(ViewPolicy.label(context, title, 13, ThemeColorPolicy.text(context)));
         TextView number = ViewPolicy.label(context, figure(context, value, 24,
             "—".equals(value) ? "" : unit), 24, ThemeColorPolicy.text(context));
-        Ui.setPaddingDp(number, context, 0, 6, 0, 6);
+        ViewPolicy.setPaddingDp(context, number, 0, 6, 0, 6);
         tile.addView(number);
         tile.addView(ViewPolicy.label(context, note, 12, highlight ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.subText(context)));
         tile.setContentDescription(title + " " + value + ("—".equals(value) ? "" : " " + unit) + "，" + note);
