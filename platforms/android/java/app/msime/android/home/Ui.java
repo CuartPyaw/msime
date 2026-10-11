@@ -166,19 +166,5 @@ public final class Ui {
 
     // ---- 读取 ----
 
-    /** 让页面底部避开导航栏、底部标签栏和输入法，并保留标准内容留白。 */
-    public static void bindPageBottomInsets(View view) {
-        Context context = view.getContext();
-        int base = DimensionPolicy.pixels(context, PAGE_PADDING_BOTTOM);
-        int tabs = DimensionPolicy.pixels(context, TAB_BAR_HEIGHT);
-        ViewCompat.setOnApplyWindowInsetsListener(view, (target, insets) -> {
-            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
-            Insets ime = insets.getInsets(WindowInsetsCompat.Type.ime());
-            int bottom = WindowInsetsPolicy.bottomContentInset(bars.bottom, tabs, ime.bottom, base);
-            ViewPolicy.setBottomPadding(target, bottom);
-            return insets;
-        });
-        ViewCompat.requestApplyInsets(view);
-    }
 
 }

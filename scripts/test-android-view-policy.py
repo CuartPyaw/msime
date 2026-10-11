@@ -241,11 +241,12 @@ def main() -> None:
             raise AssertionError(f"{path} 没有直接调用共享底部内边距策略")
     if "public static void makeClickable(View view, Context context, Runnable action)" not in view_policy:
         raise AssertionError("ViewPolicy 缺少共享点击策略")
-    if "ViewPolicy.setBottomPadding(target, bottom);" not in ui:
-        raise AssertionError("Ui 页面避让监听没有调用共享底部内边距策略")
+    page_insets = (HOME / "PageInsetsPolicy.java").read_text(encoding="utf-8")
+    if "ViewPolicy.setBottomPadding(target, bottom);" not in page_insets:
+        raise AssertionError("PageInsetsPolicy 没有调用共享底部内边距策略")
     for name in ("DetailPage.java", "KeyboardFragment.java"):
         source = (HOME / name).read_text(encoding="utf-8")
-        if "Ui.bindPageBottomInsets(scroll);" not in source:
+        if "PageInsetsPolicy.bind(scroll);" not in source:
             raise AssertionError(f"{name} 没有复用页面底部避让监听")
         if "ViewPolicy.setBottomPadding(target, bottom);" in source:
             raise AssertionError(f"{name} 仍重复应用底部内边距")
