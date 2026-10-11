@@ -135,7 +135,7 @@ public final class ClipboardEditPage extends DetailPage {
         target.addView(buttons, buttonsParams);
         boolean editing = state == State.READY;
         TextView cancel = Ui.textButton(context, editing ? "取消" : "返回", 16, 600, ThemeColorPolicy.accent(context),
-            Ui.rippleOn(context, ThemeColorPolicy.rowBackground(context), DimensionPolicy.pixels(context, Ui.GROUP_RADIUS)),
+            ViewPolicy.ripple(context, ThemeColorPolicy.rowBackground(context), DimensionPolicy.pixels(context, Ui.GROUP_RADIUS)),
             Ui.ACTION_BUTTON_MIN_HEIGHT, this::leave);
         buttons.addView(cancel, LayoutPolicy.weightedHeightPxParams(DimensionPolicy.pixels(context, Ui.ACTION_BUTTON_MIN_HEIGHT), 1f));
         if (editing) {
@@ -161,7 +161,7 @@ public final class ClipboardEditPage extends DetailPage {
         ViewPolicy.setTextColor(button, ready ? ThemeColorPolicy.onAccent(context) : ThemeColorPolicy.subText(context));
         int fill = ready ? ThemeColorPolicy.accent(context)
             : ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorSurfaceContainerHighest);
-        ViewPolicy.setBackground(button, Ui.rippleOn(context, fill, DimensionPolicy.pixels(context, Ui.GROUP_RADIUS)));
+        ViewPolicy.setBackground(button, ViewPolicy.ripple(context, fill, DimensionPolicy.pixels(context, Ui.GROUP_RADIUS)));
     }
 
     private void submit() {

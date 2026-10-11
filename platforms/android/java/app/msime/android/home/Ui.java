@@ -258,18 +258,6 @@ public final class Ui {
         return handle;
     }
 
-    /** Create a pill-shaped press ripple with a fully rounded mask. */
-    public static Drawable pillRipple(Context context, @ColorInt int fill) {
-        return rippleOn(context, fill, 9999f);
-    }
-
-    /** Create a theme ripple over a rounded fill and mask. */
-    public static Drawable rippleOn(Context context, @ColorInt int fill, float radiusPx) {
-        int pressed = ColorPolicy.withAlpha(ThemeColorPolicy.text(context), 0.10f);
-        return DrawablePolicy.ripple(pressed, DrawablePolicy.rounded(fill, radiusPx),
-            DrawablePolicy.rounded(Color.WHITE, radiusPx));
-    }
-
     /** Create a text label with the supplied text, size in sp, and colour. */
     public static TextView label(Context context, CharSequence text, float sizeSp, @ColorInt int color) {
         TextView view = new TextView(context);

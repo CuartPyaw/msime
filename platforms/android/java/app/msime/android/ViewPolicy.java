@@ -3,6 +3,7 @@ package app.msime.android;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Paint;
+import android.graphics.Color;
 import android.graphics.drawable.Drawable;
 import android.graphics.Typeface;
 import android.view.Gravity;
@@ -196,6 +197,18 @@ public final class ViewPolicy {
             return null;
         }
         return context.getDrawable(value.resourceId);
+    }
+
+    /** Resolve a theme ripple over a caller-supplied rounded fill and mask. */
+    public static Drawable ripple(Context context, int fill, float radiusPx) {
+        int pressed = ColorPolicy.withAlpha(ThemeColorPolicy.text(context), 0.10f);
+        return DrawablePolicy.ripple(pressed, DrawablePolicy.rounded(fill, radiusPx),
+            DrawablePolicy.rounded(Color.WHITE, radiusPx));
+    }
+
+    /** Resolve a theme ripple over a fully rounded fill. */
+    public static Drawable pillRipple(Context context, int fill) {
+        return ripple(context, fill, 9999f);
     }
 
     /** Apply the standard theme ripple and optional click behavior to a view. */

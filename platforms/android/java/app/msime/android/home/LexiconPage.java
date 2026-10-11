@@ -208,7 +208,7 @@ public final class LexiconPage extends DetailPage {
         } else {
             button = Ui.centeredSingleLineLabel(context, added ? "已添加" : "添加中",
                 Ui.TEXT_BUTTON_SMALL, 500, ThemeColorPolicy.subText(context));
-            ViewPolicy.setBackground(button, Ui.pillRipple(context,
+            ViewPolicy.setBackground(button, ViewPolicy.pillRipple(context,
                 added ? ThemeColorPolicy.rowBackground(context) : ThemeColorPolicy.accentSoft(context)));
             Ui.setButtonPadding(button, context);
             Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);

@@ -278,7 +278,7 @@ final class KeyboardSheets {
     static TextView bigButton(Context context, String label, boolean primary, Runnable action) {
         TextView button = Ui.textButton(context, label, Ui.TEXT_ROW_TITLE, 600,
             primary ? ThemeColorPolicy.onAccent(context) : ThemeColorPolicy.text(context),
-            Ui.rippleOn(context, primary ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, 16)),
+            ViewPolicy.ripple(context, primary ? ThemeColorPolicy.accent(context) : ThemeColorPolicy.card(context), DimensionPolicy.pixels(context, 16)),
             Ui.ACTION_BUTTON_MIN_HEIGHT, action);
         Ui.setHorizontalPaddingDp(button, context, 16);
         button.setAccessibilityDelegate(buttonDelegate(label));
