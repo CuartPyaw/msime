@@ -56,7 +56,7 @@ public final class InputDialog {
         ViewPolicy.setBackground(root, DrawablePolicy.rounded(ThemeColorPolicy.sheetBackground(context), DimensionPolicy.pixels(context, Ui.DIALOG_RADIUS)));
         root.setClipToOutline(true);
 
-        TextView heading = Ui.headingLabel(context, title, Ui.TEXT_DIALOG_TITLE, 600, ThemeColorPolicy.text(context));
+        TextView heading = ViewPolicy.headingLabel(context, title, Ui.TEXT_DIALOG_TITLE, 600, ThemeColorPolicy.text(context));
         ViewPolicy.setCentered(heading);
         LinearLayout.LayoutParams headingParams = LayoutPolicy.matchWidthWrapParams();
         headingParams.topMargin = DimensionPolicy.pixels(context, 20);
