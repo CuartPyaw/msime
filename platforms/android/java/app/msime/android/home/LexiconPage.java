@@ -212,7 +212,7 @@ public final class LexiconPage extends DetailPage {
             ViewPolicy.setBackground(button, ViewPolicy.pillRipple(context,
                 added ? ThemeColorPolicy.rowBackground(context) : ThemeColorPolicy.accentSoft(context)));
             Ui.setButtonPadding(button, context);
-            Ui.setTextMinHeightDp(button, context, Ui.COMPACT_BUTTON_MIN_HEIGHT);
+            ViewPolicy.setTextMinHeightDp(context, button, Ui.COMPACT_BUTTON_MIN_HEIGHT);
             ViewPolicy.setEnabled(button, false);
         }
         button.setAccessibilityDelegate(KeyboardSheets.buttonDelegate(button.getText() + "，" + item.name()));
