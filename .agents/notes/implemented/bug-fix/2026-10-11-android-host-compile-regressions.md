@@ -10,6 +10,11 @@ Status: implemented
 
 让 `ViewPolicy` 的圆角波纹只依赖 Android framework：从 `android.R.attr.textColorPrimary` 解析按压颜色，并在本类中构造圆角内容和 `RippleDrawable`。移除 `TextPolicy` 的悬空 Javadoc。这样保留现有调用方，同时恢复无 AAR host 检查的编译边界。
 
+## Alternatives considered
+
+- 只补一个 Material import：host 检查仍无法编译 `ThemeColorPolicy`，因为它依赖 AndroidX/Material AAR。
+- 让 host 检查跳过 `ViewPolicy`：会失去通用交互策略的编译覆盖，掩盖同类边界回归。
+
 ## Verification
 
 修复前 `ANDROID_SDK_ROOT=... bash platforms/android/check-host.sh` 在 `ViewPolicy` 找不到 `ThemeColorPolicy`；改为移除 Material/宿主层依赖后又暴露 `DrawablePolicy` 和悬空 Javadoc，最终修复后通过，运行了 202 个 Android JVM 冒烟、设备源编译和服务/资源检查。
