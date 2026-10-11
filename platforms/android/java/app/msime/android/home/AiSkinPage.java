@@ -296,7 +296,7 @@ public final class AiSkinPage extends DetailPage {
         LinearLayout heading = LayoutPolicy.column(context);
         title = ViewPolicy.singleLineLabel(context, "", 17, 600, ThemeColorPolicy.text(context));
         heading.addView(title);
-        subtitle = Ui.styledLabel(context, "", 13, 400, ThemeColorPolicy.subText(context));
+        subtitle = ViewPolicy.styledLabel(context, "", 13, 400, ThemeColorPolicy.subText(context));
         heading.addView(subtitle);
         header.addView(heading, LayoutPolicy.weightedWrapParams(1f));
         SegmentedControl layout = new SegmentedControl(context);
@@ -318,7 +318,7 @@ public final class AiSkinPage extends DetailPage {
         ProgressBar spinner = new ProgressBar(context);
         ProgressBarPolicy.setIndeterminateTint(spinner, ThemeColorPolicy.accent(context));
         overlay.addView(spinner, LayoutPolicy.squareParams(context, 32));
-        TextView designing = Ui.styledLabel(context, "正在设计…", 14, 500, ThemeColorPolicy.text(context));
+        TextView designing = ViewPolicy.styledLabel(context, "正在设计…", 14, 500, ThemeColorPolicy.text(context));
         overlay.addView(designing);
         busyOverlay = overlay;
         stage.addView(overlay, new FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT,
@@ -329,7 +329,7 @@ public final class AiSkinPage extends DetailPage {
 
         LinearLayout colours = LayoutPolicy.row(context);
         ViewPolicy.setCenteredVertically(colours);
-        TextView label = Ui.styledLabel(context, "配色", 13, 400, ThemeColorPolicy.subText(context));
+        TextView label = ViewPolicy.styledLabel(context, "配色", 13, 400, ThemeColorPolicy.subText(context));
         colours.addView(label);
         palette = LayoutPolicy.row(context);
         LinearLayout.LayoutParams paletteParams = LayoutPolicy.wrapParams();

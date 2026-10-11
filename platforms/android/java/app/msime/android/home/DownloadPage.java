@@ -55,7 +55,7 @@ public final class DownloadPage extends DetailPage {
         getRow(mobile, R.drawable.ic_ms_smartphone, "iOS", "TestFlight 测试版", "ios");
         getRow(mobile, R.drawable.ic_ms_tablet, "iPadOS", "与 iPhone 共用同一个 TestFlight", "ios");
         GroupCard.Row android = row(mobile, R.drawable.ic_ms_smartphone, "Android", "各版本的 APK 在 GitHub 发布页");
-        TextView current = Ui.styledLabel(context, "当前设备", Ui.TEXT_BUTTON_SMALL, 500, ThemeColorPolicy.text(context));
+        TextView current = ViewPolicy.styledLabel(context, "当前设备", Ui.TEXT_BUTTON_SMALL, 500, ThemeColorPolicy.text(context));
         LinearLayout.LayoutParams currentParams = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         ((LinearLayout) android.view()).addView(current, currentParams);
         getRow(mobile, R.drawable.ic_ms_smartphone, "HarmonyOS", "从源码构建", "harmony");
@@ -78,9 +78,9 @@ public final class DownloadPage extends DetailPage {
         card.addView(tile, ViewPolicy.newSquareParamsPx(tileSize));
 
         LinearLayout texts = LayoutPolicy.column(context);
-        TextView title = Ui.styledLabel(context, "在电脑上打开", Ui.TEXT_ROW_TITLE, 600, ThemeColorPolicy.text(context));
+        TextView title = ViewPolicy.styledLabel(context, "在电脑上打开", Ui.TEXT_ROW_TITLE, 600, ThemeColorPolicy.text(context));
         texts.addView(title);
-        TextView link = Ui.styledLabel(context, DOWNLOAD_LABEL, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
+        TextView link = ViewPolicy.styledLabel(context, DOWNLOAD_LABEL, Ui.TEXT_ROW_SUBTITLE, 400, ThemeColorPolicy.subText(context));
         texts.addView(link);
         LinearLayout.LayoutParams textParams = LayoutPolicy.weightedWrapParams(1f);
         textParams.setMarginStart(DimensionPolicy.pixels(context, 14));

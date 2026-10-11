@@ -159,12 +159,12 @@ public final class ClipboardSearchPage extends DetailPage {
         Ui.setPaddingDp(row, context, 16, 12, 8, 12);
 
         LinearLayout texts = LayoutPolicy.column(context);
-        TextView text = Ui.styledLabel(context, item.text(), 15, 400, ThemeColorPolicy.text(context));
+        TextView text = ViewPolicy.styledLabel(context, item.text(), 15, 400, ThemeColorPolicy.text(context));
         ViewPolicy.setMaxLinesEllipsized(text, 3);
         texts.addView(text);
         String meta = meta(item, now);
         if (!meta.isEmpty()) {
-            TextView label = Ui.styledLabel(context, meta, 12, 400, ThemeColorPolicy.subText(context));
+            TextView label = ViewPolicy.styledLabel(context, meta, 12, 400, ThemeColorPolicy.subText(context));
             LinearLayout.LayoutParams metaParams = LayoutPolicy.wrapParams();
             metaParams.topMargin = DimensionPolicy.pixels(context, 4);
             texts.addView(label, metaParams);

@@ -227,14 +227,14 @@ final class KeyboardSheets {
         LinearLayout row = baseRow(context);
         Ui.setMinimumHeightDp(row, context, Ui.COMPACT_ROW_MIN_HEIGHT);
         if (glyph != null) {
-            TextView icon = Ui.styledLabel(context, glyph, 22, 400, ThemeColorPolicy.accent(context));
+            TextView icon = ViewPolicy.styledLabel(context, glyph, 22, 400, ThemeColorPolicy.accent(context));
             ViewPolicy.setCentered(icon);
             Ui.hideFromAccessibility(icon);
             LinearLayout.LayoutParams iconParams = LayoutPolicy.squareParams(context, iconSize);
             iconParams.setMarginEnd(DimensionPolicy.pixels(context, iconMarginEnd));
             row.addView(icon, iconParams);
         }
-        TextView label = Ui.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
+        TextView label = ViewPolicy.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.accent(context));
         LinearLayout.LayoutParams labelParams = LayoutPolicy.weightedWrapParams(1f);
         labelParams.setMarginStart(DimensionPolicy.pixels(context, labelMarginStart));
         row.addView(label, labelParams);
@@ -261,7 +261,7 @@ final class KeyboardSheets {
                 ThemeColorPolicy.accentSoft(context), ThemeColorPolicy.accent(context), Ui.BUTTON_PADDING_H, Ui.BUTTON_PADDING_V,
                 Ui.COMPACT_BUTTON_MIN_HEIGHT, 0, action);
         } else {
-            button = Ui.styledLabel(context, label, Ui.TEXT_BUTTON_SMALL, 500, ThemeColorPolicy.subText(context));
+            button = ViewPolicy.styledLabel(context, label, Ui.TEXT_BUTTON_SMALL, 500, ThemeColorPolicy.subText(context));
             ViewPolicy.setCentered(button);
             ViewPolicy.setSingleLine(button);
             Ui.setButtonPadding(button, context);
@@ -295,7 +295,7 @@ final class KeyboardSheets {
 
     /** 32dp 的圆角方块徽标，供词库和语言行共用。 */
     static TextView badge(Context context, String text) {
-        TextView badge = Ui.styledLabel(context, text, 15, 600, ThemeColorPolicy.accent(context));
+        TextView badge = ViewPolicy.styledLabel(context, text, 15, 600, ThemeColorPolicy.accent(context));
         ViewPolicy.setCentered(badge);
         ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), DimensionPolicy.pixels(context, 8)));
             Ui.hideFromAccessibility(badge);
@@ -307,11 +307,11 @@ final class KeyboardSheets {
 
     static LinearLayout texts(Context context, String title, @Nullable String subtitle, int titleColor) {
         LinearLayout texts = LayoutPolicy.column(context);
-        TextView heading = Ui.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, titleColor);
+        TextView heading = ViewPolicy.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, titleColor);
         ViewPolicy.setSingleLine(heading);
         texts.addView(heading);
         if (subtitle != null && !subtitle.isEmpty()) {
-            TextView detail = Ui.styledLabel(context, subtitle, Ui.TEXT_ROW_SUBTITLE, 400,
+            TextView detail = ViewPolicy.styledLabel(context, subtitle, Ui.TEXT_ROW_SUBTITLE, 400,
                 ThemeColorPolicy.subText(context));
             ViewPolicy.setSingleLine(detail);
             texts.addView(detail);
@@ -344,10 +344,10 @@ final class KeyboardSheets {
         row.addView(glyph, glyphParams);
 
         LinearLayout texts = LayoutPolicy.column(context);
-        TextView heading = Ui.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
+        TextView heading = ViewPolicy.styledLabel(context, title, Ui.TEXT_ROW_TITLE, 400, ThemeColorPolicy.text(context));
         texts.addView(heading);
         if (subtitle != null) {
-            TextView detail = Ui.styledLabel(context, subtitle, 12, 400, ThemeColorPolicy.subText(context));
+            TextView detail = ViewPolicy.styledLabel(context, subtitle, 12, 400, ThemeColorPolicy.subText(context));
             texts.addView(detail);
         }
         row.addView(texts, LayoutPolicy.weightedWrapParams(1f));

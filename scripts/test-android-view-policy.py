@@ -56,6 +56,7 @@ def main() -> None:
         "public static TextView centeredSingleLineLabel(Context context, CharSequence text, int sizeSp,",
         "public static TextView liveStatus(Context context, int sizeSp, int color)",
         "public static EditText styledInput(Context context, int sizeSp, int weight, int color)",
+        "public static TextView styledLabel(Context context, CharSequence text, int sizeSp,",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -103,8 +104,13 @@ def main() -> None:
         raise AssertionError("Ui 仍保留文本样式转发方法")
     if re.search(r"(?<![.\w])style\(", ui):
         raise AssertionError("Ui 仍调用已移除的文本样式方法")
-    if ui.count("ViewPolicy.style(") != 2:
+    if ui.count("ViewPolicy.style(") != 1:
         raise AssertionError("Ui 文本工厂没有直接调用共享样式方法")
+    if "public static TextView styledLabel(" in ui:
+        raise AssertionError("Ui 仍保留 styledLabel 转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.styledLabel(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享样式标签工厂")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")

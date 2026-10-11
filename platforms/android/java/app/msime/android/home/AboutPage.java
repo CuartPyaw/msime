@@ -156,7 +156,7 @@ public final class AboutPage extends DetailPage {
             links.nav("在管理界面中查看", "更新日志、致谢与更多信息", null, this::openTauriAbout);
         }
 
-        TextView footer = Ui.styledLabel(context, "© 2026 Metasequoia · 输入内容默认只在本机处理",
+        TextView footer = ViewPolicy.styledLabel(context, "© 2026 Metasequoia · 输入内容默认只在本机处理",
             13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setCentered(footer);
         LinearLayout.LayoutParams footerParams = LayoutPolicy.matchWidthWrapParams();
@@ -215,14 +215,14 @@ public final class AboutPage extends DetailPage {
         int discSize = DimensionPolicy.pixels(context, 116);
         header.addView(disc, ViewPolicy.newSquareParamsPx(discSize));
 
-        TextView name = Ui.styledLabel(context, getString(R.string.app_name), 22, 700, ThemeColorPolicy.text(context));
+        TextView name = ViewPolicy.styledLabel(context, getString(R.string.app_name), 22, 700, ThemeColorPolicy.text(context));
         ViewPolicy.setCentered(name);
         name.setAccessibilityHeading(true);
         LinearLayout.LayoutParams nameParams = LayoutPolicy.wrapParams();
         nameParams.topMargin = DimensionPolicy.pixels(context, 18);
         header.addView(name, nameParams);
 
-        TextView version = Ui.styledLabel(context,
+        TextView version = ViewPolicy.styledLabel(context,
             "版本 " + UpdateJobService.currentVersion(context) + " · Android", 13, 400, ThemeColorPolicy.subText(context));
         ViewPolicy.setCentered(version);
         LinearLayout.LayoutParams versionParams = LayoutPolicy.wrapParams();

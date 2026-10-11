@@ -44,6 +44,14 @@ public final class ViewPolicy {
         setTextColor(view, color);
     }
 
+    /** Create a text label with the shared size, weight, and colour policy. */
+    public static TextView styledLabel(Context context, CharSequence text, int sizeSp,
+                                       int weight, int color) {
+        TextView view = newTextView(context, text);
+        style(view, sizeSp, weight, color);
+        return view;
+    }
+
     /** Create a styled text label constrained to one line. */
     public static TextView singleLineLabel(Context context, CharSequence text, int sizeSp,
                                            int weight, int color) {

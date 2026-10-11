@@ -242,15 +242,6 @@ public final class Ui {
         ViewPolicy.hideFromAccessibility(view);
     }
 
-    /** Create a text label with the shared size, weight, and colour policy. */
-    public static TextView styledLabel(Context context, CharSequence text, int sizeSp, int weight,
-                                       @ColorInt int color) {
-        TextView view = new TextView(context);
-        view.setText(text);
-        ViewPolicy.style(view, sizeSp, weight, color);
-        return view;
-    }
-
     /**
      * 行尾的值文字：单行，最宽只占行内可用宽度的 {@link #TRAILING_VALUE_MAX_SHARE}，再长就在末尾省略。
      *
