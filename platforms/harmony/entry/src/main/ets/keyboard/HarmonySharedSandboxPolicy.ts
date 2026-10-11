@@ -9,18 +9,18 @@
  */
 export type HarmonySharedSandboxStatus = {
   available: false;
-  kind: 'fallback';
-  reason: 'data-group-id-unconfigured';
+  kind: "fallback";
+  reason: "data-group-id-unconfigured";
 };
 
 export class HarmonySharedSandboxPolicy {
-  private static readonly DATA_GROUP_ID: string = '';
+  private static readonly DATA_GROUP_ID: string = "";
 
   static status(): HarmonySharedSandboxStatus {
     return {
       available: false,
-      kind: 'fallback',
-      reason: 'data-group-id-unconfigured',
+      kind: "fallback",
+      reason: "data-group-id-unconfigured",
     };
   }
 }

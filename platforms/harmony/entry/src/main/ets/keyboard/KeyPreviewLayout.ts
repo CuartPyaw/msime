@@ -1,4 +1,4 @@
-import { KeyboardGeometry } from './KeyboardGeometry';
+import { KeyboardGeometry } from "./KeyboardGeometry";
 
 /**
  * 按键弹出预览气泡的位置，移植自 platforms/android/java/app/msime/android/keyboard/KeyboardKeyPreview.java 的静态几何：宽度为按键宽度的 138%（权重超过 1.2 的按键为 150%），高 54 vp，底边在按键顶边下方 6 vp，以按键为中心并限制在键盘内。所有值的单位都是 vp，相对于键盘左上角。

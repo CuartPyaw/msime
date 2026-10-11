@@ -24,7 +24,10 @@ console.log("Harmony shared sandbox capability policy");
 group("an unsigned or unconfigured build reports the fallback explicitly", () => {
   const status = HarmonySharedSandboxPolicy.status();
   check(status.kind === "fallback", "empty group id uses the fallback state directory");
-  check(status.reason === "data-group-id-unconfigured", "the reason identifies the missing capability");
+  check(
+    status.reason === "data-group-id-unconfigured",
+    "the reason identifies the missing capability",
+  );
   check(!status.available, "the fallback is not reported as shared");
 });
 

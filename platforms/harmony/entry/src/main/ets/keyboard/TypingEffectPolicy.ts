@@ -219,7 +219,8 @@ export class TypingEffectPolicy {
     if (effect.tierUp) {
       base *= 1.5;
     }
-    const scaled: number = (base * TypingEffectPolicy.boundedIntensity(intensity)) / DEFAULT_INTENSITY;
+    const scaled: number =
+      (base * TypingEffectPolicy.boundedIntensity(intensity)) / DEFAULT_INTENSITY;
     return Math.min(scaled, 0.6);
   }
 
