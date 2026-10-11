@@ -49,6 +49,7 @@ public final class ExpressionPage extends DetailPage {
 
     @Override public void onDestroyView() {
         column = null;
+        installing.clear();
         super.onDestroyView();
     }
 

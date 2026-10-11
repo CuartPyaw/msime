@@ -75,6 +75,7 @@ public final class LexiconPage extends DetailPage {
 
     @Override public void onDestroyView() {
         column = null;
+        installing.clear();
         super.onDestroyView();
     }
 
