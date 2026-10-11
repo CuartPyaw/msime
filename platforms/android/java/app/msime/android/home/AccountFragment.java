@@ -263,7 +263,7 @@ public final class AccountFragment extends HomeTabFragment {
             }
         });
         if (real) {
-            ViewPolicy.setBackground(sync, DrawablePolicy.ripple(context));
+            ViewPolicy.setBackground(sync, ViewPolicy.ripple(context));
             ViewPolicy.setInteractive(sync, true);
             ViewPolicy.bindClick(sync, () -> setSync(!toggle.isChecked()));
         } else {

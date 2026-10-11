@@ -164,7 +164,7 @@ public final class SkinsPage extends ReloadingDetailPage {
 
         cell.setContentDescription("皮肤 " + card.title());
         ViewCompat.setStateDescription(cell, card.selected() ? "已选中" : "未选中");
-        Ui.makeClickable(cell, context, () -> {
+        ViewPolicy.makeClickable(cell, context, () -> {
             if (!card.selected()) select(card);
         });
         return cell;
@@ -191,7 +191,7 @@ public final class SkinsPage extends ReloadingDetailPage {
         nameParams.topMargin = Ui.dp(context, 8);
         cell.addView(name, nameParams);
         cell.setAccessibilityDelegate(KeyboardSheets.buttonDelegate("AI 设计皮肤，描述一句话生成"));
-        Ui.makeClickable(cell, context,
+        ViewPolicy.makeClickable(cell, context,
             () -> SettingsNavigator.open(requireContext(), PageId.AI_SKIN, null));
         return cell;
     }

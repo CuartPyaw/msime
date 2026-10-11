@@ -27,7 +27,7 @@ final class SheetOptionView {
             int color, boolean bold, Runnable action) {
         FrameLayout row = new FrameLayout(context);
         Ui.setMinimumHeightDp(row, context, Ui.SHEET_OPTION_HEIGHT);
-        Ui.makeClickable(row, context, action);
+        ViewPolicy.makeClickable(row, context, action);
 
         TextView text = Ui.centeredLabel(context, nested ? label + " ›" : label,
             Ui.TEXT_SHEET_OPTION, bold ? 600 : 400, color);

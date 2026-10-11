@@ -56,7 +56,7 @@ public final class ImageViewPolicy {
         button.setImageDrawable(icon);
         setTint(button, tint);
         button.setScaleType(ImageView.ScaleType.CENTER);
-        ViewPolicy.setBackground(button, DrawablePolicy.ripple(context));
+        ViewPolicy.setBackground(button, ViewPolicy.ripple(context));
         button.setContentDescription(description);
         ViewPolicy.setInteractive(button, true);
         ViewPolicy.bindOptionalClick(button, action);

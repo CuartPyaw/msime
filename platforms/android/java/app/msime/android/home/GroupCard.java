@@ -108,7 +108,7 @@ public final class GroupCard {
             onChange.accept(control.isChecked());
         });
         ViewPolicy.setInteractive(row.view, true);
-        ViewPolicy.setBackground(row.view, DrawablePolicy.ripple(context));
+        ViewPolicy.setBackground(row.view, ViewPolicy.ripple(context));
         row.view.setAccessibilityDelegate(new View.AccessibilityDelegate() {
             @Override public void onInitializeAccessibilityNodeInfo(View host, AccessibilityNodeInfo info) {
                 super.onInitializeAccessibilityNodeInfo(host, info);

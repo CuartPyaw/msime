@@ -160,7 +160,7 @@ public final class CloudClipboardPage extends DetailPage {
         if (!current.items().isEmpty()) {
             TextView clear = Ui.styledLabel(context, "清空", Ui.TEXT_GROUP_TITLE, 500, ThemeColorPolicy.accent(context));
         Ui.setPaddingDp(clear, context, 8, 4, 0, 4);
-            Ui.makeClickable(clear, context, this::confirmClear);
+            ViewPolicy.makeClickable(clear, context, this::confirmClear);
             header.addView(clear);
         }
         LinearLayout.LayoutParams headerParams = Ui.matchWidth();
@@ -215,7 +215,7 @@ public final class CloudClipboardPage extends DetailPage {
         }));
 
         row.setContentDescription(item.text() + "，" + meta(item) + "，点按复制");
-        Ui.makeClickable(row, context, () -> copy(item));
+        ViewPolicy.makeClickable(row, context, () -> copy(item));
         return row;
     }
 

@@ -171,7 +171,7 @@ public final class ClipboardSearchPage extends DetailPage {
         row.addView(ImageViewPolicy.iconButton(context, R.drawable.ic_ms_delete, ThemeColorPolicy.subText(context), "删除", 40, () -> delete(item)));
 
         row.setContentDescription(item.text() + (meta.isEmpty() ? "" : "，" + meta) + "，点按复制");
-        Ui.makeClickable(row, context, () -> copy(item));
+        ViewPolicy.makeClickable(row, context, () -> copy(item));
         return row;
     }
 

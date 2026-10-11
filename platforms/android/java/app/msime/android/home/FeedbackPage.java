@@ -125,7 +125,7 @@ public final class FeedbackPage extends DetailPage {
         LinearLayout.LayoutParams labelParams = Ui.wrap();
         labelParams.setMarginStart(Ui.dp(requireContext(), 10));
         add.addView(label, labelParams);
-        Ui.makeClickable(add, context, () -> picker.launch("image/*"));
+        ViewPolicy.makeClickable(add, context, () -> picker.launch("image/*"));
         card.addView(add, Ui.matchWidth());
         addShot = add;
 

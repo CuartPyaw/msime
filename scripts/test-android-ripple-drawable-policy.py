@@ -15,10 +15,12 @@ def main() -> int:
     for snippet in (
         "public static RippleDrawable ripple(int color, Drawable content, Drawable mask)",
         "return new RippleDrawable(ColorStateList.valueOf(color), content, mask);",
-        "public static Drawable ripple(Context context)",
     ):
         if snippet not in policy:
             errors.append(f"{POLICY}: 缺少 {snippet}")
+    view_policy = (ANDROID / "ViewPolicy.java").read_text(encoding="utf-8")
+    if "public static Drawable ripple(Context context)" not in view_policy:
+        errors.append(f"{ANDROID / 'ViewPolicy.java'}: 缺少主题 ripple 工厂")
     ui = UI.read_text(encoding="utf-8")
     if "Ui.ripple(" in ui:
         errors.append(f"{UI}: 仍保留 Ui ripple 转发调用")
