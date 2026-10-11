@@ -166,13 +166,6 @@ public final class Ui {
 
     // ---- 读取 ----
 
-    /** Apply the standard compact action-button insets to a view. */
-    public static void setButtonPadding(View view, Context context) {
-        int horizontal = DimensionPolicy.pixels(context, BUTTON_PADDING_H);
-        int vertical = DimensionPolicy.pixels(context, BUTTON_PADDING_V);
-        ViewPolicy.setPadding(view, horizontal, vertical, horizontal, vertical);
-    }
-
     /** 让页面底部避开导航栏、底部标签栏和输入法，并保留标准内容留白。 */
     public static void bindPageBottomInsets(View view) {
         Context context = view.getContext();

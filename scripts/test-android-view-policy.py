@@ -68,6 +68,7 @@ def main() -> None:
         "public static void setRowMinimumHeight(Context context, View view)",
         "public static void setMinimumHeightDp(Context context, View view, float heightDp)",
         "public static void setTextMinHeightDp(Context context, TextView view, float heightDp)",
+        "public static void setButtonPadding(Context context, View view)",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -182,6 +183,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.setTextMinHeightDp(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本最小高度 dp 策略")
+    if "public static void setButtonPadding(" in ui:
+        raise AssertionError("Ui 仍保留按钮内边距转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.setButtonPadding(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享按钮内边距策略")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")

@@ -264,7 +264,7 @@ final class KeyboardSheets {
             button = ViewPolicy.styledLabel(context, label, Ui.TEXT_BUTTON_SMALL, 500, ThemeColorPolicy.subText(context));
             ViewPolicy.setCentered(button);
             ViewPolicy.setSingleLine(button);
-            Ui.setButtonPadding(button, context);
+            ViewPolicy.setButtonPadding(context, button);
             ViewPolicy.setTextMinHeightDp(context, button, Ui.COMPACT_BUTTON_MIN_HEIGHT);
             ViewPolicy.setEnabled(button, false);
         }
