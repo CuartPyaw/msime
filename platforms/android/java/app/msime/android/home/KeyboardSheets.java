@@ -229,7 +229,7 @@ final class KeyboardSheets {
         if (glyph != null) {
             TextView icon = ViewPolicy.styledLabel(context, glyph, 22, 400, ThemeColorPolicy.accent(context));
             ViewPolicy.setCentered(icon);
-            Ui.hideFromAccessibility(icon);
+            ViewPolicy.hideFromAccessibility(icon);
             LinearLayout.LayoutParams iconParams = LayoutPolicy.squareParams(context, iconSize);
             iconParams.setMarginEnd(DimensionPolicy.pixels(context, iconMarginEnd));
             row.addView(icon, iconParams);
@@ -298,7 +298,7 @@ final class KeyboardSheets {
         TextView badge = ViewPolicy.styledLabel(context, text, 15, 600, ThemeColorPolicy.accent(context));
         ViewPolicy.setCentered(badge);
         ViewPolicy.setBackground(badge, DrawablePolicy.rounded(ThemeColorPolicy.accentSoft(context), DimensionPolicy.pixels(context, 8)));
-            Ui.hideFromAccessibility(badge);
+            ViewPolicy.hideFromAccessibility(badge);
         LinearLayout.LayoutParams params = LayoutPolicy.squareParams(context, 32);
         params.setMarginEnd(DimensionPolicy.pixels(context, Ui.ROW_GAP));
         badge.setLayoutParams(params);

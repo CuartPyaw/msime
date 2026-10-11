@@ -236,9 +236,4 @@ public final class Ui {
         ViewCompat.requestApplyInsets(view);
     }
 
-    /** Exclude a decorative view from the accessibility tree. */
-    public static void hideFromAccessibility(View view) {
-        ViewPolicy.hideFromAccessibility(view);
-    }
-
 }

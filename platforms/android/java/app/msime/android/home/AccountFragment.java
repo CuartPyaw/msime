@@ -255,7 +255,7 @@ public final class AccountFragment extends HomeTabFragment {
         MsSwitch toggle = new MsSwitch(context);
         toggle.setChecked(real && state.syncEnabled());
         ViewPolicy.setInteractive(toggle, false);
-        Ui.hideFromAccessibility(toggle);
+        ViewPolicy.hideFromAccessibility(toggle);
             LinearLayout.LayoutParams switchParams = LayoutPolicy.rowGapParams(context, Ui.ROW_GAP);
         sync.addView(toggle, switchParams);
         sync.setAccessibilityDelegate(new View.AccessibilityDelegate() {

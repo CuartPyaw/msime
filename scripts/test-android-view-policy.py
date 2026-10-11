@@ -60,6 +60,7 @@ def main() -> None:
         "public static TextView textButton(Context context, CharSequence label, int sizeSp, int weight,",
         "public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,",
         "public static TextView trailingValue(Context context, CharSequence text, int sizeSp, int color)",
+        "public static void hideFromAccessibility(View view)",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -129,6 +130,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.trailingValue(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享尾值工厂")
+    if "public static void hideFromAccessibility(" in ui:
+        raise AssertionError("Ui 仍保留无障碍隐藏转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.hideFromAccessibility(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享无障碍隐藏策略")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")
