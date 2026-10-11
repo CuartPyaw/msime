@@ -87,6 +87,7 @@ public final class DeveloperPage extends DetailPage {
         // leave the rebuilt page permanently disabled, and never retain a full access token past
         // the view that displayed it.
         busy = false;
+        confirming = false;
         freshToken = null;
         super.onDestroyView();
     }
