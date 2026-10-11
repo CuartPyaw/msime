@@ -363,9 +363,7 @@ public final class DeviceDataApi {
 
     /** 给人看的相对时间：一分钟内「刚刚」，然后「N 分钟前」「N 小时前」「N 天前」；时间未知（0）时为空字符串。 */
     public static String relativeTime(long nowMillis, long thenMillis) {
-        if (thenMillis <= 0) return "";
-        long minutes = BoundsPolicy.nonNegative(nowMillis - thenMillis) / 60_000L;
-        return RelativeTimePolicy.minutesAgo(minutes);
+        return RelativeTimePolicy.millisAgo(nowMillis, thenMillis);
     }
 
     /** 导出文件名，与服务端 `Content-Disposition` 的写法一致。 */

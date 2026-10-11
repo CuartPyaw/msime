@@ -1394,7 +1394,8 @@ final class ImePanels {
             ClipboardHistory.Item actionItem = null;
             for (int index = 0; index < items.size(); index++) {
                 ClipboardHistory.Item item = items.get(index);
-                String meta = (item.pinned() ? "已置顶 · " : "") + "本机 · " + relativeTime(item.timestamp(), now);
+                String meta = (item.pinned() ? "已置顶 · " : "") + "本机 · "
+                    + RelativeTimePolicy.timestampAgo(item.timestamp(), now);
                 boolean managed = item.text().equals(clipboardActionText);
                 boolean swiped = item.text().equals(clipboardSwipedText);
                 swipedPresent |= swiped;
@@ -1964,24 +1965,6 @@ final class ImePanels {
         return params;
     }
 
-    /** 「刚刚 / N 分钟前 / N 小时前 / N 天前」；时间戳早于 2001 年的按秒解读。 */
-    static String relativeTime(long timestamp, long now) {
-        if (timestamp <= 0) return "";
-        long millis = timestamp < 100_000_000_000L ? timestamp * 1000 : timestamp;
-        long minutes = BoundsPolicy.nonNegative(now - millis) / 60_000;
-        return RelativeTimePolicy.minutesAgo(minutes);
-    }
-
-    /** 云端条目的更新时间（ISO-8601）换成相对时间；解析不了就不显示。 */
-    static String relativeTime(String iso, long now) {
-        if (iso == null || iso.isEmpty()) return "";
-        try {
-            return relativeTime(java.time.Instant.parse(iso).toEpochMilli(), now);
-        } catch (java.time.format.DateTimeParseException | ArithmeticException error) {
-            return "";
-        }
-    }
-
     void addClipboardTab(LinearLayout tabs, String title, CloudClipboardPanelPolicy.Tab tab) {
         Button button = clipboardAction(tabs, title, () -> selectClipboardTab(tab));
         ViewPolicy.setSelected(button, s.clipboardTab == tab);
@@ -2002,7 +1985,7 @@ final class ImePanels {
         for (int index = 0; index < count; index++) {
             BackendAccount.ClipboardItem item = s.cloudClipboardItems.get(index);
             Button card = clipboardCard(index, count, item.text(),
-                "云端 · " + relativeTime(item.updatedAt(), now), false,
+                "云端 · " + RelativeTimePolicy.isoAgo(item.updatedAt(), now), false,
                 () -> insertCloudClipboardText(item.text()));
             card.setContentDescription("点按插入云剪贴板记录");
         }
