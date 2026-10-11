@@ -81,7 +81,7 @@ final class AppThemeSheet {
             }));
         }
 
-        root.addView(Ui.sheetSeparator(context));
+        root.addView(LayoutPolicy.colorBand(context, ThemeColorPolicy.page(context), 8));
         root.addView(SheetOptionView.create(context, "取消", false, false, ThemeColorPolicy.accent(context), false,
             dialog::cancel));
         dialog.setContentView(root);

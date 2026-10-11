@@ -32,6 +32,13 @@ public final class LayoutPolicy {
         return new LinearLayout.LayoutParams(widthPixels, heightPixels);
     }
 
+    /** Create a full-width solid colour band with a dp height. */
+    public static View colorBand(Context context, int color, float heightDp) {
+        View view = ViewPolicy.newColorView(context, color);
+        view.setLayoutParams(matchWidthHeightDp(context, (int) heightDp));
+        return view;
+    }
+
     /** Create a theme-coloured one-pixel divider in either orientation. */
     public static View divider(Context context, int color, boolean horizontal) {
         View view = ViewPolicy.newColorView(context, color);
