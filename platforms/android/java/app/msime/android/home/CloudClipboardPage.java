@@ -159,7 +159,8 @@ public final class CloudClipboardPage extends DetailPage {
         ViewPolicy.setCenteredVertically(header);
         Ui.setPaddingDp(header, context, Ui.GROUP_TITLE_INSET, 0,
             Ui.GROUP_TITLE_INSET, 2);
-        TextView recent = Ui.groupHeading(context, "最近");
+        TextView recent = ViewPolicy.headingLabel(context, "最近", Ui.TEXT_GROUP_TITLE, 500,
+            ThemeColorPolicy.accent(context));
         header.addView(recent, LayoutPolicy.weightedWrapParams(1f));
         if (!current.items().isEmpty()) {
             TextView clear = Ui.styledLabel(context, "清空", Ui.TEXT_GROUP_TITLE, 500, ThemeColorPolicy.accent(context));

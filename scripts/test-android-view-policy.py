@@ -138,6 +138,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.styledInput(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享编辑框工厂")
+    if "public static TextView groupHeading(" in ui:
+        raise AssertionError("Ui 仍保留 groupHeading 转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.groupHeading(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享标题工厂")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.afterTextChanged(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文字变更策略")
