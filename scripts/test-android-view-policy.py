@@ -61,6 +61,7 @@ def main() -> None:
         "public static TextView pillButton(Context context, CharSequence label, float sizeSp, int weight,",
         "public static TextView trailingValue(Context context, CharSequence text, int sizeSp, int color)",
         "public static void hideFromAccessibility(View view)",
+        "public static void setSymmetricPaddingDp(Context context, View view, float horizontalDp,",
         "public static TextView label(Context context, CharSequence text, float sizeSp, int color)",
         "public static void afterTextChanged(TextView view, Consumer<Editable> listener)",
     )
@@ -135,6 +136,11 @@ def main() -> None:
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.hideFromAccessibility(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享无障碍隐藏策略")
+    if "public static void setSymmetricPaddingDp(" in ui:
+        raise AssertionError("Ui 仍保留对称 dp 内边距转发方法")
+    for path in ANDROID_JAVA.rglob("*.java"):
+        if "Ui.setSymmetricPaddingDp(" in path.read_text(encoding="utf-8"):
+            raise AssertionError(f"{path} 没有直接调用共享对称 dp 内边距策略")
     for path in ANDROID_JAVA.rglob("*.java"):
         if "Ui.style(" in path.read_text(encoding="utf-8"):
             raise AssertionError(f"{path} 没有直接调用共享文本样式策略")

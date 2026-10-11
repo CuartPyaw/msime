@@ -301,7 +301,7 @@ public final class ProfilePage extends DetailPage {
             TextView chip = ViewPolicy.styledLabel(context, "通过 " + providerName(kind) + " 登录", 12, 500,
                 ThemeColorPolicy.accent(context));
             ViewPolicy.setBackground(chip, DrawablePolicy.pill(ThemeColorPolicy.accentSoft(context)));
-            Ui.setSymmetricPaddingDp(chip, context, 10, 3);
+            ViewPolicy.setSymmetricPaddingDp(context, chip, 10, 3);
             LinearLayout.LayoutParams chipParams = LayoutPolicy.wrapParams();
             chipParams.topMargin = DimensionPolicy.pixels(context, 8);
             header.addView(chip, chipParams);

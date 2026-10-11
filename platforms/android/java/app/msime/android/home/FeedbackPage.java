@@ -97,7 +97,7 @@ public final class FeedbackPage extends DetailPage {
         ViewPolicy.setMinLines(input, 4);
         ViewPolicy.clearBackground(input);
         input.setHintTextColor(ThemeColorPolicy.subText(context));
-        Ui.setSymmetricPaddingDp(input, requireContext(), 16, 14);
+        ViewPolicy.setSymmetricPaddingDp(requireContext(), input, 16, 14);
         input.setText(draft);
         input.setContentDescription("描述");
         card.addView(input, LayoutPolicy.matchWidthWrapParams());
@@ -233,7 +233,7 @@ public final class FeedbackPage extends DetailPage {
             ImageViewPolicy.setTint(remove,
                 ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorOnSurfaceInverse));
             ViewPolicy.setBackground(remove, DrawablePolicy.pill(ThemeColorPolicy.color(context, com.google.android.material.R.attr.colorSurfaceInverse)));
-            Ui.setSymmetricPaddingDp(remove, requireContext(), 3, 3);
+            ViewPolicy.setSymmetricPaddingDp(requireContext(), remove, 3, 3);
             remove.setContentDescription("移除截图 " + (index + 1));
             ViewPolicy.bindClick(remove, () -> {
                 if (sending) return;
