@@ -46,7 +46,8 @@ public final class DictionaryCollectionsStore {
     public record ImportReport(int imported, int duplicates, int failed, boolean truncated, String applicationNotice) {}
 
     /** 集合操作返回的整份视图；`formats` 是 client-services 接受的导入格式，`importReport` 只在导入后非空。 */
-    public record View(List<Collection> collections, List<String> formats, ImportReport importReport) {
+    public record View(List<Collection> collections, List<String> formats, int outboxPending,
+                       ImportReport importReport) {
         /** 按 id 找集合，找不到时为 null。 */
         public Collection find(String id) {
             for (Collection collection : collections) if (collection.id().equals(id)) return collection;
@@ -118,6 +119,21 @@ public final class DictionaryCollectionsStore {
         if (value == null) return Result.failed(failureMessage(errorOf(response)));
         Integer sent = JsonPolicy.nonNegativeInteger(value.opt("sent"));
         return Result.of(sent == null ? 0 : sent);
+    }
+
+    /** 还没交给个人词库队列的集合增删总数；云同步导出前必须等它清零。 */
+    public static Result<Integer> pendingOutbox(Context context) {
+        String options = hostOptions(context);
+        if (options.isEmpty()) return Result.failed(failureMessage("unavailable"));
+        try {
+            JSONObject value = value(NativeClient.dictionaryCollections(new JSONObject()
+                .put("options", new JSONObject(options)).put("action", action("load")).toString()));
+            if (value == null) return Result.failed(failureMessage(""));
+            Integer pending = JsonPolicy.nonNegativeInteger(value.opt("outbox_pending"));
+            return pending == null ? Result.failed(failureMessage("")) : Result.of(pending);
+        } catch (JSONException | RuntimeException | LinkageError error) {
+            return Result.failed(failureMessage(""));
+        }
     }
 
     /** 新建一个空的拼音词库。 */
@@ -476,7 +492,9 @@ public final class DictionaryCollectionsStore {
             JsonPolicy.nonNegativeInteger(report.opt("duplicates"), 0),
             JsonPolicy.nonNegativeInteger(report.opt("failed"), 0),
             JsonPolicy.strictTrue(report.opt("truncated")), "");
-        return new View(ListPolicy.copyOrEmpty(collections), ListPolicy.copyOrEmpty(formats), importReport);
+        Integer outboxPending = JsonPolicy.nonNegativeInteger(value.opt("outbox_pending"), 0);
+        return new View(ListPolicy.copyOrEmpty(collections), ListPolicy.copyOrEmpty(formats),
+            outboxPending, importReport);
     }
 
     /** 解析一页词条（`value`）。 */
@@ -525,7 +543,7 @@ public final class DictionaryCollectionsStore {
                     JsonPolicy.nonNegativeInteger(synchronizedWords.opt("failed_count"), -1));
             }, System::nanoTime);
             ImportReport report = view.importReport();
-            view = new View(view.collections(), view.formats(), new ImportReport(
+            view = new View(view.collections(), view.formats(), view.outboxPending(), new ImportReport(
                 report.imported(), report.duplicates(), report.failed(), report.truncated(),
                 DictionaryImportSynchronization.notice(outcome)));
         }

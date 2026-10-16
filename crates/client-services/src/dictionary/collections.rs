@@ -150,6 +150,8 @@ pub struct CollectionImportReport {
 pub struct DictionaryCollectionsView {
     pub collections: Vec<CollectionSummary>,
     pub formats: [&'static str; 6],
+    /// 集合和不属于集合的词合计还没交给个人词库队列的增删条数。
+    pub outbox_pending: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub import: Option<CollectionImportReport>,
     /// 只在 `flush` 时给出：这次送进个人词库队列的条数。
@@ -1230,6 +1232,7 @@ impl State {
                 })
                 .collect(),
             formats: IMPORT_FORMATS,
+            outbox_pending: self.outbox.operations().count(),
             import: None,
             sent: None,
             queued: None,

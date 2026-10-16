@@ -245,6 +245,11 @@ public final class SyncMergePolicy {
         return pendingQueueCount > 0;
     }
 
+    /** 个人词库队列和命名词库待发送队列任一未清空，都不能导出上传快照。 */
+    public static boolean uploadBlocked(int personalPending, int outboxPending) {
+        return personalPending > 0 || outboxPending > 0;
+    }
+
     /** 下一次自动同步能不能跑：距上次尝试满 {@link #THROTTLE_MILLIS}；有分类带着待上传标记时只要满 {@link #DIRTY_DEBOUNCE_MILLIS}。时钟往回拨时当作已到期。 */
     public static boolean due(long now, long lastAttempt, boolean anyDirty) {
         if (lastAttempt <= 0 || now < lastAttempt) return true;
