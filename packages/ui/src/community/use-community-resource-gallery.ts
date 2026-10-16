@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useToast } from "../core/toast";
 import { pushMobileSettingsState } from "../settings/mobile-navigation";
+import { useAsyncGeneration } from "../settings/use-async-generation";
 import { appendUniqueById, resourceMessage } from "./community-helpers";
 import { useCommunityClientLifecycle } from "./use-community-client-lifecycle";
 import { useCommunityDetailHistory } from "./use-community-detail-history";
@@ -44,7 +45,7 @@ export function useCommunityResourceGallery({
   const [error, setError] = useState("");
   const [selected, setSelected] = useState<CommunityResource | null>(null);
   const [editing, setEditing] = useState(false);
-  const { mounted, clientGeneration, isCurrent } = useCommunityClientLifecycle(client, kind, scope);
+  const { mounted, clientGeneration } = useCommunityClientLifecycle(client, kind, scope);
   const activeSearch = useRef("");
   const load = async (append = false, query = activeSearch.current) => {
     const current = ++clientGeneration.current;
@@ -97,6 +98,7 @@ export function useCommunityResourceGallery({
   // 本次会话已添加和正在添加的条目，按 id 记录。没有宿主会报告哪些共享词库或回复模板已在设备上，所以每行初始都是「添加」；再次添加只会导入相同的词条或保留同一个模板，不产生任何变化。
   const [added, setAdded] = useState<ReadonlySet<string>>(() => new Set());
   const [adding, setAdding] = useState<ReadonlySet<string>>(() => new Set());
+  const addGeneration = useAsyncGeneration(client);
   const addingNow = useRef(new Map<string, number>());
   useEffect(() => {
     addingNow.current.clear();
@@ -105,11 +107,11 @@ export function useCommunityResourceGallery({
   }, [client]);
   /** 「添加」：与详情页主按钮同一路径，之后弹出 toast。宿主能本地导入时，词库进入本机词库，不能时进入云词库；回复模板保存给「高情商回复」键盘使用。 */
   const add = async (item: CommunityResource) => {
-    const generation = clientGeneration.current;
+    const generation = addGeneration.current;
     if (addingNow.current.has(item.id)) return;
     addingNow.current.set(item.id, generation);
     setAdding((current) => new Set(current).add(item.id));
-    const current = () => mounted.current && isCurrent(generation);
+    const current = () => mounted.current && generation === addGeneration.current;
     try {
       if (item.kind === "dictionary") {
         // 列表里的副本可能比服务器将导入的版本旧，所以词条取自重新获取的详情，与详情页的做法相同。
