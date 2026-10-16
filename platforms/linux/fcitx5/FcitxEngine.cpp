@@ -565,6 +565,7 @@ public:
     last_smart_punctuation_ = 0;
     last_smart_punctuation_at_ = {};
     smart_punctuation_rejected_ = 0;
+    forgetSmartPunctuationShadow();
     paired_tracker_.clear();
     pending_caret_.clear();
     caret_forward_event_.reset();
@@ -2488,6 +2489,48 @@ public:
     if (text.empty()) return;
     ic_.commitString(text);
     if (typingStatistics) recordTypingStatistics(text, source.value_or(typingSource()));
+    rememberSmartPunctuationCommit(text);
+  }
+  // surrounding text 不可用时，只用本会话由输入法自己上屏的末尾文本判断智能标点；交给应用的按键或光标编辑会使它失效。
+  void rememberSmartPunctuationCommit(const std::string &text) {
+    if (!ic_.hasFocus() || restricted() || privateInput()) {
+      forgetSmartPunctuationShadow();
+      return;
+    }
+    smart_punctuation_shadow_ += text;
+    if (smart_punctuation_shadow_.size() > 1024) {
+      size_t cut = smart_punctuation_shadow_.size() - 1024;
+      while (cut < smart_punctuation_shadow_.size() &&
+             (static_cast<unsigned char>(smart_punctuation_shadow_[cut]) & 0xc0) == 0x80)
+        ++cut;
+      smart_punctuation_shadow_.erase(0, cut);
+    }
+    smart_punctuation_shadow_valid_ = true;
+  }
+  void forgetSmartPunctuationShadow() {
+    smart_punctuation_shadow_.clear();
+    smart_punctuation_shadow_valid_ = false;
+  }
+  void eraseSmartPunctuationShadowLast() {
+    if (!smart_punctuation_shadow_valid_ || smart_punctuation_shadow_.empty()) {
+      forgetSmartPunctuationShadow();
+      return;
+    }
+    size_t last = smart_punctuation_shadow_.size() - 1;
+    while (last > 0 &&
+           (static_cast<unsigned char>(smart_punctuation_shadow_[last]) & 0xc0) == 0x80)
+      --last;
+    smart_punctuation_shadow_.erase(last);
+  }
+  std::optional<uint32_t> smartPunctuationShadowLast() const {
+    if (!smart_punctuation_shadow_valid_ || smart_punctuation_shadow_.empty())
+      return std::nullopt;
+    auto start = smart_punctuation_shadow_.end();
+    do {
+      --start;
+    } while (start != smart_punctuation_shadow_.begin() &&
+             (static_cast<unsigned char>(*start) & 0xc0) == 0x80);
+    return fcitx::utf8::getChar(start, smart_punctuation_shadow_.end());
   }
   bool pasteClipboard(size_t index = 0) {
     if (restricted() || privateInput() || !ic_.hasFocus()) return false;
@@ -3282,6 +3325,7 @@ public:
             ascii, fullwidthOutput(), *characters))
       return false;
     ic_.deleteSurroundingText(-1, 1);
+    eraseSmartPunctuationShadowLast();
     commitText(std::string(chinese));
     forgetSmartPunctuationRepeat();
     space_convert_mark_.clear();
@@ -3294,9 +3338,11 @@ public:
     uint32_t preceding = 0;
     std::optional<size_t> surroundingLength;
     const auto &surrounding = ic_.surroundingText();
-    if (!privateInput() && ic_.capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText) &&
-        surrounding.isValid() && surrounding.cursor() > 0 &&
-        surrounding.cursor() == surrounding.anchor()) {
+    const bool surroundingPublished =
+        !privateInput() &&
+        ic_.capabilityFlags().test(fcitx::CapabilityFlag::SurroundingText) &&
+        surrounding.isValid();
+    if (surroundingPublished && surrounding.cursor() == surrounding.anchor()) {
       const auto &text = surrounding.text();
       const auto length = fcitx::utf8::lengthValidated(text);
       if (length != fcitx::utf8::INVALID_LENGTH) {
@@ -3305,6 +3351,11 @@ public:
           preceding = fcitx::utf8::getChar(
               fcitx::utf8::nextNChar(text.begin(), surrounding.cursor() - 1), text.end());
       }
+    }
+    // 有效 surrounding 即使光标在文档开头、位于选择中或光标位置越界，也代表宿主文档的权威状态；只有宿主没有发布可用 surrounding 时才回退本会话影子。
+    if (!surroundingPublished) {
+      if (const auto shadow = smartPunctuationShadowLast())
+        preceding = *shadow;
     }
     // Engine is about to commit the Chinese mark for this key. Record what the
     // caret follows now, while the document still predates the commit; a Space
@@ -3366,6 +3417,7 @@ public:
   }
   std::optional<bool> caretShiftHeld() const;
   void forwardCaret(fcitx::KeySym sym) {
+    forgetSmartPunctuationShadow();
     // Wayland 虚拟键盘沿用物理修饰状态；Shift 尚未松开时不能发送方向键，否则会选中文字。
     if (std::string_view(ic_.frontend()).find("wayland") == 0 && caretShiftHeld().value_or(caret_shift_)) {
       pending_caret_.push_back(sym);
@@ -3475,6 +3527,7 @@ public:
                                                               *characters))
       return false;
     ic_.deleteSurroundingText(-1, 1);
+    eraseSmartPunctuationShadowLast();
     commitText(replacement);
     return true;
   }
@@ -3822,6 +3875,8 @@ public:
   char last_smart_punctuation_ = 0;
   std::chrono::steady_clock::time_point last_smart_punctuation_at_{};
   char smart_punctuation_rejected_ = 0;
+  std::string smart_punctuation_shadow_;
+  bool smart_punctuation_shadow_valid_ = false;
   // The ASCII key whose Chinese mark Engine just committed with nothing
   // composing, and the character that stood in front of it at that moment. A
   // bare Space arriving next takes the mark back to ASCII; any other key
@@ -6604,6 +6659,8 @@ public:
       return PanelInputDelivery::Restricted;
     if (request.kind == msime::linux_host::PanelInputRequest::Kind::Text) {
       ic->commitString(request.text);
+      if (!request.text.empty())
+        ic->propertyFor(&factory_)->rememberSmartPunctuationCommit(request.text);
       return PanelInputDelivery::Delivered;
     }
     auto sym = fcitx::Key::keySymFromString(request.key);
@@ -6736,7 +6793,10 @@ public:
         const auto comboBefore = state->typing_combo_;
         state->keyDown(event);
         if (state->key(event)) event.filterAndAccept();
-        else state->countPassthroughKey(event);
+        else {
+          if (!event.isRelease()) state->forgetSmartPunctuationShadow();
+          state->countPassthroughKey(event);
+        }
         state->keySettled(comboBefore);
       }
     }
@@ -7254,6 +7314,12 @@ bool FcitxState::key(fcitx::KeyEvent &event) {
   const auto &key = event.key();
   const auto sym = key.sym();
   const auto states = key.states();
+  if (!event.isRelease() &&
+      (sym == FcitxKey_BackSpace || sym == FcitxKey_Delete || sym == FcitxKey_Left ||
+       sym == FcitxKey_Right || sym == FcitxKey_Up || sym == FcitxKey_Down ||
+       sym == FcitxKey_Home || sym == FcitxKey_End || sym == FcitxKey_Page_Up ||
+       sym == FcitxKey_Page_Down))
+    forgetSmartPunctuationShadow();
   // 和裸 Shift 一样，切换之后松开事件照常交给应用；布防了的按下也只交给应用。
   if (observeCapsLockTap(event)) return false;
   // 规范化后的符号可能已丢掉 Shift 位，光标转发必须按原始事件判断。
