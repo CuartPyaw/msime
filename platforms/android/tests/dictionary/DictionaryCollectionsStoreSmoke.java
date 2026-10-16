@@ -65,7 +65,7 @@ public final class DictionaryCollectionsStoreSmoke {
         DictionaryCollectionsStore.View view = new DictionaryCollectionsStore.View(List.of(
             new DictionaryCollectionsStore.Collection("c1", "网络流行语", "pinyin", "community", "r1", true, 10, 0),
             new DictionaryCollectionsStore.Collection("c2", "工作", "pinyin", "user", "", false, 0, 0)),
-            List.of("txt"), null);
+            List.of("txt"), 0, null);
         check(view.installed("r1") && !view.installed("r2"));
         check(view.find("c2").name().equals("工作") && view.find("c3") == null);
 

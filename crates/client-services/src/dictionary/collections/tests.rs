@@ -167,7 +167,7 @@ fn collections_load_lists_import_formats_and_starts_empty() {
     let value = serde_json::to_value(&view).unwrap();
     assert_eq!(
         value,
-        serde_json::json!({"collections": [], "formats": ["txt", "standard", "windows", "hans", "rime", "scel"]})
+        serde_json::json!({"collections": [], "formats": ["txt", "standard", "windows", "hans", "rime", "scel"], "outbox_pending": 0})
     );
 }
 
@@ -270,6 +270,7 @@ fn collections_unsent_opposite_operations_cancel_out() {
     let id = create_with(&fixture, "英文", &[english("alpha"), english("beta")]);
     let view = fixture.store.load().unwrap();
     assert_eq!(view.collections[0].pending, 2);
+    assert_eq!(view.outbox_pending, 2);
     assert!(matches!(
         fixture.store.flush(),
         Ok(DictionaryCollectionsView { sent: Some(0), .. })
@@ -297,6 +298,7 @@ fn collections_large_collections_are_sent_in_batches_the_queue_accepts() {
     // 个人词库队列同时只接受 128 个未完成的请求。
     assert_eq!(fixture.requests().len(), PERSONAL_QUEUE_CAPACITY);
     assert_eq!(view.collections[0].pending, 300 - PERSONAL_QUEUE_CAPACITY);
+    assert_eq!(view.outbox_pending, 172);
     assert_eq!(fixture.store.flush().unwrap().sent, Some(0));
     let view = fixture.drain();
     assert_eq!(view.collections[0].pending, 0);
@@ -328,6 +330,7 @@ fn collections_unowned_words_are_queued_past_the_personal_queue_limit() {
     .unwrap();
     let view = fixture.store.perform(action, None).unwrap();
     assert_eq!(view.queued, Some(1000));
+    assert_eq!(view.outbox_pending, 873);
     // 不属于任何集合：集合列表里看不到这些词。
     assert!(view.collections.is_empty());
     // 个人词库队列只收得下空出来的位置，其余留在待发送队列里。

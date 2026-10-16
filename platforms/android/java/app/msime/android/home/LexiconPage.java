@@ -105,7 +105,7 @@ public final class LexiconPage extends ReloadingDetailPage {
             ? InputFeatureToggle.LEARNING.enabledByDefault()
             : preferences.optBoolean(InputFeatureToggle.LEARNING.key(), InputFeatureToggle.LEARNING.enabledByDefault());
         DictionaryCollectionsStore.View value = view.ok() ? view.value()
-            : new DictionaryCollectionsStore.View(List.of(), List.of(), null);
+            : new DictionaryCollectionsStore.View(List.of(), List.of(), 0, null);
         return new Model(value, count.ok() ? count.value() : -1, learning, view.failure());
     }
 
