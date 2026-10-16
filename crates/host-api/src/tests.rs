@@ -1090,21 +1090,32 @@ fn account_cloud_clipboard_refuses_without_a_signed_in_session_or_a_valid_action
         read(unsafe { msime_client_account_cloud_clipboard(body.as_ptr(), body.len()) })
     };
     // No account-session.json: every action stops at the session, before the network.
+    let id = "0123456789abcdef".repeat(4);
     for action in [
         json!({ "operation": "list", "search": "" }),
         json!({ "operation": "add", "text": "synthetic upload" }),
+        json!({ "operation": "pin", "id": id, "pinned": true }),
+        json!({ "operation": "set_retention", "days": 7 }),
+        json!({ "operation": "clear" }),
     ] {
-        let result = call(action);
-        assert_eq!(result["ok"], false);
-        assert_eq!(result["error"], "account_unauthorized");
+        let result = call(action.clone());
+        assert_eq!(result["ok"], false, "{action}");
+        assert_eq!(result["error"], "account_unauthorized", "{action}");
     }
     for action in [
         json!({ "operation": "add", "text": "" }),
         json!({ "operation": "add", "text": "界".repeat(4001) }),
-        json!({ "operation": "clear" }),
+        json!({ "operation": "pin", "id": "entry-1", "pinned": true }),
+        json!({ "operation": "pin", "id": id }),
+        json!({ "operation": "set_retention", "days": 3 }),
+        json!({ "operation": "unknown" }),
         json!({}),
     ] {
-        assert_eq!(call(action)["error"], "invalid_cloud_clipboard");
+        assert_eq!(
+            call(action.clone())["error"],
+            "invalid_cloud_clipboard",
+            "{action}"
+        );
     }
     assert!(!directory.path().join("account-session.json").exists());
 }
@@ -1179,7 +1190,7 @@ fn relay_cloud_clipboard_checks_its_input_and_the_configured_relay_before_the_ne
         call(request(json!({ "operation": "clear" })))["error"],
         "relay_unavailable"
     );
-    // 中继的三个新动作只在中继入口里有，账号入口照旧拒绝。
+    // 账号入口也收这三个动作：这个目录里没有登录会话，停在会话上，不联网。
     let account = serde_json::to_vec(&json!({
         "directory": keystore_path,
         "action": { "operation": "set_retention", "days": 7 },
@@ -1188,7 +1199,7 @@ fn relay_cloud_clipboard_checks_its_input_and_the_configured_relay_before_the_ne
     assert_eq!(
         read(unsafe { msime_client_account_cloud_clipboard(account.as_ptr(), account.len()) })
             ["error"],
-        "invalid_cloud_clipboard"
+        "account_unauthorized"
     );
 }
 
@@ -3546,6 +3557,48 @@ fn the_c_header_aliases_the_candidate_list_command_and_extends_the_scheme_legend
         "9 stroke",
     ] {
         assert!(HEADER.contains(legend), "{legend} missing from the legend");
+    }
+}
+
+#[test]
+fn the_c_header_declares_the_session_store_as_rust_reads_it() {
+    const HEADER: &str = include_str!("../include/msime_client.h");
+    assert!(HEADER.contains("#define MSIME_CLIENT_SESSION_STORE_VERSION 1\n"));
+    assert!(HEADER.contains("#define MSIME_CLIENT_SESSION_STORE_SHARED 1u\n"));
+    for item in [
+        "MSIME_CLIENT_SESSION_ITEM_ACCOUNT = 1,",
+        "MSIME_CLIENT_SESSION_ITEM_CLIPBOARD_KEYSTORE = 2,",
+        "MSIME_CLIENT_SESSION_ITEM_ANONYMOUS = 3,",
+        "MSIME_CLIENT_SESSION_ITEM_ANONYMOUS_IDENTITY = 4,",
+    ] {
+        assert!(HEADER.contains(item), "{item}");
+    }
+    // 字段顺序与 `ffi::session_store::SessionStoreV1` 相同；布局本身由那边的 size_of/offset_of 测试锁住。
+    let start = HEADER
+        .find("typedef struct msime_client_session_store {")
+        .unwrap();
+    let end = start
+        + HEADER[start..]
+            .find("} msime_client_session_store;")
+            .unwrap();
+    let mut position = start;
+    for field in [
+        "uint32_t version;",
+        "uint32_t layout;",
+        "uint32_t flags;",
+        "const char *client_agent;",
+        "void *context;",
+        "intptr_t (*load)(void *context, uint32_t item, uint8_t *buffer, size_t capacity);",
+        "int32_t (*save)(void *context, uint32_t item, const uint8_t *bytes, size_t length);",
+        "int32_t (*remove)(void *context, uint32_t item);",
+        "int32_t (*lock)(void *context, uint32_t item, uint32_t timeout_ms, uint64_t *token);",
+        "void (*unlock)(void *context, uint32_t item, uint64_t token);",
+        "void (*release)(void *context);",
+    ] {
+        let found = HEADER[position..end]
+            .find(field)
+            .unwrap_or_else(|| panic!("{field} missing or out of order"));
+        position += found + field.len();
     }
 }
 
@@ -15490,7 +15543,7 @@ fn dictionary_count_and_snapshot_export_answer_for_an_empty_store() {
 }
 
 /// `empty_host_options` with an empty main dictionary, which the Engine needs before it stores a pinyin word (`ni'…` lands in `tbl_2_n`) or a quick phrase.
-fn host_options_with_main_dictionary(root: &Path) -> Value {
+pub(crate) fn host_options_with_main_dictionary(root: &Path) -> Value {
     for name in ["resources", "user", "cache", "dictionaries"] {
         std::fs::create_dir_all(root.join(name)).unwrap();
     }

@@ -307,6 +307,48 @@ fn parse_personal_dictionary_import(text: &str) -> Result<Vec<PersonalWord>, Str
     Ok(entries)
 }
 
+/// 一个要排进个人词库导入队列的词，按 `import_personal` 导入文件的规则规范化并检查；`kind` 是导入文件的写法（`pinyin`、`quickPhrase` 等），不合规时为 `None`。云同步合并时用它算出与队列里一致的身份。
+pub(crate) fn personal_import_word(
+    kind: &str,
+    key: &str,
+    value: &str,
+    weight: i64,
+) -> Option<PersonalWord> {
+    let kind: PersonalWordKind = serde_json::from_value(json!(kind)).ok()?;
+    let word = normalize_personal_word(PersonalWord {
+        kind,
+        key: key.to_owned(),
+        value: value.to_owned(),
+        weight,
+    })
+    .ok()?;
+    word.validate_new().ok()?;
+    Some(word)
+}
+
+/// 一个已经存着的词在个人词库里的身份（权重不参与）：编码按 Engine 对已存词的规则规范（`dictionary_validate_previous`，权重不设上限，英文学习抬过上限的词也认得），规范不了时用原样的写法。云同步合并时用它比较云端的词和本机导出的词，与 [`personal_import_word`] 排进队列的词的身份一致。种类不认识时为 `None`。
+pub(crate) fn personal_stored_identity(kind: &str, key: &str, value: &str) -> Option<String> {
+    let kind: PersonalWordKind = serde_json::from_value(json!(kind)).ok()?;
+    let word = PersonalWord {
+        kind,
+        key: key.to_owned(),
+        value: value.to_owned(),
+        weight: 1,
+    };
+    Some(
+        match msime_engine::host::dictionary_validate_previous(&personal_engine_entry(&word)) {
+            Ok(entry) => PersonalWord {
+                kind: personal_kind(entry.kind),
+                key: entry.key,
+                value: entry.value,
+                weight: 1,
+            }
+            .identity(),
+            Err(_) => word.identity(),
+        },
+    )
+}
+
 /// Native management requests return only redacted errors.
 /// # Safety
 /// `request` must point to `length` readable bytes. Null is rejected.
