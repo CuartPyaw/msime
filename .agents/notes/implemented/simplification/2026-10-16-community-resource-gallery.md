@@ -10,6 +10,8 @@ Status: implemented
 
 `use-community-resource-gallery.ts` 持有原有状态与动作，客户端只要求 `list`、`detail`、`apply`、`save` 和可选 `storeReply`。页面持有桌面与 Harmony 的显示分支并委托 hook，资源卡片与鸿蒙资源行由[公共展示组件](2026-10-16-community-resource-cards.md)持有，公开 `CommunityResourcesPageProps`。皮肤与资源的首页组合及分类控件由[社区首页](2026-10-16-community-home.md)持有，不属于资源图库状态。保留搜索草稿和已提交查询分离、分页去重、失败后的分页处理、列表代次、移动历史记录、添加同步锁和会话标记及原提示；发布成功先关闭编辑器再刷新。
 
+后续审计发现逐项添加也必须遵守同一客户端代次：详情或导入回包迟到时不能在新客户端上写入 `added` 状态、弹出旧提示或保留旧的忙标记。添加操作在每个异步边界检查代次；客户端替换时清空会话内添加标记，并用条目到代次的映射避免旧操作的收尾清掉新操作。
+
 ## 旧笔记归属
 
 按 `CommunityResourcesPage`、资源图库、资源列表、添加状态、`activeSearch` 与失败分页检索 proposed、implemented、rejected：
@@ -27,10 +29,10 @@ Status: implemented
 
 ## Verification
 
-迁移前 5 文件 48 项基线通过；迁移后原页面与独立状态 6 文件 67 项通过，另补充不同资源并行添加的状态隔离测试。源码门禁改读真实 hook 并保留原断言。完整社区套件 86 文件 422 项通过；桌面类型检查与生产构建、HarmonyOS 类型检查、格式、lint、notes 与 `git diff --check` 通过。状态体除注释中文化外与基线相同，图库 JSX 仅 setter、编辑和发布成功回调委托：首页正文不变，均经机械比对确认。独立审查通过，无待修问题；`bash scripts/verify-local.sh --quick` 退出 0，Rust workspace、Android Rust target 与共享 Apple bridge 编译通过；桌面 Rust 外壳因未生成 macOS app bundle 跳过，Harmony ArkTS 真编译、Linux 桌面外壳和 Windows 原生宿主因本机环境缺失跳过，其余未受影响平台按范围跳过。
+迁移前 5 文件 48 项基线通过；迁移后原页面与独立状态 6 文件 67 项通过，另补充不同资源并行添加的状态隔离测试。源码门禁改读真实 hook 并保留原断言。后续补充客户端替换期间的添加回归，独立图库测试 21 项通过；桌面类型检查通过。完整社区套件 86 文件 422 项通过；桌面类型检查与生产构建、HarmonyOS 类型检查、格式、lint、notes 与 `git diff --check` 通过。状态体除注释中文化外与基线相同，图库 JSX 仅 setter、编辑和发布成功回调委托：首页正文不变，均经机械比对确认。独立审查通过，无待修问题；`bash scripts/verify-local.sh --quick` 退出 0，Rust workspace、Android Rust target 与共享 Apple bridge 编译通过；桌面 Rust 外壳因未生成 macOS app bundle 跳过，Harmony ArkTS 真编译、Linux 桌面外壳和 Windows 原生宿主因本机环境缺失跳过，其余未受影响平台按范围跳过。
 
 ## Consequences
 
-图库状态可脱离完整页面独立使用与验证，页面只负责显示分支和控件接线；多出一层状态接口，需要既有页面测试与机械比对确认语义。`useToast` 继续依赖既有 provider，没有 provider 时仍静默；不新增另一套通知状态。初始范围、移动参数默认值集中在 hook，公开页面 props 继承其契约。
+图库状态可脱离完整页面独立使用与验证，页面只负责显示分支和控件接线；多出一层状态接口，需要既有页面测试与机械比对确认语义。`useToast` 继续依赖既有 provider，没有 provider 时仍静默；不新增另一套通知状态。初始范围、移动参数默认值集中在 hook，公开页面 props 继承其契约。客户端替换会清空本次会话的已添加与添加中标记，旧客户端已经发出的实际导入请求不回滚，但其结果不再更新新图库界面。
 
-本片不统一添加与列表请求的生命周期，不改变会话标记的重置边界；不改变实际宿主读写、权限、Android 资源或协议，也不声明设备验收。
+添加与列表请求现在共用客户端代次判断，但仍分别维护各自的请求与状态；不改变实际宿主读写、权限、Android 资源或协议，也不声明设备验收。

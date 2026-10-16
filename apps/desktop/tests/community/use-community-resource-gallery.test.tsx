@@ -170,6 +170,39 @@ test("卸载后的加载成功不回写列表", async () => {
   expect(result.current.items).toEqual([]);
 });
 
+test("替换客户端后旧添加结果不污染新图库", async () => {
+  const props = options();
+  const pending = deferred<CommunityResource>();
+  props.client.detail.mockReturnValue(pending.promise);
+  const replacement = options();
+  const { result, rerender } = renderHook((value) => useCommunityResourceGallery(value), {
+    initialProps: props,
+    wrapper: ToastProvider,
+  });
+  await waitFor(() => expect(result.current.busy).toBe(false));
+
+  let adding!: Promise<void>;
+  act(() => {
+    adding = result.current.add(resource());
+  });
+  rerender({ ...props, client: replacement.client });
+  await waitFor(() => expect(replacement.client.list).toHaveBeenCalled());
+
+  await act(async () => {
+    pending.resolve({ ...resource(), revision: 9 });
+    await adding;
+  });
+
+  expect(props.client.apply).not.toHaveBeenCalled();
+  expect(replacement.client.apply).not.toHaveBeenCalled();
+  expect(result.current.added.has(resource().id)).toBe(false);
+  expect(screen.getByRole("status").textContent).toBe("");
+
+  await act(async () => result.current.add(resource()));
+  expect(replacement.client.apply).toHaveBeenCalledWith(resource().id, resource().revision);
+  expect(result.current.added.has(resource().id)).toBe(true);
+});
+
 test("普通详情直接选择和关闭，发布后先关编辑器再刷新", async () => {
   const props = options();
   const { result } = renderHook(() => useCommunityResourceGallery(props));
