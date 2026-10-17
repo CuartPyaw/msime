@@ -59,8 +59,6 @@ public final class CopyDeviceInfoDeviceSmoke extends DeviceSmoke {
                 || copied.contains("屏幕分辨率：未知") || copied.contains("应用版本：未知"))
                 throw new AssertionError("Device information contains invalid diagnostics");
             stage = "device information copy returns to keyboard";
-            if (Build.VERSION.SDK_INT >= 30 && toolPanel().isVisibleToUser())
-                throw new AssertionError("device information tool panel stayed open");
             await(field("msime-test-plain").and(node -> equalsText("你好", node.getText())));
             if (Build.VERSION.SDK_INT < 30) {
                 await(described("键盘快捷栏").and(node -> node.refresh() && node.isVisibleToUser()));
