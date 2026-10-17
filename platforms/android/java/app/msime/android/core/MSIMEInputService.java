@@ -6993,6 +6993,47 @@ public final class MSIMEInputService extends InputMethodService {
         imePanels.renderClipboardHistory();
     }
 
+    /** 删除多选记录；每条仍经共享存储的单条契约，避免 Android 自己重写排序与固定规则。 */
+    void removeClipboardItems(java.util.List<String> texts) {
+        if (clipboardHistory == null || texts == null || texts.isEmpty()) return;
+        try {
+            for (String text : texts) if (text != null && !text.isEmpty()) clipboardHistory.remove(text);
+            clipboardUndoTexts = new java.util.ArrayList<>(texts);
+            if (clipboardUndoExpiry != null) main.removeCallbacks(clipboardUndoExpiry);
+            clipboardUndoExpiry = () -> {
+                clipboardUndoTexts = null;
+                if (imePanels.clipboardPanelOpen()) imePanels.renderClipboardHistory();
+            };
+            main.postDelayed(clipboardUndoExpiry, 5000L);
+            forgetCurrentClip();
+            notice("已删除 " + texts.size() + " 项，可在 5 秒内撤销");
+        } catch (IllegalStateException error) {
+            notice("无法修改剪贴板历史");
+        }
+        imePanels.renderClipboardHistory();
+    }
+
+    private java.util.List<String> clipboardUndoTexts;
+    private Runnable clipboardUndoExpiry;
+
+    boolean hasClipboardUndo() {
+        return clipboardUndoTexts != null && !clipboardUndoTexts.isEmpty();
+    }
+
+    void undoClipboardItems() {
+        if (!hasClipboardUndo() || clipboardHistory == null) return;
+        java.util.List<String> restore = clipboardUndoTexts;
+        clipboardUndoTexts = null;
+        if (clipboardUndoExpiry != null) main.removeCallbacks(clipboardUndoExpiry);
+        try {
+            for (String text : restore) if (text != null && !text.isEmpty()) clipboardHistory.add(text);
+            notice("已撤销删除");
+        } catch (IllegalStateException error) {
+            notice("无法撤销剪贴板删除");
+        }
+        imePanels.renderClipboardHistory();
+    }
+
     /**
      * 长按操作行里的「编辑」（#5971）：打开应用里的编辑页，在那里改这一条的文字，确认后经共享存储的 `replace` 写回，条目留在原位。键盘里没有可输入的文本框，增删改放在应用里，和常用语（#5673）一样；面板里也不能弹对话框（#5605、#5653）。
      *
