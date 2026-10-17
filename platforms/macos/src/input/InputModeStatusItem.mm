@@ -25,7 +25,7 @@ static NSString *const MSIMEInputModeStatusItemAutosaveName = @"MSIMEInputModeSt
     // 本版本没有声明这个模式时（五笔版把五笔的名字和图标放在 .Hans 上），名字和图标都取主模式的，与系统输入法菜单显示的一致。
     NSString *declared = MSIMEInputModeDeclaredIn(info, modeID) ? modeID : MSIMEChineseInputModeID;
     // imageForResource: 返回按名字缓存的共享图，复制一份再标成模板图，不改动缓存里的那张。
-    NSImage *image = [[NSBundle.mainBundle imageForResource:MSIMEInputModeMenuIconFileIn(info, declared)] copy];
+    NSImage *image = [[NSBundle.mainBundle imageForResource:@"MSIMEClientInputMethodMenuIcon.tiff"] copy];
     [image setTemplate:YES];
     if (!_item) {
         _item = [NSStatusBar.systemStatusBar statusItemWithLength:NSSquareStatusItemLength];
