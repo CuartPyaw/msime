@@ -1903,7 +1903,9 @@ test("paging defaults match Windows and individual edits persist", async () => {
     expect((screen.getByRole("checkbox", { name }) as HTMLInputElement).checked).toBe(true);
   }
   // 左右键移动候选是后加的可选开关：文档里没有这个键，控件按关闭显示，勾上才写进偏好。
-  const leftRight = screen.getByRole("checkbox", { name: "左 / 右（移动候选项）" }) as HTMLInputElement;
+  const leftRight = screen.getByRole("checkbox", {
+    name: "左 / 右（移动候选项）",
+  }) as HTMLInputElement;
   expect(leftRight.checked).toBe(false);
   fireEvent.click(brackets);
   fireEvent.click(screen.getByRole("checkbox", { name: "Shift+Tab / Tab" }));
@@ -3126,6 +3128,13 @@ test("dictionary manager queries, edits and removes Engine entries", async () =>
   render(<SettingsPage client={client} />);
   await settingsReady();
   fireEvent.click(screen.getByRole("button", { name: "词库" }));
+  const dictionaryTabs = screen.getByRole("tablist", { name: "词库设置分类" });
+  expect(
+    within(dictionaryTabs).getByRole("tab", { name: "查词库" }).getAttribute("aria-selected"),
+  ).toBe("true");
+  fireEvent.click(within(dictionaryTabs).getByRole("tab", { name: "管理词库" }));
+  expect(screen.queryByRole("region", { name: "本地词库管理" })).toBeNull();
+  fireEvent.click(within(dictionaryTabs).getByRole("tab", { name: "查词库" }));
   fireEvent.click(await screen.findByRole("button", { name: "查询" }));
   expect(await screen.findByText("fixture")).toBeDefined();
   expect(
@@ -3152,6 +3161,27 @@ test("dictionary manager queries, edits and removes Engine entries", async () =>
   await waitFor(() =>
     expect(edit).toHaveBeenCalledWith(quick, null, expect.stringMatching(/^ui-remove-/)),
   );
+});
+
+test("dictionary lookup submits an ASCII or Chinese query with Enter", async () => {
+  const entry = { kind: "pinyin" as const, key: "ni'hao", value: "你好", weight: 100 };
+  const list = vi.fn().mockResolvedValue({ entries: [entry], has_more: false });
+  const client: SettingsClient = {
+    load: vi.fn().mockResolvedValue(initial),
+    save: vi.fn(),
+    dictionary: { list, edit: vi.fn() },
+  };
+  render(<SettingsPage client={client} />);
+  await settingsReady();
+  fireEvent.click(screen.getByRole("button", { name: "词库" }));
+  fireEvent.change(await screen.findByLabelText("本地词库类型"), {
+    target: { value: "pinyin" },
+  });
+  const query = await screen.findByRole("textbox", { name: "词条或编码" });
+  fireEvent.change(query, { target: { value: "你好" } });
+  fireEvent.keyDown(query, { key: "Enter" });
+  expect(await screen.findByText("你好")).toBeDefined();
+  expect(list).toHaveBeenLastCalledWith(0, 100, "pinyin", "你好");
 });
 
 test("a pinyin prefix typed without separators keeps the rows the host matched", async () => {
