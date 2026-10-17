@@ -1169,6 +1169,8 @@ final class ImePanels {
         clipboardClearPending = false;
         clipboardActionText = null;
         clipboardSwipedText = null;
+        clipboardSelectionMode = false;
+        clipboardSelectedTexts.clear();
         endClipboardSegmentation();
         // 补读一次：键盘进程没在运行时复制的内容，监听收不到。
         s.captureClipboard(ClipboardCapturePolicy.Trigger.PANEL_OPENED, false);
@@ -1194,6 +1196,8 @@ final class ImePanels {
         clipboardClearPending = false;
         clipboardActionText = null;
         clipboardSwipedText = null;
+        clipboardSelectionMode = false;
+        clipboardSelectedTexts.clear();
         endClipboardSegmentation();
         renderClipboardHistory();
     }
