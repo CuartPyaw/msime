@@ -21,6 +21,11 @@ import org.json.JSONObject;
 
 /** 联系人导入页：只有用户点击导入时申请权限，名单保存到共享 mentions 存储。 */
 public final class ContactsPage extends ReloadingDetailPage {
+    private static final class Contact {
+        final String name;
+        final String phone;
+        Contact(String name, String phone) { this.name = name; this.phone = phone; }
+    }
     @Override protected List<String> sectionTitles() { return List.of("联系人"); }
 
     private final ActivityResultLauncher<String> permission = registerForActivityResult(
@@ -35,14 +40,15 @@ public final class ContactsPage extends ReloadingDetailPage {
         HostTask.run(this, ContactsPage::load, this::render);
     }
 
-    @Nullable private static List<String> load(Context context) {
+    @Nullable private static List<Contact> load(Context context) {
         try {
             JSONObject request = request(context, new JSONObject().put("operation", "load_mentions"));
             JSONArray entries = JsonPolicy.objectValue(request).optJSONArray("entries");
-            List<String> result = new ArrayList<>();
+            List<Contact> result = new ArrayList<>();
             if (entries != null) for (int i = 0; i < entries.length(); i++) {
                 JSONObject entry = entries.optJSONObject(i);
-                if (entry != null) result.add(entry.optString("text", ""));
+                if (entry != null) result.add(new Contact(entry.optString("text", ""),
+                    entry.optString("phone", "")));
             }
             return result;
         } catch (JSONException | RuntimeException | LinkageError error) {
@@ -50,7 +56,7 @@ public final class ContactsPage extends ReloadingDetailPage {
         }
     }
 
-    private void render(@Nullable List<String> entries) {
+    private void render(@Nullable List<Contact> entries) {
         LinearLayout target = contentColumn();
         if (target == null) return;
         target.removeAllViews();
@@ -77,7 +83,7 @@ public final class ContactsPage extends ReloadingDetailPage {
         });
     }
 
-    private static List<String> readContacts(Context context) {
+    private static List<Contact> readContacts(Context context) {
         LinkedHashMap<String, String> values = new LinkedHashMap<>();
         String[] projection = {ContactsContract.CommonDataKinds.Phone.DISPLAY_NAME,
             ContactsContract.CommonDataKinds.Phone.NUMBER};
@@ -92,9 +98,9 @@ public final class ContactsPage extends ReloadingDetailPage {
                 values.putIfAbsent(name.trim(), number == null ? "" : number.trim());
             }
         }
-        List<String> entries = new ArrayList<>(values.size());
+        List<Contact> entries = new ArrayList<>(values.size());
         for (var entry : values.entrySet())
-            entries.add(entry.getValue().isEmpty() ? entry.getKey() : entry.getKey() + "：" + entry.getValue());
+            entries.add(new Contact(entry.getKey(), entry.getValue()));
         return entries;
     }
 
@@ -105,10 +111,11 @@ public final class ContactsPage extends ReloadingDetailPage {
         });
     }
 
-    private static boolean save(Context context, List<String> entries) {
+    private static boolean save(Context context, List<Contact> entries) {
         try {
             JSONArray values = new JSONArray();
-            for (String text : entries) values.put(new JSONObject().put("text", text).put("key", ""));
+            for (Contact entry : entries) values.put(new JSONObject().put("text", entry.name)
+                .put("key", "").put("phone", entry.phone));
             JSONObject action = new JSONObject().put("operation", "save_mentions").put("entries", values);
             JSONObject response = request(context, action);
             return JsonPolicy.strictTrue(response.opt("ok"));

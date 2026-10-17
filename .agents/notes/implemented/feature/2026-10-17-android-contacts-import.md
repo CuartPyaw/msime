@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-在 Android 原生输入设置中增加联系人页。只有点击导入或刷新时申请 `READ_CONTACTS`，读取姓名和手机号后写入共享 mentions 名单；清空只删除输入法自己的名单，不触碰系统电话本。名单写入通过 `msime_client_plugins` 的 `save_mentions`，与输入进程共享并由引擎匹配。
+在 Android 原生输入设置中增加联系人页。只有点击导入或刷新时申请 `READ_CONTACTS`，读取姓名和手机号后写入共享 mentions 名单；清空只删除输入法自己的名单，不触碰系统电话本。名单写入通过 `msime_client_plugins` 的 `save_mentions`，与输入进程共享并由引擎匹配。共享条目增加可选 `phone` 字段，普通 `@` 名单保持为空；引擎把姓名拼音命中的手机号作为 `CandidateSource::Contact` 置顶候选，宿主显示小人标记并禁止释义、学习和候选管理。
 
 ## Alternatives considered
 
@@ -16,4 +16,4 @@ Status: implemented
 
 ## Consequences
 
-权限请求只发生在用户操作时，输入进程不直接读取联系人。导入结果可被键盘和设置页共同使用；刷新会替换整份名单，清空不影响系统联系人。联系人来源图标仍需候选渲染层后续补充，当前共享 mentions 契约只携带文本和读音。
+权限请求只发生在用户操作时，输入进程不直接读取联系人。导入结果可被键盘和设置页共同使用；刷新会替换整份名单，清空不影响系统联系人。手机号仍只保存在本机 `mentions.json`，候选来源不会送往释义服务。

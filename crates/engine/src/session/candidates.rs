@@ -76,6 +76,8 @@ impl InputSession {
             clone_candidate_rows(&self.prefix_candidates, &mut decoded);
         } else {
             clone_candidate_rows(self.engine.candidates(), &mut decoded);
+            self.queries
+                .append_contact_candidates(self.engine.request().raw_input.as_str(), &mut decoded);
             if self.quick_phrase_candidates {
                 self.queries.append_quick_phrase_candidates(
                     self.engine.request().raw_input.as_str(),
