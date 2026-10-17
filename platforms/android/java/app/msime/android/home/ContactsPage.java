@@ -29,7 +29,7 @@ public final class ContactsPage extends ReloadingDetailPage {
             else showMessage("没有联系人权限，未导入电话本");
         });
 
-    @Override protected void onContentReady() { reload(); }
+    @Override protected void onColumnReady(android.os.Bundle args) { reload(); }
 
     @Override protected void reload() {
         HostTask.run(this, ContactsPage::load, this::render);
