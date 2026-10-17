@@ -56,7 +56,7 @@ public final class ContactsPage extends ReloadingDetailPage {
         target.removeAllViews();
         GroupCard card = GroupCard.add(sectionColumn(target, "联系人"), "电话本").withDividers(16);
         int count = entries == null ? 0 : entries.size();
-        card.note("已保存 " + count + " 个联系人。姓名候选会标记为电话本来源；数据只保存在本机。");
+        card.note("已保存 " + count + " 个联系人。名单供输入法本地匹配，数据只保存在本机。");
         card.button("导入联系人", "首次点击时才申请读取联系人权限", "导入", this::requestImport);
         card.button("刷新联系人", "重新读取电话本并替换本机名单", "刷新", this::requestImport);
         card.button("清空联系人", "删除已导入的联系人，不影响系统电话本", "清空", this::clearContacts);
