@@ -3345,6 +3345,7 @@ static void TestSegmentEditingChords(MSIMEAppearancePreferences *appearance) {
     shuangpin[@"scheme"] = @1;
     for (NSArray *entry in @[@[@123, @(MSIME_MOVE_LEFT_SEGMENT)], @[@124, @(MSIME_MOVE_RIGHT_SEGMENT)]]) {
         [controller setValue:shuangpin forKey:@"view"];
+        panel.visible = YES;
         session.lastCommand = UINT32_MAX;
         assert([controller handleEvent:ModeKey([entry[0] unsignedShortValue], 0, NO) client:client]);
         assert(session.lastCommand == [entry[1] unsignedIntValue]);
