@@ -1,4 +1,4 @@
-//! #8201 新接口的传输测试：`BackendAccountClient::loopback` 连本机 `TcpListener` 假服务器，回放服务端的响应形状（msime-cloud `origin/main`），核对发出去的方法、路径、凭据和正文，以及失败时的状态码、服务端错误码和 `Retry-After`。
+//! #8201 新接口的传输测试（请求的读取和响应的拼装也给 `chat_stream` 的测试用）：`BackendAccountClient::loopback` 连本机 `TcpListener` 假服务器，回放服务端的响应形状（msime-cloud `origin/main`），核对发出去的方法、路径、凭据和正文，以及失败时的状态码、服务端错误码和 `Retry-After`。
 
 use super::*;
 use crate::diagnostics::upload::{prepare_upload, DiagnosticUpload};
@@ -12,7 +12,7 @@ fn token(character: char) -> String {
 }
 
 /// 一个完整的 HTTP/1.1 响应，带 `Content-Length` 和 `Connection: close`，客户端不会复用连接。
-fn http(status: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
+pub(super) fn http(status: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
     let mut response = format!(
         "HTTP/1.1 {status}\r\nContent-Length: {}\r\nConnection: close\r\n",
         body.len()
@@ -26,7 +26,7 @@ fn http(status: &str, headers: &[(&str, &str)], body: &[u8]) -> Vec<u8> {
     bytes
 }
 
-fn json_response(status: &str, body: Value) -> Vec<u8> {
+pub(super) fn json_response(status: &str, body: Value) -> Vec<u8> {
     http(
         status,
         &[("Content-Type", "application/json")],
@@ -34,7 +34,7 @@ fn json_response(status: &str, body: Value) -> Vec<u8> {
     )
 }
 
-fn error_response(status: &str, code: &str, headers: &[(&str, &str)]) -> Vec<u8> {
+pub(super) fn error_response(status: &str, code: &str, headers: &[(&str, &str)]) -> Vec<u8> {
     let mut all = vec![("Content-Type", "application/json")];
     all.extend_from_slice(headers);
     http(
@@ -47,24 +47,24 @@ fn error_response(status: &str, code: &str, headers: &[(&str, &str)]) -> Vec<u8>
 }
 
 /// 一个收到的请求：请求行和头（头名转成小写）以及正文。
-struct Received {
-    head: String,
-    body: Vec<u8>,
+pub(super) struct Received {
+    pub(super) head: String,
+    pub(super) body: Vec<u8>,
 }
 
 impl Received {
-    fn line(&self) -> &str {
+    pub(super) fn line(&self) -> &str {
         self.head.lines().next().unwrap()
     }
 
-    fn header(&self, name: &str) -> Option<&str> {
+    pub(super) fn header(&self, name: &str) -> Option<&str> {
         self.head.lines().skip(1).find_map(|line| {
             let (key, value) = line.split_once(':')?;
             key.eq_ignore_ascii_case(name).then(|| value.trim())
         })
     }
 
-    fn json(&self) -> Value {
+    pub(super) fn json(&self) -> Value {
         serde_json::from_slice(&self.body).unwrap()
     }
 }
@@ -85,7 +85,7 @@ fn serve(responses: Vec<Vec<u8>>) -> (String, Receiver<Received>) {
     (origin, received)
 }
 
-fn read_request(stream: &mut std::net::TcpStream) -> Received {
+pub(super) fn read_request(stream: &mut std::net::TcpStream) -> Received {
     let mut bytes = Vec::new();
     let mut buffer = [0_u8; 8192];
     let head_end = loop {
@@ -965,4 +965,392 @@ fn apple_web_requests_are_checked_before_they_are_sent() {
             .err(),
         Some(AccountError::Invalid)
     );
+}
+
+// ---- 断网与服务不可用、对话和 AI 皮肤的失败细节、带细节的注销 ----
+
+/// 读完请求就挂断、什么也不回：`serve` 收到空响应时就是这样，客户端拿不到响应头。
+fn hang_up() -> Vec<u8> {
+    Vec::new()
+}
+
+/// 内存里的会话存储，开始时有一份未过期的合成登录会话（访问令牌是 `a`）。
+#[derive(Clone)]
+struct SignedIn(Arc<Mutex<Option<SavedAccountSession>>>);
+
+impl SignedIn {
+    fn new() -> Self {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as u64;
+        Self(Arc::new(Mutex::new(Some(SavedAccountSession {
+            tokens: AccountTokens {
+                access_token: token('a'),
+                refresh_token: token('b'),
+                token_type: "Bearer".into(),
+                expires_in: 3600,
+                user: AccountUser {
+                    id: "fixture-user".into(),
+                    display_name: "Fixture".into(),
+                    created_at: "2026-01-01T00:00:00Z".into(),
+                    email: None,
+                    avatar_url: None,
+                },
+            },
+            expires_at_unix_ms: now + 3_600_000,
+            session_id: Some(uuid::Uuid::new_v4()),
+        }))))
+    }
+
+    fn signed_in(&self) -> bool {
+        self.0.lock().unwrap().is_some()
+    }
+}
+
+impl AccountSessionStorage for SignedIn {
+    fn load(&self) -> Result<Option<SavedAccountSession>, AccountError> {
+        Ok(self.0.lock().unwrap().clone())
+    }
+    fn save(&self, session: &SavedAccountSession) -> Result<(), AccountError> {
+        *self.0.lock().unwrap() = Some(session.clone());
+        Ok(())
+    }
+    fn clear(&self) -> Result<(), AccountError> {
+        *self.0.lock().unwrap() = None;
+        Ok(())
+    }
+}
+
+#[test]
+fn a_request_without_a_response_is_a_network_failure_only_on_the_detailed_paths() {
+    let (origin, received) = serve(vec![
+        hang_up(),
+        hang_up(),
+        error_response("503 Service Unavailable", "job_unavailable", &[]),
+    ]);
+    let client = client(&origin);
+    let failure = client.phrases(&token('a')).unwrap_err();
+    assert_eq!(failure.code(), "account_network");
+    assert!(failure.network_failure);
+    assert_eq!(failure.status, None);
+    // 经 `error` 取码的已有接口看到的码不变。
+    assert_eq!(failure.error, AccountError::Unavailable);
+    assert_eq!(
+        client.chat_models(&token('a')).unwrap_err(),
+        AccountError::Unavailable
+    );
+    // 服务端回了 503 不是断网。
+    let failure = client.chat_models_detailed(&token('a')).unwrap_err();
+    assert_eq!(failure.code(), "account_unavailable");
+    assert!(!failure.network_failure);
+    assert_eq!(failure.status, Some(503));
+    assert_eq!(received.iter().count(), 3);
+}
+
+#[test]
+fn chat_failures_keep_retry_after_and_tell_503_from_a_dropped_connection() {
+    let messages = [AccountChatMessage {
+        role: "user".into(),
+        content: "合成的问题".into(),
+    }];
+    let (origin, received) = serve(vec![
+        error_response(
+            "429 Too Many Requests",
+            "rate_limit_exceeded",
+            &[("Retry-After", "60")],
+        ),
+        error_response(
+            "429 Too Many Requests",
+            "rate_limit_exceeded",
+            &[("Retry-After", "60")],
+        ),
+        error_response(
+            "503 Service Unavailable",
+            "server_busy",
+            &[("Retry-After", "1")],
+        ),
+        error_response("503 Service Unavailable", "upstream_unavailable", &[]),
+        hang_up(),
+        error_response(
+            "429 Too Many Requests",
+            "rate_limit_exceeded",
+            &[("Retry-After", "30")],
+        ),
+    ]);
+    let client = client(&origin);
+    let chat = || {
+        client
+            .chat_detailed(&messages, "synthetic-model", &token('a'))
+            .unwrap_err()
+    };
+    let limited = chat();
+    assert_eq!(
+        (limited.code(), limited.retry_after_seconds),
+        ("account_rate_limited", Some(60))
+    );
+    // 已有的 `chat` 照旧只有 AccountError。
+    assert_eq!(
+        client
+            .chat(&messages, "synthetic-model", &token('a'))
+            .unwrap_err(),
+        AccountError::RateLimited
+    );
+    let busy = chat();
+    assert_eq!(
+        (busy.code(), busy.retry_after_seconds),
+        ("account_rate_limited", Some(1))
+    );
+    assert_eq!(chat().code(), "account_unavailable");
+    assert_eq!(chat().code(), "account_network");
+    let models = client.chat_models_detailed(&token('a')).unwrap_err();
+    assert_eq!(
+        (models.code(), models.retry_after_seconds),
+        ("account_rate_limited", Some(30))
+    );
+    let sent: Vec<_> = received.iter().collect();
+    assert_eq!(sent[0].line(), "POST /v1/chat/completions HTTP/1.1");
+    assert_eq!(sent[0].json()["stream"], false);
+    assert_eq!(sent[5].line(), "GET /v1/models HTTP/1.1");
+}
+
+#[test]
+fn only_the_detailed_account_deletion_reports_recent_login_required() {
+    let (origin, received) = serve(vec![
+        error_response("403 Forbidden", "recent_login_required", &[]),
+        error_response("403 Forbidden", "recent_login_required", &[]),
+        error_response("403 Forbidden", "recent_login_required", &[]),
+        http("204 No Content", &[], b""),
+    ]);
+    let client = client(&origin);
+    assert_eq!(
+        client
+            .delete_account_detailed(&token('a'))
+            .unwrap_err()
+            .code(),
+        "account_recent_login_required"
+    );
+    // 已有的 `delete` 不变：仍是 account_unauthorized。
+    let old = client.delete_account(&token('a')).unwrap_err();
+    assert_eq!(
+        (old.clone(), old.code()),
+        (AccountError::Forbidden, "account_unauthorized")
+    );
+    // 会话层：需要最近登录时本地会话留着，注销成功后清掉。
+    let storage = SignedIn::new();
+    let session = BackendAccountSession::new(client, storage.clone());
+    assert_eq!(
+        session.delete_account_detailed().unwrap_err().code(),
+        "account_recent_login_required"
+    );
+    assert!(storage.signed_in());
+    session.delete_account_detailed().unwrap();
+    assert!(!storage.signed_in());
+    let sent: Vec<_> = received.iter().collect();
+    assert_eq!(sent.len(), 4);
+    for request in &sent {
+        assert_eq!(request.line(), "DELETE /v1/users/me HTTP/1.1");
+        assert_eq!(
+            request.header("authorization"),
+            Some(format!("Bearer {}", token('a')).as_str())
+        );
+    }
+}
+
+#[test]
+fn ai_skin_routes_keep_retry_after_and_the_network_flag() {
+    use crate::skin::ai::AiSkinApi;
+    let id = "0123456789abcdef".repeat(3);
+    let (origin, received) = serve(vec![
+        error_response(
+            "429 Too Many Requests",
+            "rate_limit_exceeded",
+            &[("Retry-After", "7200")],
+        ),
+        error_response("404 Not Found", "skin_job_not_found", &[]),
+        hang_up(),
+        error_response(
+            "503 Service Unavailable",
+            "skin_jobs_busy",
+            &[("Retry-After", "5")],
+        ),
+    ]);
+    let client = client(&origin);
+    let limited = client
+        .create_skin_artwork("合成的插画提示词", &token('a'))
+        .unwrap_err();
+    assert_eq!(
+        (limited.code(), limited.retry_after_seconds),
+        ("account_rate_limited", Some(7200))
+    );
+    assert_eq!(
+        client
+            .get_skin_artwork(&id, &token('a'))
+            .unwrap_err()
+            .code(),
+        "account_not_found"
+    );
+    assert_eq!(
+        client
+            .delete_skin_artwork(&id, &token('a'))
+            .unwrap_err()
+            .code(),
+        "account_network"
+    );
+    let busy = client.ai_models(&token('a')).unwrap_err();
+    assert_eq!(
+        (busy.code(), busy.retry_after_seconds),
+        ("account_unavailable", Some(5))
+    );
+    let lines: Vec<_> = received
+        .iter()
+        .map(|request| request.line().to_owned())
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "POST /v1/skins/jobs HTTP/1.1".to_owned(),
+            format!("GET /v1/skins/jobs/{id} HTTP/1.1"),
+            format!("DELETE /v1/skins/jobs/{id} HTTP/1.1"),
+            "GET /v1/models HTTP/1.1".to_owned(),
+        ]
+    );
+}
+
+#[test]
+fn the_ai_skin_service_keeps_the_detail_only_for_the_detailed_entry_points() {
+    use crate::skin::ai::{AiSkinError, AiSkinFailure, BackendAiSkinService};
+    use std::sync::atomic::AtomicBool;
+    let limited = || {
+        error_response(
+            "429 Too Many Requests",
+            "rate_limit_exceeded",
+            &[("Retry-After", "3600")],
+        )
+    };
+    let (origin, received) = serve(vec![limited(), limited(), hang_up()]);
+    let service = BackendAiSkinService::new(
+        client(&origin),
+        Arc::new(BackendAccountSession::new(client(&origin), SignedIn::new())),
+    );
+    let cancelled = AtomicBool::new(false);
+    match service
+        .generate_detailed("合成的提示词", &cancelled, |_| {})
+        .unwrap_err()
+    {
+        AiSkinFailure::Account(failure) => assert_eq!(
+            (failure.code(), failure.retry_after_seconds),
+            ("account_rate_limited", Some(3600))
+        ),
+        other => panic!("{other:?}"),
+    }
+    // Tauri 的 `ai_skin_generate` 用的 `generate` 照旧只有 AccountError。
+    assert_eq!(
+        service
+            .generate("合成的提示词", &cancelled, |_| {})
+            .unwrap_err(),
+        AiSkinError::Account(AccountError::RateLimited)
+    );
+    match service.create_artwork_job("合成的插画提示词").unwrap_err() {
+        AiSkinFailure::Account(failure) => assert_eq!(failure.code(), "account_network"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(received.iter().count(), 3);
+}
+
+#[test]
+fn feedback_voice_and_export_report_a_dropped_connection_as_account_network() {
+    let feedback = prepare_feedback(&AccountFeedbackInput {
+        kind: "bug".into(),
+        text: "合成反馈".into(),
+        platform: "android".into(),
+        app_version: "0.9.0".into(),
+        edition: "full".into(),
+        ..Default::default()
+    })
+    .unwrap();
+    let contribution = prepare_voice_contribution(&AccountVoiceContributionInput {
+        language: "zh-CN".into(),
+        provider: "system".into(),
+        transcript: "合成识别文本".into(),
+        app_version: "0.9.0".into(),
+        audio: synthetic_wav(1, 16_000, 16, 32_000),
+    })
+    .unwrap();
+    // 三个都自己 send()，不经 request_detailed：服务端读完请求就挂断，一个字节也不回。
+    let (origin, received) = serve(vec![hang_up(), hang_up(), hang_up()]);
+    let client = client(&origin);
+    let directory = tempfile::tempdir().unwrap();
+    let destination = directory.path().join("export.zip");
+    std::fs::write(&destination, b"older export").unwrap();
+    let failures = [
+        client.feedback(&feedback, &token('a')).unwrap_err(),
+        client
+            .voice_contribution(&contribution, &token('a'))
+            .unwrap_err(),
+        client.data_export(&destination, &token('a')).unwrap_err(),
+    ];
+    for failure in &failures {
+        assert_eq!(failure.code(), "account_network", "{failure:?}");
+        assert!(failure.network_failure);
+        assert_eq!(failure.status, None);
+        // 经 `error` 取码的已有接口看到的仍是 Unavailable。
+        assert_eq!(failure.error, AccountError::Unavailable);
+    }
+    // 导出没拿到响应：目标位置上原有的文件不动，也不留临时文件。
+    assert_eq!(std::fs::read(&destination).unwrap(), b"older export");
+    assert_eq!(std::fs::read_dir(directory.path()).unwrap().count(), 1);
+    let lines: Vec<String> = received
+        .iter()
+        .map(|request| request.line().to_owned())
+        .collect();
+    assert_eq!(
+        lines,
+        [
+            "POST /v1/feedback HTTP/1.1",
+            "POST /v1/voice/contributions HTTP/1.1",
+            "GET /v1/users/me/data/export HTTP/1.1",
+        ]
+    );
+}
+
+#[test]
+fn send_errors_that_are_not_a_lost_connection_are_not_account_network() {
+    // 建不出请求：根本没有发出去，是请求不合法。
+    let builder = reqwest::blocking::Client::new()
+        .get("not an absolute url")
+        .send()
+        .unwrap_err();
+    assert!(builder.is_builder(), "{builder:?}");
+    let failure = AccountFailure::from_send_error(&builder);
+    assert_eq!(failure.code(), "account_invalid");
+    assert!(!failure.network_failure);
+
+    // 重定向被策略拒绝：服务端已经回了响应，是不可用而不是断网。账号客户端不跟随重定向，这里用一个一次也不许跟随的客户端造出这种错误。
+    let (origin, received) = serve(vec![
+        http("302 Found", &[("Location", "/elsewhere")], b""),
+        hang_up(),
+    ]);
+    let redirect = reqwest::blocking::Client::builder()
+        .redirect(reqwest::redirect::Policy::limited(0))
+        .build()
+        .unwrap()
+        .get(format!("{origin}/start"))
+        .send()
+        .unwrap_err();
+    assert!(redirect.is_redirect(), "{redirect:?}");
+    let failure = AccountFailure::from_send_error(&redirect);
+    assert_eq!(failure.code(), "account_unavailable");
+    assert!(!failure.network_failure);
+
+    // 真的没拿到响应仍是断网。
+    let dropped = reqwest::blocking::Client::new()
+        .get(format!("{origin}/again"))
+        .send()
+        .unwrap_err();
+    assert_eq!(
+        AccountFailure::from_send_error(&dropped).code(),
+        "account_network"
+    );
+    assert_eq!(received.iter().count(), 2);
 }

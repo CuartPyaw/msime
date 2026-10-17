@@ -430,7 +430,86 @@ pub trait AccountApi: Send + Sync + 'static {
         Err(AccountError::Unavailable.into())
     }
 
-    // 以下几项给云同步（`cloud_sync`）用：与上面同名的接口相同，失败时带着状态码、服务端错误码和 `Retry-After`，同步据此区分 409 `revision_conflict` 和别的 409，并尊重限流。默认实现转调不带细节的那个，只实现了旧接口的假后端照样能用。
+    // 以下几项与上面同名的已有接口相同，失败时带着状态码、服务端错误码和 `Retry-After`：对话、模型目录和注销给 `msime_client_account` 的新操作用，其余给云同步（`cloud_sync`）用，同步据此区分 409 `revision_conflict` 和别的 409，并尊重限流。默认实现转调不带细节的那个，只实现了旧接口的假后端照样能用。
+
+    /// 与 [`Self::chat_models`] 相同，失败时是 [`AccountFailure`]：限流带 `Retry-After`，503 与没拿到响应分开。
+    fn chat_models_detailed(
+        &self,
+        access_token: &str,
+    ) -> Result<AccountChatModels, AccountFailure> {
+        self.chat_models(access_token).map_err(Into::into)
+    }
+
+    /// 与 [`Self::chat`] 相同，失败时是 [`AccountFailure`]；序列化后的请求体超过 64 KiB 是 [`AccountFailure::too_large`]。
+    fn chat_detailed(
+        &self,
+        messages: &[AccountChatMessage],
+        model: &str,
+        access_token: &str,
+    ) -> Result<String, AccountFailure> {
+        self.chat(messages, model, access_token).map_err(Into::into)
+    }
+
+    /// 与 [`Self::chat_detailed`] 相同，只是以 `stream: true` 请求：回复每到一段非空的增量就在调用线程上交给 `on_delta`，返回整段回复。`cancel` 可以从任何线程取消，取消后不再调用 `on_delta`，返回 `account_cancelled`。默认实现给只实现了非流式接口的假后端用：整段回复作为一段增量交出。
+    fn chat_stream_detailed(
+        &self,
+        messages: &[AccountChatMessage],
+        model: &str,
+        access_token: &str,
+        cancel: &ChatStreamCancel,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<String, AccountFailure> {
+        cancel.check()?;
+        let reply = self.chat_detailed(messages, model, access_token)?;
+        cancel.check()?;
+        on_delta(&reply);
+        Ok(reply)
+    }
+
+    /// 与 [`Self::delete_account`] 相同，失败时是 [`AccountFailure`]：会话不是 10 分钟内登录的是 403 `recent_login_required`（`account_recent_login_required`）。
+    fn delete_account_detailed(&self, access_token: &str) -> Result<(), AccountFailure> {
+        self.delete_account(access_token).map_err(Into::into)
+    }
+
+    /// `POST /v1/auth/challenges {provider,target,purpose:"link"}`，带着登录账号的令牌：给已登录的账号添加一种登录方式。服务端要求令牌所在的会话是 10 分钟内登录的，否则 403 `recent_login_required`。
+    fn link_challenge(
+        &self,
+        _provider: &str,
+        _target: &str,
+        _access_token: &str,
+    ) -> Result<AccountChallenge, AccountFailure> {
+        Err(AccountError::Unavailable.into())
+    }
+
+    /// `POST /v1/auth/login`，带着发起 [`Self::link_challenge`] 的那个账号的令牌：服务端把这个登录方式绑到该账号上（已经绑在别的账号上时是 409 `identity_already_linked`），并为它签发一个新会话，响应与登录相同。
+    fn link_login(
+        &self,
+        _challenge: &str,
+        _credential: &str,
+        _access_token: &str,
+    ) -> Result<AccountTokens, AccountFailure> {
+        Err(AccountError::Unavailable.into())
+    }
+
+    /// 与 [`Self::apple_web_challenge`] 相同，只是 `purpose:"link"`、带着登录账号的令牌，要求同 [`Self::link_challenge`]。
+    fn apple_web_link_challenge(
+        &self,
+        _code_challenge: &str,
+        _app: &str,
+        _access_token: &str,
+    ) -> Result<AccountAppleWebChallenge, AccountFailure> {
+        Err(AccountError::Unavailable.into())
+    }
+
+    /// 与 [`Self::apple_web_login`] 相同，只是带着发起 [`Self::apple_web_link_challenge`] 的那个账号的令牌，结果同 [`Self::link_login`]。
+    fn apple_web_link_login(
+        &self,
+        _grant: &str,
+        _code_verifier: &str,
+        _access_token: &str,
+    ) -> Result<AccountTokens, AccountFailure> {
+        Err(AccountError::Unavailable.into())
+    }
 
     /// 与 [`Self::preference_schema`] 相同，失败时是 [`AccountFailure`]。
     fn preference_schema_detailed(

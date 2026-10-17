@@ -1,10 +1,10 @@
 //! 原生设置窗口的账号操作：与 Tauri 桌面端的十四个账号命令（`desktop_account.rs`）和 Windows 的四个设置同步命令（`windows_settings_sync.rs`）一一对应，用同一个 [`BackendAccountSession`] 和同一份本用户会话文件（[`FileAccountSessionStorage`]，`account-session.json`），返回的也是同样的脱敏形状（[`msime_client_services::account::page`]）。令牌只在本进程里，不出现在响应中。
 //!
-//! 每个会话目录在进程里只有一个会话对象，这样进行中的 Google 登录可以被另一次调用里的 `google_cancel` 结束；会话文件本身每次访问都重新读，共享应用、输入法和这里同时登录、刷新或退出时以文件为准，刷新时共用 `account-refresh.lock`。
+//! 每个会话目录（和宿主自报的 `client_agent`）在进程里只有一个会话对象，这样进行中的 Google 登录可以被另一次调用里的 `google_cancel` 结束；会话文件本身每次访问都重新读，共享应用、输入法和这里同时登录、刷新或退出时以文件为准，刷新时共用 `account-refresh.lock`。
 //!
 //! 请求带 `session_store` 而不带 `directory` 时，会话在宿主注入的存储里（[`super::session_store`]），会话对象是注册时建好的那一个。
 //!
-//! #8201 新增的操作（对话、释义、常用语、我的设备、云端数据、反馈、诊断上传、发送下载链接、语音贡献）在 [`crate::account_ops`]；它们失败时还可能带 `retry_after_seconds`。登录账号优先、退回匿名账号的几项，按目录时用同一目录里的 `anonymous-session.json`（每个目录一个会话对象，刷新时与登录会话共用 `account-refresh.lock`），注入时用该 store 的匿名会话。
+//! #8201 新增的操作（对话、释义、常用语、我的设备、云端数据、反馈、诊断上传、发送下载链接、语音贡献和删除语音样本）在 [`crate::account_ops`]；已有的 `delete` 注销成功以后也经它删匿名账号的语音样本；它们失败时还可能带 `retry_after_seconds`。用到匿名账号的几项，按目录时用同一目录里的 `anonymous-session.json`（每个目录、每个 `client_agent` 一个会话对象，刷新时与登录会话共用 `account-refresh.lock`）和 `anonymous-account.json` 里的身份，注入时用该 store 的匿名会话和 `ANONYMOUS_IDENTITY` 项。
 //!
 //! Part of the C ABI; see the parent module for what these shims guarantee.
 
@@ -21,22 +21,37 @@ use msime_client_services::account::settings_sync::{
 };
 use msime_client_services::account::{
     adopt_legacy_account_session, ensure_anonymous_account, ensure_anonymous_account_in,
-    AccountError, AccountPreferences, AccountSessionFileLayout, BackendAccountClient,
-    BackendAccountSession, FileAccountSessionStorage, LockedAnonymousSessionStorage,
+    ensure_anonymous_account_with, valid_client_agent, AccountError, AccountPreferences,
+    AccountSessionFileLayout, AnonymousIdentitySource, BackendAccountClient, BackendAccountSession,
+    FileAccountSessionStorage, LockedAnonymousSessionStorage,
 };
 use std::panic::{catch_unwind, AssertUnwindSafe};
 
 /// 请求的上限：应用云端设置时请求里带着整份云端设置文档（其中可能有 Android 的自定义键盘皮肤库，最多 768 KiB），与 Android 的设置同步导出一样给 4 MiB；目录各最多 16 KiB。
 const MAX_REQUEST_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DIRECTORY_BYTES: usize = 16 * 1024;
+/// `msime_client_ensure_anonymous_account_with_agent` 的请求上限：16 KiB 的目录加上 `client_agent` 和 JSON 本身。
+const MAX_ENSURE_ANONYMOUS_REQUEST_BYTES: usize = 32 * 1024;
 
 pub(super) type Session = BackendAccountSession<BackendAccountClient, SessionStorage>;
 
-/// 每个会话目录一个会话对象。只在取对象时持锁，账号调用本身在锁外进行。
-static ACCOUNT_SESSIONS: OnceLock<Mutex<HashMap<PathBuf, Arc<Session>>>> = OnceLock::new();
+/// 会话对象的键：会话目录和宿主自报的 User-Agent（没给时为 `None`，发 `MSIME/Android`）。
+type SessionKey = (PathBuf, Option<String>);
 
-/// 每个会话目录一个匿名会话对象（同一目录的 `anonymous-session.json`），给登录账号优先、退回匿名账号的新操作用。
-static ANONYMOUS_SESSIONS: OnceLock<Mutex<HashMap<PathBuf, Arc<Session>>>> = OnceLock::new();
+/// 每个会话目录、每个 `client_agent` 一个会话对象。同一目录的几个对象读写同一份会话文件，刷新时共用 `account-refresh.lock`，与几个进程共用一个目录相同。只在取对象时持锁，账号调用本身在锁外进行。
+static ACCOUNT_SESSIONS: OnceLock<Mutex<HashMap<SessionKey, Arc<Session>>>> = OnceLock::new();
+
+/// 每个会话目录、每个 `client_agent` 一个匿名会话对象（同一目录的 `anonymous-session.json`），给登录账号优先、退回匿名账号的新操作用。
+static ANONYMOUS_SESSIONS: OnceLock<Mutex<HashMap<SessionKey, Arc<Session>>>> = OnceLock::new();
+
+/// 目录模式里宿主自报的每个 User-Agent 一个 HTTP 客户端，整个进程共用：客户端里只有连接池和超时，没有账号状态（见 [`BackendAccountClient::new`] 共用的那一个），各建一份时每个都多占一个后台线程和几个文件描述符。
+static AGENT_CLIENTS: OnceLock<Mutex<HashMap<String, BackendAccountClient>>> = OnceLock::new();
+
+#[cfg(test)]
+thread_local! {
+    /// 测试里本线程上 [`directory_client`] 改连的本机假服务端（`http://127.0.0.1:<端口>`），每次都新建、不进 [`AGENT_CLIENTS`]。按线程设，并行跑的其他测试仍连不到它；`msime_client_account` 在调用线程上完成，所以经 C 入口的请求也走它。
+    static TEST_ORIGIN: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -50,6 +65,9 @@ struct AccountRequest {
     /// `msime_client_session_store_register` 给的 id；与 `directory` 恰好给一个。
     #[serde(default)]
     session_store: Option<u64>,
+    /// 宿主自报的 User-Agent，形状与注入存储的 `client_agent` 相同（[`valid_client_agent`]）；只能与 `directory` 一起给，注入存储用注册时给的那个。不给时发 `MSIME/Android`，与以前相同（#8201 的决定 1）。
+    #[serde(default)]
+    client_agent: Option<String>,
     action: Action,
 }
 
@@ -70,13 +88,18 @@ enum AccountAction {
     RequestCode {
         provider: String,
         target: String,
+        #[serde(default)]
+        purpose: Purpose,
     },
     Login {
         challenge_id: String,
         code: String,
+        #[serde(default)]
+        purpose: Purpose,
     },
-    GoogleLogin,
-    GoogleCancel,
+    /// Windows 的浏览器登录和它的取消。写成空的结构体变体，理由与 `AppleChallenge {}` 相同：多带 `purpose` 之类字段的请求是 `account_invalid`，不会照样打开浏览器做一次普通登录。
+    GoogleLogin {},
+    GoogleCancel {},
     /// 宿主自己弹 Apple 登录界面（iOS、macOS 的 `ASAuthorizationAppleIDProvider`）：先要 challenge 和 nonce，再交回 identity token。写成空的结构体变体：内部标签的单元变体不检查多余字段，多带字段的请求会照样联网申请 challenge。
     AppleChallenge {},
     AppleLogin {
@@ -87,6 +110,8 @@ enum AccountAction {
     GoogleChallenge {
         #[serde(default)]
         target: Option<String>,
+        #[serde(default)]
+        purpose: Purpose,
     },
     GoogleCodeLogin {
         challenge_id: String,
@@ -95,14 +120,20 @@ enum AccountAction {
     GoogleTokenLogin {
         challenge_id: String,
         id_token: String,
+        #[serde(default)]
+        purpose: Purpose,
     },
     /// 没有 Apple 原生登录的宿主（安卓）走 Apple 网页登录：`app` 是发起登录的 applicationId。
     AppleWebStart {
         app: String,
+        #[serde(default)]
+        purpose: Purpose,
     },
     AppleWebLogin {
         grant: String,
         code_verifier: String,
+        #[serde(default)]
+        purpose: Purpose,
     },
     Profile,
     Rename {
@@ -132,43 +163,100 @@ enum AccountAction {
     EnsureAnonymous,
 }
 
-/// 目录对应的会话对象，第一次用到时建立；建立前先接管旧目录里的会话，与共享应用启动时做的一样。社区操作（`msime_client_community`）经同一个对象认证。
+/// 邮箱、Google ID token 和 Apple 网页登录这几个操作的用途：缺省是登录；`link` 是给已登录的账号添加这种登录方式（#8201 的决定 9，Android 的「添加登录方式」），申请和完成两步都要带。
+#[derive(Clone, Copy, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum Purpose {
+    #[default]
+    Login,
+    Link,
+}
+
+/// 宿主给的 `client_agent`：不合法时是 [`AccountError::Invalid`]，在用到目录之前就拒绝。
+pub(super) fn checked_agent(agent: Option<&str>) -> Result<Option<&str>, AccountError> {
+    match agent {
+        Some(agent) if !valid_client_agent(agent) => Err(AccountError::Invalid),
+        agent => Ok(agent),
+    }
+}
+
+/// 目录模式的 HTTP 客户端：没有 `agent` 时是进程共用的默认客户端（`MSIME/Android`），有时是这个 User-Agent 的那一个，第一次用到时建立。
+fn directory_client(agent: Option<&str>) -> Result<BackendAccountClient, AccountError> {
+    #[cfg(test)]
+    if let Some(origin) = TEST_ORIGIN.with_borrow(Clone::clone) {
+        return BackendAccountClient::loopback_with_agent(
+            &origin,
+            agent.unwrap_or("MSIME/Android"),
+        );
+    }
+    let Some(agent) = agent else {
+        return BackendAccountClient::new();
+    };
+    let clients = AGENT_CLIENTS.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut clients = clients.lock().map_err(|_| AccountError::Unavailable)?;
+    if let Some(client) = clients.get(agent) {
+        return Ok(client.clone());
+    }
+    let client = BackendAccountClient::with_user_agent(agent)?;
+    clients.insert(agent.to_owned(), client.clone());
+    Ok(client)
+}
+
+/// 目录对应的会话对象（默认 User-Agent），第一次用到时建立；建立前先接管旧目录里的会话，与共享应用启动时做的一样。社区操作（`msime_client_community`）经同一个对象认证。
 pub(super) fn session_for(
     directory: &Path,
     legacy: Option<&Path>,
 ) -> Result<Arc<Session>, AccountError> {
+    session_with_agent(directory, legacy, None)
+}
+
+/// 与 [`session_for`] 相同，只是请求以宿主自报的 `agent` 作 User-Agent（`agent` 已经过 [`checked_agent`]）；同一目录、同一个 `agent` 的请求用同一个对象。
+pub(super) fn session_with_agent(
+    directory: &Path,
+    legacy: Option<&Path>,
+    agent: Option<&str>,
+) -> Result<Arc<Session>, AccountError> {
     let sessions = ACCOUNT_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut sessions = sessions.lock().map_err(|_| AccountError::Unavailable)?;
-    if let Some(session) = sessions.get(directory) {
+    let key = (directory.to_path_buf(), agent.map(str::to_owned));
+    if let Some(session) = sessions.get(&key) {
         return Ok(Arc::clone(session));
     }
     if let Some(legacy) = legacy {
         adopt_legacy_account_session(legacy, directory);
     }
-    let client = BackendAccountClient::new()?;
     let session = Arc::new(BackendAccountSession::new(
-        client,
+        directory_client(agent)?,
         SessionStorage::File(FileAccountSessionStorage::new(
             directory,
             AccountSessionFileLayout::Native,
         )),
     ));
-    sessions.insert(directory.to_path_buf(), Arc::clone(&session));
+    sessions.insert(key, Arc::clone(&session));
     Ok(session)
 }
 
-/// 目录里匿名会话的对象，第一次用到时建立。
+/// 目录里匿名会话的对象（默认 User-Agent），第一次用到时建立。
 pub(super) fn anonymous_session_for(directory: &Path) -> Result<Arc<Session>, AccountError> {
+    anonymous_session_with_agent(directory, None)
+}
+
+/// 与 [`anonymous_session_for`] 相同，只是请求（包括删除语音样本时匿名账号的重新登录）以 `agent` 作 User-Agent。
+pub(super) fn anonymous_session_with_agent(
+    directory: &Path,
+    agent: Option<&str>,
+) -> Result<Arc<Session>, AccountError> {
     let sessions = ANONYMOUS_SESSIONS.get_or_init(|| Mutex::new(HashMap::new()));
     let mut sessions = sessions.lock().map_err(|_| AccountError::Unavailable)?;
-    if let Some(session) = sessions.get(directory) {
+    let key = (directory.to_path_buf(), agent.map(str::to_owned));
+    if let Some(session) = sessions.get(&key) {
         return Ok(Arc::clone(session));
     }
     let session = Arc::new(BackendAccountSession::new(
-        BackendAccountClient::new()?,
+        directory_client(agent)?,
         SessionStorage::AnonymousFile(LockedAnonymousSessionStorage::new(directory)),
     ));
-    sessions.insert(directory.to_path_buf(), Arc::clone(&session));
+    sessions.insert(key, Arc::clone(&session));
     Ok(session)
 }
 
@@ -292,8 +380,75 @@ fn apply_preferences(
     serde_json::to_value(saved).map_err(|_| "storage".to_owned())
 }
 
-/// 一次操作。设置同步的上传和应用要读写宿主给的偏好目录，在这里处理；其余都只经会话，见 [`run_account`]。
-fn run(session: &Session, action: AccountAction) -> Result<Value, String> {
+fn apple_web_started(started: msime_client_services::account::AppleWebSignIn) -> Value {
+    json!({
+        "authorizationUrl": started.authorization_url,
+        "expiresIn": started.expires_in,
+        "codeVerifier": started.code_verifier,
+    })
+}
+
+/// 给已登录账号添加登录方式的一步：失败时按 #8201 新操作的规则带细节（需要最近登录是 `account_recent_login_required`，断网是 `account_network`，限流带 `retry_after_seconds`）。
+fn link(
+    operation: impl FnOnce() -> Result<Value, msime_client_services::account::AccountFailure>,
+) -> Result<Value, Failure> {
+    operation().map_err(Failure::from)
+}
+
+/// 一次操作。`purpose:"link"` 的几步（给已登录账号添加登录方式）只用登录会话，在这里处理；其余见 [`run_other`]。
+fn run(session: &Session, action: AccountAction) -> Result<Value, Failure> {
+    match action {
+        AccountAction::RequestCode {
+            provider,
+            target,
+            purpose: Purpose::Link,
+        } => link(|| {
+            Ok(value(ChallengeResponse::from(
+                session.link_request_code(&provider, &target)?,
+            ))?)
+        }),
+        AccountAction::Login {
+            challenge_id,
+            code,
+            purpose: Purpose::Link,
+        } => link(|| Ok(status(Some(session.link_email(&challenge_id, &code)?))?)),
+        // 绑定只走 ID token 流程（Android 的 Credential Manager），回环流程不能绑定。
+        AccountAction::GoogleChallenge {
+            target: Some(_),
+            purpose: Purpose::Link,
+        } => Err(AccountError::Invalid.code().to_owned().into()),
+        AccountAction::GoogleChallenge {
+            target: None,
+            purpose: Purpose::Link,
+        } => link(|| Ok(nonce_challenge(session.link_google_id_token_challenge()?)?)),
+        AccountAction::GoogleTokenLogin {
+            challenge_id,
+            id_token,
+            purpose: Purpose::Link,
+        } => link(|| {
+            Ok(status(Some(
+                session.link_google_id_token(&challenge_id, &id_token)?,
+            ))?)
+        }),
+        AccountAction::AppleWebStart {
+            app,
+            purpose: Purpose::Link,
+        } => link(|| Ok(apple_web_started(session.link_apple_web_start(&app)?))),
+        AccountAction::AppleWebLogin {
+            grant,
+            code_verifier,
+            purpose: Purpose::Link,
+        } => link(|| {
+            Ok(status(Some(
+                session.link_apple_web(&grant, &code_verifier)?,
+            ))?)
+        }),
+        action => run_other(session, action).map_err(Failure::from),
+    }
+}
+
+/// 不是绑定的操作。设置同步的上传和应用要读写宿主给的偏好目录，在这里处理；其余都只经会话，见 [`run_account`]。
+fn run_other(session: &Session, action: AccountAction) -> Result<Value, String> {
     let code = |error: AccountError| error.code().to_owned();
     match action {
         AccountAction::PreferencesApply {
@@ -317,16 +472,22 @@ fn run_account(session: &Session, action: AccountAction) -> Result<Value, Accoun
     match action {
         AccountAction::Status => status(session.status()?),
         AccountAction::Providers => value(providers_response(session.providers()?)),
-        AccountAction::RequestCode { provider, target } => value(ChallengeResponse::from(
+        AccountAction::RequestCode {
+            provider,
+            target,
+            purpose: Purpose::Login,
+        } => value(ChallengeResponse::from(
             session.request_code(&provider, &target)?,
         )),
-        AccountAction::Login { challenge_id, code } => {
-            status(Some(session.sign_in(&challenge_id, &code)?))
-        }
-        AccountAction::GoogleLogin => {
+        AccountAction::Login {
+            challenge_id,
+            code,
+            purpose: Purpose::Login,
+        } => status(Some(session.sign_in(&challenge_id, &code)?)),
+        AccountAction::GoogleLogin {} => {
             status(Some(session.sign_in_google_with_browser(open_browser)?))
         }
-        AccountAction::GoogleCancel => {
+        AccountAction::GoogleCancel {} => {
             session.cancel_google_sign_in();
             Ok(Value::Null)
         }
@@ -335,11 +496,13 @@ fn run_account(session: &Session, action: AccountAction) -> Result<Value, Accoun
             challenge_id,
             identity_token,
         } => status(Some(session.sign_in_apple(&challenge_id, &identity_token)?)),
-        AccountAction::GoogleChallenge { target: None } => {
-            nonce_challenge(session.google_id_token_challenge()?)
-        }
+        AccountAction::GoogleChallenge {
+            target: None,
+            purpose: Purpose::Login,
+        } => nonce_challenge(session.google_id_token_challenge()?),
         AccountAction::GoogleChallenge {
             target: Some(target),
+            purpose: Purpose::Login,
         } => {
             let challenge = session.google_loopback_challenge(&target)?;
             Ok(json!({
@@ -354,20 +517,18 @@ fn run_account(session: &Session, action: AccountAction) -> Result<Value, Accoun
         AccountAction::GoogleTokenLogin {
             challenge_id,
             id_token,
+            purpose: Purpose::Login,
         } => status(Some(
             session.sign_in_google_id_token(&challenge_id, &id_token)?,
         )),
-        AccountAction::AppleWebStart { app } => {
-            let started = session.apple_web_start(&app)?;
-            Ok(json!({
-                "authorizationUrl": started.authorization_url,
-                "expiresIn": started.expires_in,
-                "codeVerifier": started.code_verifier,
-            }))
-        }
+        AccountAction::AppleWebStart {
+            app,
+            purpose: Purpose::Login,
+        } => Ok(apple_web_started(session.apple_web_start(&app)?)),
         AccountAction::AppleWebLogin {
             grant,
             code_verifier,
+            purpose: Purpose::Login,
         } => status(Some(session.sign_in_apple_web(&grant, &code_verifier)?)),
         AccountAction::Profile => value(ProfileResponse::from(session.profile()?)),
         AccountAction::Rename { display_name } => {
@@ -386,14 +547,87 @@ fn run_account(session: &Session, action: AccountAction) -> Result<Value, Accoun
             value(PreferenceSchemaResponse::from(session.preference_schema()?))
         }
         AccountAction::PreferencesLoad => value(session.preferences()?),
-        // 要写本机偏好、错误码不全是账号错误码的两项由 run 处理，要看会话来源的 ensure_anonymous 由导出函数处理，都不会到这里。
+        // 要写本机偏好、错误码不全是账号错误码的两项由 run_other 处理，绑定登录方式的几步由 run 处理，要看会话来源的 ensure_anonymous 由导出函数处理，都不会到这里。
         AccountAction::PreferencesUpload { .. }
         | AccountAction::PreferencesApply { .. }
-        | AccountAction::EnsureAnonymous => Err(AccountError::Invalid),
+        | AccountAction::EnsureAnonymous
+        | AccountAction::RequestCode {
+            purpose: Purpose::Link,
+            ..
+        }
+        | AccountAction::Login {
+            purpose: Purpose::Link,
+            ..
+        }
+        | AccountAction::GoogleChallenge {
+            purpose: Purpose::Link,
+            ..
+        }
+        | AccountAction::GoogleTokenLogin {
+            purpose: Purpose::Link,
+            ..
+        }
+        | AccountAction::AppleWebStart {
+            purpose: Purpose::Link,
+            ..
+        }
+        | AccountAction::AppleWebLogin {
+            purpose: Purpose::Link,
+            ..
+        } => Err(AccountError::Invalid),
     }
 }
 
-fn absolute_directory(value: &str) -> Result<&Path, String> {
+/// 目录模式的匿名账号注册：没有 `agent` 时与 `msime_client_ensure_anonymous_account` 完全相同（已有会话时只读一次会话文件、不建 HTTP 客户端），有时经这个 User-Agent 的客户端注册。`agent` 已经过 [`checked_agent`]。
+fn ensure_anonymous_in_directory(
+    directory: &Path,
+    agent: Option<&str>,
+) -> Result<(), AccountError> {
+    match agent {
+        None => ensure_anonymous_account(directory),
+        Some(agent) => directory_client(Some(agent))
+            .and_then(|client| ensure_anonymous_account_with(client, directory)),
+    }
+}
+
+/// `msime_client_ensure_anonymous_account_with_agent` 的请求。
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnsureAnonymousRequest {
+    directory: String,
+    #[serde(default)]
+    client_agent: Option<String>,
+}
+
+/// 与 `msime_client_ensure_anonymous_account` 相同，只是请求是 JSON `{"directory": 绝对路径, "client_agent": 可选}`，带 `client_agent` 时注册请求以它作 User-Agent（#8201 的决定 1 扩展到这里），服务端「我的设备」据此显示平台。校验与 `msime_client_account` 的 `client_agent` 相同，不合法是 `account_invalid`；不带时与 `msime_client_ensure_anonymous_account` 发的请求相同。失败时 error 是账号错误码，与 `msime_client_account` 的 `ensure_anonymous` 相同，不是旧入口那样的说明文字。
+/// # Safety
+/// `request` points to `length` readable UTF-8 JSON bytes. Null is rejected.
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_ensure_anonymous_account_with_agent(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    response(|| {
+        let invalid = || AccountError::Invalid.code().to_owned();
+        // SAFETY: forwarded from the documented caller contract.
+        let request: EnsureAnonymousRequest = unsafe {
+            with_bounded_bytes(
+                request,
+                length,
+                MAX_ENSURE_ANONYMOUS_REQUEST_BYTES,
+                "account_invalid",
+                |bytes| serde_json::from_slice(bytes).map_err(|_| invalid()),
+            )?
+        };
+        let directory = absolute_directory(&request.directory)?;
+        let agent = checked_agent(request.client_agent.as_deref()).map_err(|_| invalid())?;
+        ensure_anonymous_in_directory(directory, agent)
+            .map(|()| Value::Bool(true))
+            .map_err(|error| error.code().to_owned())
+    })
+}
+
+pub(super) fn absolute_directory(value: &str) -> Result<&Path, String> {
     let path = Path::new(value);
     if value.len() > MAX_DIRECTORY_BYTES || !path.is_absolute() {
         return Err(AccountError::Invalid.code().to_owned());
@@ -433,35 +667,55 @@ pub unsafe extern "C" fn msime_client_account(request: *const u8, length: usize)
                     .as_deref()
                     .map(absolute_directory)
                     .transpose()?;
+                let agent = checked_agent(request.client_agent.as_deref()).map_err(code)?;
                 if matches!(
                     request.action,
                     Action::Account(AccountAction::EnsureAnonymous)
                 ) {
-                    return ensure_anonymous_account(directory)
+                    return ensure_anonymous_in_directory(directory, agent)
                         .map(|()| Value::Bool(true))
                         .map_err(code);
                 }
-                let session = session_for(directory, legacy).map_err(code)?;
+                let session = session_with_agent(directory, legacy, agent).map_err(code)?;
                 match request.action {
-                    Action::Account(action) => run(&session, action).map_err(Failure::from),
+                    // 注销成功以后尽力删掉本机匿名账号的语音样本（#8201 的决定 12 后续 2），结果在 voice_samples 里，不影响注销本身。
+                    Action::Account(AccountAction::Delete) => {
+                        run(&session, AccountAction::Delete)?;
+                        Ok(crate::account_ops::account_deleted(
+                            || anonymous_session_with_agent(directory, agent),
+                            AnonymousIdentitySource::Directory(directory),
+                        ))
+                    }
+                    Action::Account(action) => run(&session, action),
                     Action::Extended(operation) => crate::account_ops::run(
                         &session,
-                        || anonymous_session_for(directory),
+                        || anonymous_session_with_agent(directory, agent),
+                        AnonymousIdentitySource::Directory(directory),
                         operation,
                     )
                     .map_err(Failure::from),
                 }
             }
+            // 注入存储的 User-Agent 是注册时给的那个。
+            Source::Store(_) if request.client_agent.is_some() => Err(invalid()),
             Source::Store(entry) => match request.action {
                 Action::Account(AccountAction::EnsureAnonymous) => {
                     ensure_anonymous_account_in(&entry.anonymous, entry.backend.as_ref())
                         .map(|()| Value::Bool(true))
                         .map_err(code)
                 }
-                Action::Account(action) => run(&entry.account, action).map_err(Failure::from),
+                Action::Account(AccountAction::Delete) => {
+                    run(&entry.account, AccountAction::Delete)?;
+                    Ok(crate::account_ops::account_deleted(
+                        || Ok(Arc::clone(&entry.anonymous)),
+                        AnonymousIdentitySource::Store(entry.backend.as_ref()),
+                    ))
+                }
+                Action::Account(action) => run(&entry.account, action),
                 Action::Extended(operation) => crate::account_ops::run(
                     &entry.account,
                     || Ok(Arc::clone(&entry.anonymous)),
+                    AnonymousIdentitySource::Store(entry.backend.as_ref()),
                     operation,
                 )
                 .map_err(Failure::from),
@@ -469,6 +723,13 @@ pub unsafe extern "C" fn msime_client_account(request: *const u8, length: usize)
         }
     })
 }
+
+#[cfg(test)]
+mod client_agent_tests;
+#[cfg(test)]
+mod link_tests;
+#[cfg(test)]
+mod voice_samples_tests;
 
 #[cfg(test)]
 mod tests {
@@ -858,6 +1119,43 @@ mod tests {
         }
 
         #[test]
+        fn signed_out_community_and_ai_skin_requests_read_the_stores_anonymous_session() {
+            let store = leaked_store();
+            let id = registered(store, SHARED, 0);
+            // store 里只有一份解不开的匿名会话：要是只看登录会话，下面几项会以未登录结束；它们读了匿名会话，在发请求之前就以存储错误结束。
+            put(store, 3, b"not a session".to_vec());
+            let item = "10000000-0000-4000-8000-000000000001";
+            for action in [
+                json!({ "operation": "keyboard_skin_download", "id": item }),
+                json!({ "operation": "report", "kind": "skins", "id": item, "reason": "其他" }),
+            ] {
+                assert_eq!(
+                    community(json!({ "session_store": id, "action": action })),
+                    json!({ "ok": false, "error": "community_storage" }),
+                    "{action}"
+                );
+            }
+            // 只认登录账号的社区操作不看匿名会话。
+            assert_eq!(
+                community(
+                    json!({ "session_store": id, "action": { "operation": "keyboard_skin_rate", "id": item, "stars": 5 } })
+                ),
+                json!({ "ok": false, "error": "community_unauthorized" })
+            );
+            let request = json!({ "session_store": id, "action": { "operation": "create", "prompt": "合成插画" } }).to_string();
+            // SAFETY: 缓冲区在调用期间有效，返回的字符串在下面释放。
+            let job = unsafe {
+                let raw =
+                    crate::ffi::ai_skin::msime_client_ai_skin_job(request.as_ptr(), request.len());
+                let text = CStr::from_ptr(raw).to_str().unwrap().to_owned();
+                msime_client_string_free(raw);
+                serde_json::from_str::<Value>(&text).unwrap()
+            };
+            assert_eq!(job, json!({ "ok": false, "error": "account_storage" }));
+            unregister(id);
+        }
+
+        #[test]
         fn host_driven_sign_ins_go_through_the_stores_session() {
             let store = leaked_store();
             let id = registered(store, SHARED, 0);
@@ -919,11 +1217,14 @@ mod tests {
         ));
         assert!(matches!(
             parse(json!({ "operation": "google_challenge" })),
-            AccountAction::GoogleChallenge { target: None }
+            AccountAction::GoogleChallenge {
+                target: None,
+                purpose: Purpose::Login
+            }
         ));
         assert!(matches!(
             parse(json!({ "operation": "google_challenge", "target": "http://127.0.0.1:53682/callback" })),
-            AccountAction::GoogleChallenge { target: Some(target) } if target == "http://127.0.0.1:53682/callback"
+            AccountAction::GoogleChallenge { target: Some(target), purpose: Purpose::Login } if target == "http://127.0.0.1:53682/callback"
         ));
         assert!(matches!(
             parse(json!({ "operation": "google_code_login", "challenge_id": "c", "code": "k" })),
@@ -931,20 +1232,24 @@ mod tests {
         ));
         assert!(matches!(
             parse(json!({ "operation": "google_token_login", "challenge_id": "c", "id_token": "t" })),
-            AccountAction::GoogleTokenLogin { challenge_id, id_token } if challenge_id == "c" && id_token == "t"
+            AccountAction::GoogleTokenLogin { challenge_id, id_token, purpose: Purpose::Login } if challenge_id == "c" && id_token == "t"
         ));
         assert!(matches!(
             parse(json!({ "operation": "apple_web_start", "app": "app.msime.android" })),
-            AccountAction::AppleWebStart { app } if app == "app.msime.android"
+            AccountAction::AppleWebStart { app, purpose: Purpose::Login } if app == "app.msime.android"
         ));
         assert!(matches!(
             parse(json!({ "operation": "apple_web_login", "grant": "g", "code_verifier": "v" })),
-            AccountAction::AppleWebLogin { grant, code_verifier } if grant == "g" && code_verifier == "v"
+            AccountAction::AppleWebLogin { grant, code_verifier, purpose: Purpose::Login } if grant == "g" && code_verifier == "v"
         ));
         // 已有的 google_login 仍是不带参数的 Windows 浏览器流程。
         assert!(matches!(
             parse(json!({ "operation": "google_login" })),
-            AccountAction::GoogleLogin
+            AccountAction::GoogleLogin {}
+        ));
+        assert!(matches!(
+            parse(json!({ "operation": "google_cancel" })),
+            AccountAction::GoogleCancel {}
         ));
     }
 
@@ -1181,6 +1486,7 @@ mod tests {
         for operation in [
             json!({ "operation": "chat_models" }),
             json!({ "operation": "chat", "messages": [{ "role": "user", "content": "你好" }], "model": "synthetic-model" }),
+            json!({ "operation": "account_delete" }),
             json!({ "operation": "phrases_load" }),
             json!({ "operation": "sessions_list" }),
             json!({ "operation": "session_revoke", "id": "0".repeat(64) }),

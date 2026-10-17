@@ -28,6 +28,9 @@ const MAX_CHAT_MESSAGES: usize = 16;
 const MAX_CHAT_MESSAGE_BYTES: usize = 16 * 1024;
 const MAX_CHAT_REQUEST_BYTES: usize = 64 * 1024;
 const MAX_CHAT_RESPONSE_BYTES: usize = 16 * 1024;
+const CHAT_PATH: &str = "/v1/chat/completions";
+/// 对话请求从连接到读完回答的总时限。服务端整条请求（流式也一样）受 `timeout_seconds` 约束，最多 120 秒，多给 5 秒让服务端自己的超时先到。
+const CHAT_TIMEOUT: Duration = Duration::from_secs(125);
 const REFRESH_EARLY_SECONDS: u64 = 30;
 /// Backend bearer sessions are short-lived; reject malformed responses that would create a
 /// practically permanent local session.
@@ -484,7 +487,7 @@ impl AccountError {
     }
 }
 
-/// 新接口（释义、常用语、我的设备、云端数据、反馈、诊断上传）的失败：在 [`AccountError`] 之外带着 HTTP 状态码、服务端的错误码和 `Retry-After` 的秒数，宿主据此区分「需要最近登录」「请求太大」「不存在」「被限流、多久后重试」。`AccountError` 的变体不变，已有接口返回的码也不变。
+/// 新接口（释义、常用语、我的设备、云端数据、反馈、诊断上传、对话、AI 皮肤、注销账号的 `account_delete`）的失败：在 [`AccountError`] 之外带着 HTTP 状态码、服务端的错误码、`Retry-After` 的秒数和有没有拿到响应，宿主据此区分「需要最近登录」「请求太大」「不存在」「被限流、多久后重试」「断网」。`AccountError` 的变体不变，已有接口返回的码也不变。
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AccountFailure {
     pub error: AccountError,
@@ -494,12 +497,16 @@ pub struct AccountFailure {
     pub server_code: Option<String>,
     /// `Retry-After` 的秒数，只认整数秒；HTTP-date 形式忽略。
     pub retry_after_seconds: Option<u64>,
+    /// 请求发出去以后没有拿到响应：连不上、DNS 或 TLS 失败、超时、连接在响应头到达之前断开。这时 `error` 仍是 [`AccountError::Unavailable`]，经 `error` 取码的已有接口看到的还是 `account_unavailable`；[`Self::code`] 是 `account_network`，宿主据此说「网络连接失败」，与服务端 5xx 的「服务暂不可用」分开。
+    pub network_failure: bool,
 }
 
 /// 本地预检发现请求体超过服务端整包上限时的码。服务端走 `decode` 的接口超限时回的是 400 `invalid_json`，所以本地先拦下。
 const LOCAL_TOO_LARGE: &str = "request_too_large";
 /// 绑定账号的操作发现当前会话已不是那个账号时的码。
 const LOCAL_IDENTITY_CHANGED: &str = "identity_changed";
+/// 宿主给的请求 id 已经有一个在进行时的码。
+const LOCAL_BUSY: &str = "request_busy";
 
 impl From<AccountError> for AccountFailure {
     fn from(error: AccountError) -> Self {
@@ -508,28 +515,52 @@ impl From<AccountError> for AccountFailure {
             status: None,
             server_code: None,
             retry_after_seconds: None,
+            network_failure: false,
         }
     }
 }
 
 impl AccountFailure {
+    /// 请求没有拿到响应（见 [`Self::network_failure`]），`code()` 是 `account_network`。
+    pub fn network() -> Self {
+        Self {
+            network_failure: true,
+            ..AccountError::Unavailable.into()
+        }
+    }
+
+    /// `send()` 失败时的码。只有真的没拿到响应（连不上、DNS 或 TLS 失败、超时、连接在响应头到达之前断开）才是 [`Self::network`]：reqwest 在发出之前就建不出请求（`is_builder`，例如地址或头不合法）是 `account_invalid`，请求根本没有发出去；重定向被策略拒绝（`is_redirect`，客户端不跟随重定向，正常碰不到）时服务端已经回了响应，是 `account_unavailable`。
+    pub(crate) fn from_send_error(error: &reqwest::Error) -> Self {
+        if error.is_builder() {
+            AccountError::Invalid.into()
+        } else if error.is_redirect() {
+            AccountError::Unavailable.into()
+        } else {
+            Self::network()
+        }
+    }
+
     /// 请求体超过服务端的上限，在本地就拒绝，`code()` 是 `account_too_large`。
     pub fn too_large() -> Self {
         Self {
-            error: AccountError::Invalid,
-            status: None,
             server_code: Some(LOCAL_TOO_LARGE.to_owned()),
-            retry_after_seconds: None,
+            ..AccountError::Invalid.into()
         }
     }
 
     /// 操作绑定的账号已不是当前登录或匿名会话的账号，`code()` 是 `account_identity_changed`；不会退回另一个账号去做。
     pub fn identity_changed() -> Self {
         Self {
-            error: AccountError::Cancelled,
-            status: None,
             server_code: Some(LOCAL_IDENTITY_CHANGED.to_owned()),
-            retry_after_seconds: None,
+            ..AccountError::Cancelled.into()
+        }
+    }
+
+    /// 同一个请求 id 已经有一个在进行（[`ChatStreamRequests::begin`]），`code()` 是 `account_busy`。
+    pub fn busy() -> Self {
+        Self {
+            server_code: Some(LOCAL_BUSY.to_owned()),
+            ..AccountError::Conflict.into()
         }
     }
 
@@ -541,17 +572,24 @@ impl AccountFailure {
             status: Some(status),
             server_code: server_error_code(body),
             retry_after_seconds: retry_after.and_then(parse_retry_after),
+            network_failure: false,
         }
     }
 
     /// 交给宿主的错误码。`account_too_large` 的 413 规则只对反馈和快照接口有效：走 64 KiB 整包上限的接口超限时服务端回 400 `invalid_json`，那些接口靠本地预检报这个码。
     pub fn code(&self) -> &'static str {
+        if self.network_failure {
+            return "account_network";
+        }
         let server = self.server_code.as_deref();
         if server == Some("recent_login_required") {
             return "account_recent_login_required";
         }
         if server == Some(LOCAL_IDENTITY_CHANGED) {
             return "account_identity_changed";
+        }
+        if server == Some(LOCAL_BUSY) {
+            return "account_busy";
         }
         if server == Some("no_verified_email") {
             return "account_no_verified_email";
@@ -635,6 +673,8 @@ mod api;
 /// 安卓的 Apple 网页登录（PKCE 式一次性授权码）。
 mod apple_web;
 mod avatar;
+/// 对话的流式请求（SSE）和取消。
+mod chat_stream;
 mod client;
 mod clipboard;
 /// 多分类自动云同步的纯决策、状态文件和单轮状态机。
@@ -673,14 +713,16 @@ mod validate;
 mod voice_contribution;
 
 pub use anonymous::{
-    ensure_anonymous_account, ensure_anonymous_account_in, shared_access_token,
-    shared_access_token_in, with_shared_access_token, AnonymousSessionStorage,
-    LockedAnonymousSessionStorage, SharedAccessToken, ANONYMOUS_ACCOUNT_FILE,
-    ANONYMOUS_SESSION_FILE,
+    delete_anonymous_voice_samples, ensure_anonymous_account, ensure_anonymous_account_in,
+    ensure_anonymous_account_with, has_saved_anonymous_identity, shared_access_token,
+    shared_access_token_in, with_shared_access_token, AnonymousIdentitySource,
+    AnonymousSessionStorage, LockedAnonymousSessionStorage, SharedAccessToken,
+    ANONYMOUS_ACCOUNT_FILE, ANONYMOUS_SESSION_FILE,
 };
 pub use api::*;
 pub use apple_web::{AccountAppleWebChallenge, AppleWebSignIn};
 pub use avatar::*;
+pub use chat_stream::*;
 pub use client::*;
 pub use clipboard::*;
 pub use devices::*;
@@ -698,6 +740,8 @@ pub use user_data::*;
 pub use validate::*;
 pub use voice_contribution::*;
 
+#[cfg(test)]
+mod link_tests;
 #[cfg(test)]
 mod sign_in_tests;
 #[cfg(test)]

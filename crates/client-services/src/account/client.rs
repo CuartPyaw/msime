@@ -125,8 +125,9 @@ impl BackendAccountClient {
         Self::with_origin(origin, true)
     }
 
-    #[cfg(test)]
-    pub(crate) fn loopback_with_agent(origin: &str, agent: &str) -> Result<Self, AccountError> {
+    /// 测试用：连 `http://127.0.0.1:<端口>` 上的假服务端，以 `agent` 作 User-Agent（不校验形状，默认的 `MSIME/Android` 也可以）。其他 crate 的测试经 `test-support` 特性用它。
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn loopback_with_agent(origin: &str, agent: &str) -> Result<Self, AccountError> {
         Self::with_origin_and_agent(origin, true, agent)
     }
 
@@ -200,7 +201,7 @@ impl BackendAccountClient {
     }
 
     /// 校验路径、凭据和请求体后组装请求；请求只会发往构造时给定的源站。
-    fn prepare(
+    pub(super) fn prepare(
         &self,
         method: Method,
         path: &str,
@@ -328,7 +329,7 @@ impl BackendAccountClient {
         serde_json::from_slice(&bytes).map_err(|_| AccountError::Unavailable)
     }
 
-    /// 返回 [`AccountFailure`] 的新接口发请求用：与 [`Self::request_with_limit_timeout_accept`] 相同，失败时带着状态码、服务端错误码和 `Retry-After`。请求体超过 `maximum_request_bytes` 时在本地以 [`AccountFailure::too_large`] 拒绝，不发出去。
+    /// 返回 [`AccountFailure`] 的新接口发请求用：与 [`Self::request_with_limit_timeout_accept`] 相同，失败时带着状态码、服务端错误码和 `Retry-After`，没拿到响应时是 [`AccountFailure::network`]。请求体超过 `maximum_request_bytes` 时在本地以 [`AccountFailure::too_large`] 拒绝，不发出去。
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn request_detailed(
         &self,
@@ -351,7 +352,7 @@ impl BackendAccountClient {
             .prepare(method, path, token, body, maximum_request_bytes, accept)?
             .timeout(timeout)
             .send()
-            .map_err(|_| AccountError::Unavailable)?;
+            .map_err(|error| AccountFailure::from_send_error(&error))?;
         read_detailed_response(response, maximum_response_bytes)
     }
 
@@ -1325,22 +1326,68 @@ struct ChatBody<'a> {
 }
 
 impl<'a> ChatBody<'a> {
-    fn new(messages: &'a [AccountChatMessage], model: &'a str) -> Self {
+    fn new(messages: &'a [AccountChatMessage], model: &'a str, stream: bool) -> Self {
         Self {
             messages,
             model,
             max_tokens: 2048,
-            stream: false,
+            stream,
         }
     }
 }
 
-/// 序列化后的聊天请求体。
+/// 序列化后的聊天请求体（非流式）。流式的请求体只是 `false` 换成 `true`，短一个字节，按这份量出的上限对两者都成立。
 pub(super) fn chat_request_body(
     messages: &[AccountChatMessage],
     model: &str,
 ) -> Result<Vec<u8>, AccountError> {
-    serde_json::to_vec(&ChatBody::new(messages, model)).map_err(|_| AccountError::Invalid)
+    chat_body_bytes(messages, model, false)
+}
+
+/// 序列化后的聊天请求体，`stream` 决定服务端回 JSON 还是 SSE。
+pub(super) fn chat_body_bytes(
+    messages: &[AccountChatMessage],
+    model: &str,
+    stream: bool,
+) -> Result<Vec<u8>, AccountError> {
+    serde_json::to_vec(&ChatBody::new(messages, model, stream)).map_err(|_| AccountError::Invalid)
+}
+
+/// 非流式回答 `{choices:[{message:{role,content}}]}` 里的回复：取第一个选项，角色必须是 assistant，正文非空白、不超过 16 KiB、不含换行、回车和制表符以外的控制字符，否则是 `account_unavailable`。流式请求遇到没按 SSE 回答的响应时也按它读。
+pub(super) fn chat_reply(bytes: &[u8]) -> Result<String, AccountFailure> {
+    #[derive(Deserialize)]
+    struct Response {
+        choices: Vec<Choice>,
+    }
+    #[derive(Deserialize)]
+    struct Choice {
+        message: AccountChatMessage,
+    }
+    let response: Response =
+        serde_json::from_slice(bytes).map_err(|_| AccountError::Unavailable)?;
+    let reply = response
+        .choices
+        .into_iter()
+        .next()
+        .map(|choice| choice.message)
+        .ok_or(AccountError::Unavailable)?;
+    if reply.role != "assistant"
+        || reply.content.trim().is_empty()
+        || reply.content.len() > MAX_CHAT_RESPONSE_BYTES
+        || crate::text::has_disallowed_control(&reply.content)
+    {
+        return Err(AccountError::Unavailable.into());
+    }
+    Ok(reply.content)
+}
+
+/// 对话请求在取令牌之前的检查，与 [`BackendAccountSession::chat_checked`] 相同：不合法是 `account_invalid`，序列化后的请求体超过服务端 64 KiB 的整包上限是 `account_too_large`。
+pub fn prepare_chat(messages: &[AccountChatMessage], model: &str) -> Result<(), AccountFailure> {
+    validate_chat_request(messages, model)?;
+    if chat_request_body(messages, model)?.len() > MAX_CHAT_REQUEST_BYTES {
+        return Err(AccountFailure::too_large());
+    }
+    Ok(())
 }
 
 impl AccountApi for BackendAccountClient {
@@ -1456,6 +1503,132 @@ impl AccountApi for BackendAccountClient {
         Ok(tokens)
     }
 
+    fn link_challenge(
+        &self,
+        provider: &str,
+        target: &str,
+        access_token: &str,
+    ) -> Result<AccountChallenge, AccountFailure> {
+        validate_challenge_request(provider, target)?;
+        #[derive(Serialize)]
+        struct Body<'a> {
+            provider: &'a str,
+            target: &'a str,
+            purpose: &'static str,
+        }
+        let challenge = self.json_detailed(
+            Method::POST,
+            "/v1/auth/challenges",
+            Some(access_token),
+            Some(&Body {
+                provider,
+                target,
+                purpose: "link",
+            }),
+            MAX_JSON_BYTES,
+            MAX_JSON_BYTES,
+            Duration::from_secs(30),
+        )?;
+        validate_challenge(&challenge)?;
+        Ok(challenge)
+    }
+
+    fn link_login(
+        &self,
+        challenge: &str,
+        credential: &str,
+        access_token: &str,
+    ) -> Result<AccountTokens, AccountFailure> {
+        validate_login_request(challenge, credential)?;
+        #[derive(Serialize)]
+        struct Body<'a> {
+            challenge_id: &'a str,
+            credential: &'a str,
+        }
+        let tokens = self.json_detailed(
+            Method::POST,
+            "/v1/auth/login",
+            Some(access_token),
+            Some(&Body {
+                challenge_id: challenge,
+                credential,
+            }),
+            MAX_JSON_BYTES,
+            MAX_JSON_BYTES,
+            Duration::from_secs(30),
+        )?;
+        validate_tokens(&tokens)?;
+        Ok(tokens)
+    }
+
+    fn apple_web_link_challenge(
+        &self,
+        code_challenge: &str,
+        app: &str,
+        access_token: &str,
+    ) -> Result<AccountAppleWebChallenge, AccountFailure> {
+        if !super::apple_web::valid_base64url_token(code_challenge, 32)
+            || !super::apple_web::valid_apple_web_app(app)
+        {
+            return Err(AccountError::Invalid.into());
+        }
+        #[derive(Serialize)]
+        struct Body<'a> {
+            code_challenge: &'a str,
+            code_challenge_method: &'static str,
+            app: &'a str,
+            purpose: &'static str,
+        }
+        let challenge = self.json_detailed(
+            Method::POST,
+            "/v1/auth/apple/web",
+            Some(access_token),
+            Some(&Body {
+                code_challenge,
+                code_challenge_method: "S256",
+                app,
+                purpose: "link",
+            }),
+            MAX_JSON_BYTES,
+            MAX_JSON_BYTES,
+            Duration::from_secs(30),
+        )?;
+        super::apple_web::validate_apple_web_challenge(&challenge)?;
+        Ok(challenge)
+    }
+
+    fn apple_web_link_login(
+        &self,
+        grant: &str,
+        code_verifier: &str,
+        access_token: &str,
+    ) -> Result<AccountTokens, AccountFailure> {
+        if !super::apple_web::valid_apple_web_grant(grant)
+            || !super::apple_web::valid_code_verifier(code_verifier)
+        {
+            return Err(AccountError::Invalid.into());
+        }
+        #[derive(Serialize)]
+        struct Body<'a> {
+            grant: &'a str,
+            code_verifier: &'a str,
+        }
+        let tokens = self.json_detailed(
+            Method::POST,
+            "/v1/auth/apple/web/login",
+            Some(access_token),
+            Some(&Body {
+                grant,
+                code_verifier,
+            }),
+            MAX_JSON_BYTES,
+            MAX_JSON_BYTES,
+            Duration::from_secs(30),
+        )?;
+        validate_tokens(&tokens)?;
+        Ok(tokens)
+    }
+
     fn refresh(&self, refresh_token: &str) -> Result<AccountTokens, AccountError> {
         if !crate::text::is_lower_hex(refresh_token, 64) {
             return Err(AccountError::Invalid);
@@ -1512,7 +1685,22 @@ impl AccountApi for BackendAccountClient {
     }
 
     fn delete_account(&self, access_token: &str) -> Result<(), AccountError> {
-        self.empty::<()>(Method::DELETE, "/v1/users/me", Some(access_token), None)
+        self.delete_account_detailed(access_token)
+            .map_err(|failure| failure.error)
+    }
+
+    fn delete_account_detailed(&self, access_token: &str) -> Result<(), AccountFailure> {
+        self.request_detailed(
+            Method::DELETE,
+            "/v1/users/me",
+            Some(access_token),
+            None,
+            MAX_JSON_BYTES,
+            MAX_JSON_BYTES,
+            Duration::from_secs(30),
+            "application/json",
+        )
+        .map(|_| ())
     }
 
     fn upload_avatar(
@@ -1555,17 +1743,8 @@ impl AccountApi for BackendAccountClient {
     }
 
     fn chat_models(&self, access_token: &str) -> Result<AccountChatModels, AccountError> {
-        if !crate::text::is_lower_hex(access_token, 64) {
-            return Err(AccountError::Invalid);
-        }
-        let models = self.json::<AccountChatModels, ()>(
-            Method::GET,
-            "/v1/models",
-            Some(access_token),
-            None,
-        )?;
-        validate_chat_models(&models)?;
-        Ok(models)
+        self.chat_models_detailed(access_token)
+            .map_err(|failure| failure.error)
     }
 
     fn chat(
@@ -1574,44 +1753,66 @@ impl AccountApi for BackendAccountClient {
         model: &str,
         access_token: &str,
     ) -> Result<String, AccountError> {
+        self.chat_detailed(messages, model, access_token)
+            .map_err(|failure| failure.error)
+    }
+
+    fn chat_models_detailed(
+        &self,
+        access_token: &str,
+    ) -> Result<AccountChatModels, AccountFailure> {
         if !crate::text::is_lower_hex(access_token, 64) {
-            return Err(AccountError::Invalid);
+            return Err(AccountError::Invalid.into());
+        }
+        let models = self.json_detailed::<AccountChatModels, ()>(
+            Method::GET,
+            "/v1/models",
+            Some(access_token),
+            None,
+            MAX_JSON_BYTES,
+            MAX_JSON_BYTES,
+            Duration::from_secs(30),
+        )?;
+        validate_chat_models(&models)?;
+        Ok(models)
+    }
+
+    fn chat_detailed(
+        &self,
+        messages: &[AccountChatMessage],
+        model: &str,
+        access_token: &str,
+    ) -> Result<String, AccountFailure> {
+        if !crate::text::is_lower_hex(access_token, 64) {
+            return Err(AccountError::Invalid.into());
         }
         validate_chat_request(messages, model)?;
-        #[derive(Deserialize)]
-        struct Response {
-            choices: Vec<Choice>,
+        let body = chat_request_body(messages, model)?;
+        if body.len() > MAX_CHAT_REQUEST_BYTES {
+            return Err(AccountFailure::too_large());
         }
-        #[derive(Deserialize)]
-        struct Choice {
-            message: AccountChatMessage,
-        }
-        let body = ChatBody::new(messages, model);
-        if chat_request_body(messages, model)?.len() > MAX_CHAT_REQUEST_BYTES {
-            return Err(AccountError::Invalid);
-        }
-        let response = self.json_with_limit_timeout::<Response, _>(
+        let bytes = self.request_detailed(
             Method::POST,
-            "/v1/chat/completions",
+            CHAT_PATH,
             Some(access_token),
-            Some(&body),
+            Some(body),
+            MAX_CHAT_REQUEST_BYTES,
             MAX_CHAT_RESPONSE_BYTES,
-            Duration::from_secs(125),
+            CHAT_TIMEOUT,
+            "application/json",
         )?;
-        let reply = response
-            .choices
-            .into_iter()
-            .next()
-            .map(|choice| choice.message)
-            .ok_or(AccountError::Unavailable)?;
-        if reply.role != "assistant"
-            || reply.content.trim().is_empty()
-            || reply.content.len() > MAX_CHAT_RESPONSE_BYTES
-            || crate::text::has_disallowed_control(&reply.content)
-        {
-            return Err(AccountError::Unavailable);
-        }
-        Ok(reply.content)
+        chat_reply(&bytes)
+    }
+
+    fn chat_stream_detailed(
+        &self,
+        messages: &[AccountChatMessage],
+        model: &str,
+        access_token: &str,
+        cancel: &ChatStreamCancel,
+        on_delta: &mut dyn FnMut(&str),
+    ) -> Result<String, AccountFailure> {
+        self.stream_chat(messages, model, access_token, cancel, on_delta)
     }
 
     fn preference_schema(
