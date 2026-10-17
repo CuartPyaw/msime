@@ -574,6 +574,9 @@ public final class MSIMEInputService extends InputMethodService {
     void copyDeviceInfo() {
         long generation = ++deviceInfoCopyGeneration;
         DeviceInfoCollector.Screen screen = DeviceInfoCollector.screen(moreButton);
+        // 复制完成后直接回到键盘，提示会在键盘内部显示，避免用户还要手动关闭工具面板。
+        closeMoreTools();
+        render();
         try {
             preferencesWorker.execute(() -> {
                 var entries = DeviceInfoCollector.collect(getApplicationContext(), screen);

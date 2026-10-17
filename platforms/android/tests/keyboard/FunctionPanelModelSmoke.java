@@ -12,7 +12,7 @@ public final class FunctionPanelModelSmoke {
             "单手模式", "浮动键盘", "无痕输入", "键盘高度")),
             "page one");
         check(labels(1).equals(List.of("按键音", "振动", "振动强度", "插入语音文字", "词库", "文本编辑",
-            "反馈", "关于", "复制设备信息", "宣传", "表情", "剪贴板历史")), "page two");
+            "反馈", "关于", "设备信息", "宣传", "表情", "剪贴板历史")), "page two");
         check(labels(2).equals(List.of("编辑工具栏")), "page three");
         check(!FunctionPanelModel.item(Id.TEXT_EDIT).toggle() && FunctionPanelModel.pageOf(Id.TEXT_EDIT) == 1,
             "文本编辑 opens a panel from page two");
