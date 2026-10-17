@@ -5338,10 +5338,12 @@ fn generated_modes_session(fixture: &Fixture) -> Session {
         }];
         options.mention_entries = vec![
             crate::types::MentionEntry {
+                phone: String::new(),
                 text: "张三".to_owned(),
                 key: "zhang'san".to_owned(),
             },
             crate::types::MentionEntry {
+                phone: String::new(),
                 text: "深圳市".to_owned(),
                 key: "shen'zhen'shi".to_owned(),
             },
@@ -5779,6 +5781,7 @@ fn at_lists_the_mention_list_and_letters_filter_it() {
     // The list can be replaced while the mode is open.
     session.character(b'@', false);
     session.set_mention_entries(&[crate::types::MentionEntry {
+        phone: String::new(),
         text: "李四".to_owned(),
         key: "li'si".to_owned(),
     }]);
@@ -5839,6 +5842,7 @@ fn mention_place_annotation_uses_the_shown_row_when_a_list_name_does_not_match()
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = generated_modes_session(&fixture);
     session.set_mention_entries(&[crate::types::MentionEntry {
+        phone: String::new(),
         text: "深圳市".to_owned(),
         key: "other".to_owned(),
     }]);
@@ -5869,6 +5873,7 @@ fn generated_mode_commits_are_never_learned() {
             linear_step: 1,
         };
         options.mention_entries = vec![crate::types::MentionEntry {
+            phone: String::new(),
             text: "张三".to_owned(),
             key: "zhang'san".to_owned(),
         }];
