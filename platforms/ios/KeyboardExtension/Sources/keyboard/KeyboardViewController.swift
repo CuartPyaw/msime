@@ -132,10 +132,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private var toolbarPhrases = true
   private var toolbarScheme = true
   private var toolbarHidden = false
-  /// 工具栏上除品牌键和收起键之外还有没有显示的按钮，由 `updateShortcutButtons` 算出；一个都没有时空闲工具栏行按显示方式「隐藏」处理（`toolbarRowHidden`）。
+  /// 工具栏上除品牌键和收起键之外还有没有显示的按钮，由 `updateShortcutButtons` 算出；一个都没有时空闲工具栏内容按显示方式「隐藏」处理（`toolbarRowHidden`）。
   private var toolbarHasTools = true
-  /// 工具栏行空闲时不显示且顶栏上没有内容：顶栏不占空间，它下面的间距也一并去掉（`renderCandidateStrip`）。
-  private var topRowCollapsed = false
   /// 按键行当前按哪种单手模式布局（`applyOneHanded`）；第一次布局之前为 nil。
   private var appliedOneHanded: KeyboardOneHandedMode?
   /// 顶栏下面的那一行：各排按键组成的列，单手模式下还有它旁边的侧栏。
@@ -2019,7 +2017,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
      aiShortcut, characterSetShortcut, fullwidthShortcut, punctuationShortcut, replyShortcut, scriptShortcut]
   }
 
-  /// 空闲时不显示工具栏这一行：显示方式为「隐藏」，或者可选按钮一个都没打开，只剩品牌键和收起键，与 Android 的 `toolbarRowHidden` 一致。组字时候选行照常出现。
+  /// 空闲时不显示工具栏内容：显示方式为「隐藏」，或者可选按钮一个都没打开，只剩品牌键和收起键，与 Android 的 `toolbarRowHidden` 一致。iOS 保留顶栏高度，组字时候选行在同一位置出现。
   private var toolbarRowHidden: Bool { toolbarHidden || !toolbarHasTools }
 
   /// 工具栏里高亮的按钮：面板已打开的那个图标，以及任何面板、候选网格或回复面板盖住按键时的品牌键。
@@ -4096,16 +4094,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       separateReadingRow: separateReadingRow)
   }
 
-  /// 实际画出的顶栏高度：收起时为零。
-  private var shownTopRowHeight: CGFloat { topRowCollapsed ? 0 : currentTopRowHeight }
-
-  private func setTopRowCollapsed(_ collapsed: Bool) {
-    guard collapsed != topRowCollapsed else { return }
-    topRowCollapsed = collapsed
-    topRowHeightConstraint?.constant = shownTopRowHeight
-    applyKeyboardMetrics()
-    updatePreferredKeyboardHeight()
-  }
+  /// 实际画出的顶栏高度。iOS 键盘扩展在一次键盘会话里保持这个高度，避免组字开始或结束时触发系统键盘重排。
+  private var shownTopRowHeight: CGFloat { currentTopRowHeight }
 
   /// 读本机的工具栏设置；工具栏和顶栏在下一次 `updateShortcutButtons` 和 `renderCandidateStrip` 时跟着更新。
   private func readToolbarPreferences() {
@@ -6035,8 +6025,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     let showsCandidates = isInLocalMode || !visiblePreedit.isEmpty || !visibleCandidates.isEmpty || visibleDiagnostic != nil
     // 内联高度调节条占据工具栏的位置；下面的按键照常可用，所以打字时候选仍会盖在两者之上显示。
     shortcutBar.isHidden = showsCandidates || inlineHeightBar != nil || toolbarRowHidden
-    // 显示方式「隐藏」或可选按钮全部关掉：与 Android 隐藏空闲时的工具栏区域一样，有内容可显示之前顶栏不存在，按键上移占据它的位置。
-    setTopRowCollapsed(toolbarRowHidden && !showsCandidates && inlineHeightBar == nil)
+    // 工具栏内容可以隐藏，但 iOS 键盘扩展不能在组字开始和结束时改变顶栏高度；否则 UIKit 会重排键盘，表现为键盘抖动，严重时还会重新选择输入法。
     inlineHeightBar?.isHidden = showsCandidates
     readingRow.isHidden = !showsCandidates
     candidateContent?.isHidden = !showsCandidates
@@ -6952,7 +6941,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     keyboardPaddingConstraints[1].constant = padding.leading
     keyboardPaddingConstraints[2].constant = -padding.trailing
     keyboardPaddingConstraints[3].constant = -padding.bottom
-    root.setCustomSpacing(topRowCollapsed ? 0 : formFactor.topRowGap, after: topRow)
+    root.setCustomSpacing(formFactor.topRowGap, after: topRow)
   }
 
   /// 假名面板的四排：按存储行距排列的手机竖屏按键区高度，所以竖屏时假名键盘与字母键盘一样高。面板自己决定按键尺寸，在所有设备形态上都保持这个高度。
