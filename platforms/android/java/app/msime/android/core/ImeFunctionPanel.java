@@ -155,7 +155,7 @@ final class ImeFunctionPanel {
                 icon(item, KeyboardIconPaths.Icon.FEEDBACK, () -> host("FEEDBACK"), null),
                 FunctionPanelView.State.NONE, true);
             case COPY_DEVICE_INFO -> add(entries, states, enabled,
-                icon(item, KeyboardIconPaths.Icon.CLIPBOARD_HISTORY, s::copyDeviceInfo, null),
+                icon(item, KeyboardIconPaths.Icon.DEVICE_INFO, s::copyDeviceInfo, null),
                 FunctionPanelView.State.NONE, true);
             case PROMOTION -> add(entries, states, enabled,
                 glyph(item, "吆", () -> {
