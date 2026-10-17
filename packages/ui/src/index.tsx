@@ -36,7 +36,7 @@ import { diagnosticLogPreferences } from "./settings/diagnostic-log-preferences"
 import { clipboardHistoryEnabled } from "./settings/clipboard-history-preferences";
 import { useSettingsThemePreviews } from "./settings/use-settings-theme-previews";
 
-import { useCallback, useLayoutEffect, useState } from "react";
+import { useLayoutEffect, useState } from "react";
 export type {
   DictionaryEntry,
   DictionaryPageFormat,
@@ -134,7 +134,7 @@ import { useWindowState } from "./settings/use-window-state";
 import { useAppVersion } from "./settings/use-app-version";
 import { supportDiagnostics } from "./settings/support-diagnostics";
 import { useMountedRef } from "./settings/use-mounted-ref";
-import { useCustomHelpcodeSchemas, useHelpcodePacks } from "./settings/use-helpcode-catalog";
+import { useHelpcodeCatalog } from "./settings/use-helpcode-catalog";
 export {
   useProviderCredentials,
   type ProviderCredentialBusy,
@@ -379,7 +379,12 @@ export {
   type UseSettingsWindowInteractionsOptions,
 } from "./settings/use-settings-window-interactions";
 export { useAppVersion, type UseAppVersionOptions } from "./settings/use-app-version";
-export { useCustomHelpcodeSchemas, useHelpcodePacks } from "./settings/use-helpcode-catalog";
+export {
+  useCustomHelpcodeSchemas,
+  useHelpcodeCatalog,
+  useHelpcodePacks,
+  type UseHelpcodeCatalogOptions,
+} from "./settings/use-helpcode-catalog";
 export {
   supportDiagnostics,
   type SupportDiagnosticsHost,
@@ -2151,17 +2156,11 @@ function useSettingsPageModel({ client, initialPage, route }: SettingsPageProps)
     readAppVersion: client.readAppVersion,
     fallbackVersion: fallbackAppVersion,
   });
-  const customHelpcodeSchemas = useCustomHelpcodeSchemas(client.listHelpcodeSchemas);
-  const [helpcodeCatalogRevision, setHelpcodeCatalogRevision] = useState(0);
-  const refreshHelpcodePacks = useCallback(
-    () => setHelpcodeCatalogRevision((value) => value + 1),
-    [],
-  );
-  const helpcodePacks = useHelpcodePacks(
-    client.plugins?.catalog,
-    page === "input",
-    helpcodeCatalogRevision,
-  );
+  const { customHelpcodeSchemas, helpcodePacks, refreshHelpcodePacks } = useHelpcodeCatalog({
+    schemaReader: client.listHelpcodeSchemas,
+    catalog: client.plugins?.catalog,
+    inputPageOpen: page === "input",
+  });
   const {
     value: mobileKeyboardFeedback,
     busy: mobileKeyboardFeedbackBusy,
