@@ -8208,7 +8208,10 @@ fn cloud_candidate_requires_an_existing_local_candidate_page() {
     }
     let query = read(msime_client_online_query(handle))["value"].to_string();
     let before = read(msime_client_view(handle))["value"].clone();
-    assert!(before["candidates"].as_array().unwrap().is_empty());
+    let candidates = before["candidates"].as_array().unwrap();
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0]["source"], 15);
+    assert_eq!(candidates[0]["text"], "☁");
     let candidate = "你好";
     let result = read(unsafe {
         msime_client_apply_online_candidate(
@@ -8220,8 +8223,9 @@ fn cloud_candidate_requires_an_existing_local_candidate_page() {
             0,
         )
     });
-    assert_eq!(result["value"]["applied"], false);
-    assert_eq!(result["value"]["view"], before);
+    assert_eq!(result["value"]["applied"], true);
+    assert_eq!(result["value"]["view"]["candidates"][0]["text"], "你好");
+    assert_eq!(result["value"]["view"]["candidates"][0]["source"], 2);
     read(msime_client_destroy(handle));
 }
 
@@ -15738,6 +15742,7 @@ pub(crate) fn host_options_with_main_dictionary(root: &Path) -> Value {
             .unwrap()
             .execute_batch(
                 "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+                 CREATE TABLE tbl_3_a(key TEXT,jp TEXT,value TEXT,weight INTEGER);
                  CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);
                  CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);
                  CREATE INDEX idx_quick_parases_key_weight ON quick_parases(key,weight DESC);",
