@@ -3336,6 +3336,15 @@ static void TestSegmentEditingChords(MSIMEAppearancePreferences *appearance) {
         assert(session.lastCommand == [entry[1] unsignedIntValue]);
         [controller setValue:composing forKey:@"view"];
     }
+    // 双拼的普通左右键也按音节移动，避免候选栏打开后在音节内部误触发候选导航。
+    NSMutableDictionary *shuangpin = [composing mutableCopy];
+    shuangpin[@"scheme"] = @1;
+    for (NSArray *entry in @[@[@123, @(MSIME_MOVE_LEFT_SEGMENT)], @[@124, @(MSIME_MOVE_RIGHT_SEGMENT)]]) {
+        [controller setValue:shuangpin forKey:@"view"];
+        session.lastCommand = UINT32_MAX;
+        assert([controller handleEvent:ModeKey([entry[0] unsignedShortValue], 0, NO) client:client]);
+        assert(session.lastCommand == [entry[1] unsignedIntValue]);
+    }
     // 没有整句改字的方案（五笔）里 Ctrl+左右照旧按分段移动。
     NSMutableDictionary *wubi = [composing mutableCopy];
     wubi[@"scheme"] = @2;
