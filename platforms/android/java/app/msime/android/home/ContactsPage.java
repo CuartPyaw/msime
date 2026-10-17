@@ -9,7 +9,6 @@ import android.widget.LinearLayout;
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.Nullable;
-import app.msime.android.HostStore;
 import app.msime.android.JsonPolicy;
 import app.msime.android.NativeClient;
 import java.util.ArrayList;
@@ -33,8 +32,6 @@ public final class ContactsPage extends ReloadingDetailPage {
             if (granted) importContacts();
             else showMessage("没有联系人权限，未导入电话本");
         });
-
-    @Override protected void onColumnReady(android.os.Bundle args) { reload(); }
 
     @Override protected void reload() {
         HostTask.run(this, ContactsPage::load, this::render);
