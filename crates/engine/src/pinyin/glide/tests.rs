@@ -349,6 +349,23 @@ fn ranking_a_decoded_stroke_keeps_dictionary_key_allocations_bounded() {
 }
 
 #[test]
+fn ranking_reuses_materialized_split_keys_for_scoring() {
+    let hypotheses = (0..16)
+        .map(|index| GlideHypothesis {
+            letters: "xian".into(),
+            cost: index as f32,
+        })
+        .collect();
+    let (_, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        rank_by_dictionary(hypotheses, |_| HashMap::new())
+    });
+    assert!(
+        allocations <= 110,
+        "glide ranking repeated split-key allocations: {allocations}"
+    );
+}
+
+#[test]
 fn a_stroke_that_doubles_back_is_not_one_pass() {
     // 这几笔都在一条线上来回走；读成只走一遍就会是 `lao`、`keng`、`shou` 和 `gen`。
     for (word, single) in [
