@@ -2965,6 +2965,8 @@ static void TestPinyinArrowCandidateNavigation() {
     [controller setValue:client forKey:@"activeClient"];
     [controller setValue:panel forKey:@"panel"];
     auto check = [&](int scheme, NSUInteger caret, NSUInteger selected, unsigned short key, uint32_t expected, BOOL list = NO) {
+        // 其他回归可能在主线程排队释放词库会话；每次断言前重新绑定合成会话，避免异步生命周期回调让本测试落到真实会话准备路径。
+        [controller setValue:session forKey:@"session"];
         [controller setValue:@{@"focused": @YES, @"scheme": @(scheme), @"editing_text": @"ceshi", @"caret_position": @(caret),
                               @"candidate_list_open": @(list), @"candidates": @[
                                   @{@"text": @"甲", @"highlighted": @(selected == 0)},
