@@ -4675,6 +4675,48 @@ fn dedicated_english_offers_the_typed_word_when_unknown() {
 }
 
 #[test]
+fn dedicated_english_refresh_reuses_candidate_row_storage() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE).with_english(ENGLISH_FIXTURE);
+    let mut old_style = fixture.session();
+    old_style.set_dedicated_english(true);
+    type_text(&mut old_style, "HE");
+    let (_, old_allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        let prefix =
+            crate::ime::queries::lowercase_prefix(&old_style.input.dedicated_english_preedit);
+        let mut candidates = old_style
+            .input
+            .queries
+            .english_dictionary()
+            .query_prefix(&prefix, crate::ime::queries::MODE_ENGLISH_LIMIT);
+        old_style.input.apply_candidate_positions(&mut candidates);
+        old_style.input.dedicated_english_candidates = candidates;
+    });
+
+    let mut session = fixture.session();
+    session.set_dedicated_english(true);
+    type_text(&mut session, "HE");
+    assert!(session.input.dedicated_english_candidates.len() >= 2);
+    let pointer = session.input.dedicated_english_candidates.as_ptr();
+    let capacity = session.input.dedicated_english_candidates.capacity();
+    let words = session.input.dedicated_english_candidates.clone();
+
+    let (_, allocations) = crate::ime::personal_rerank::allocations::count(|| {
+        session.input.update_dedicated_english_candidates();
+    });
+
+    assert_eq!(session.input.dedicated_english_candidates, words);
+    assert_eq!(session.input.dedicated_english_candidates.as_ptr(), pointer);
+    assert_eq!(
+        session.input.dedicated_english_candidates.capacity(),
+        capacity
+    );
+    assert!(
+        allocations < old_allocations,
+        "专用英文热刷新分配 {allocations} 次，旧路径为 {old_allocations} 次"
+    );
+}
+
+#[test]
 fn dedicated_english_caret_rejects_nonletters_without_releasing_the_key() {
     let fixture = Fixture::new(QUANPIN_FIXTURE).with_english(ENGLISH_FIXTURE);
     let mut session = fixture.session();
