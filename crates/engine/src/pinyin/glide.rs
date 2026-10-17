@@ -570,7 +570,12 @@ fn prune(prefixes: &mut Vec<Prefix>, scratch: &mut PruneScratch, recycled: &mut 
 /// 把 `letters` 切成完整音节的各种切法，至多 `limit` 种。
 struct SyllableSplits<'a> {
     syllables: Vec<&'a str>,
-    ranges: Vec<std::ops::Range<usize>>,
+    ranges: Vec<SplitRange>,
+}
+
+struct SplitRange {
+    range: std::ops::Range<usize>,
+    key: String,
 }
 
 impl<'a> SyllableSplits<'a> {
@@ -584,7 +589,7 @@ impl<'a> SyllableSplits<'a> {
     fn iter(&self) -> impl Iterator<Item = &[&'a str]> {
         self.ranges
             .iter()
-            .map(|range| &self.syllables[range.clone()])
+            .map(|range| &self.syllables[range.range.clone()])
     }
 }
 
@@ -601,7 +606,10 @@ fn syllable_splits(letters: &str, limit: usize) -> SyllableSplits<'_> {
         if rest.is_empty() {
             let start = found.syllables.len();
             found.syllables.extend_from_slice(split);
-            found.ranges.push(start..found.syllables.len());
+            found.ranges.push(SplitRange {
+                range: start..found.syllables.len(),
+                key: split.join("'"),
+            });
             return;
         }
         for end in (1..=rest.len().min(MAX_SYLLABLE_LENGTH)).rev() {
@@ -639,26 +647,33 @@ pub fn rank_by_dictionary(
                 .sum::<usize>()
         })
         .sum();
-    let mut keys = HashSet::with_capacity(key_capacity);
-    for split in splits.iter().flat_map(SyllableSplits::iter) {
-        keys.insert(split.join("'"));
-        for syllable in split {
-            if !keys.contains(*syllable) {
-                keys.insert((*syllable).to_owned());
+    let mut unique = HashSet::with_capacity(key_capacity);
+    let mut keys = Vec::with_capacity(key_capacity);
+    for hypothesis in &splits {
+        for range in &hypothesis.ranges {
+            if unique.insert(range.key.as_str()) {
+                keys.push(range.key.clone());
+            }
+            for syllable in &hypothesis.syllables[range.range.clone()] {
+                if unique.insert(*syllable) {
+                    keys.push((*syllable).to_owned());
+                }
             }
         }
     }
-    let mut keys: Vec<String> = keys.into_iter().collect();
     keys.sort();
     let known = weights(&keys);
-    let log_weight = |key: &str| known.get(key).map(|&weight| (weight.max(0) as f32).ln_1p());
     let scores: Vec<f32> = splits
         .iter()
         .map(|splits| {
             let word = splits
+                .ranges
                 .iter()
-                .filter_map(|split| {
-                    log_weight(&split.join("'"))
+                .zip(splits.iter())
+                .filter_map(|(range, split)| {
+                    known
+                        .get(&range.key)
+                        .map(|&weight| (weight.max(0) as f32).ln_1p())
                         .map(|weight| weight + WORD_SYLLABLE_BONUS * (split.len() - 1) as f32)
                 })
                 .fold(None, |best: Option<f32>, weight| {
@@ -670,7 +685,12 @@ pub fn rank_by_dictionary(
                     .map(|split| {
                         split
                             .iter()
-                            .map(|syllable| log_weight(syllable).unwrap_or(0.0))
+                            .map(|syllable| {
+                                known
+                                    .get(*syllable)
+                                    .map(|&weight| (weight.max(0) as f32).ln_1p())
+                                    .unwrap_or(0.0)
+                            })
                             .fold(f32::INFINITY, f32::min)
                     })
                     .fold(0.0, f32::max)
