@@ -2568,8 +2568,8 @@ final class NineKeyKeyboardTests: XCTestCase {
     add(attachment)
   }
 
-  /// 显示方式 隐藏 以及 常用语 / 输入方式 两个开关，对应 Android 的 `toolbar_hidden`、`toolbar_phrase` 和 `toolbar_scheme`：隐藏时空闲顶行及其下方的间隙消失，按键上移；组字时读音行和候选行以顶行的常规高度回来，但不带工具栏，上屏后顶行再次消失。两个开关会把各自的按钮从工具栏上去掉。
-  func testHiddenToolbarCollapsesTheIdleRowAndTheSwitchesDropTheirButtons() throws {
+  /// 显示方式 隐藏 以及 常用语 / 输入方式 两个开关，对应 Android 的 `toolbar_hidden`、`toolbar_phrase` 和 `toolbar_scheme`：iOS 隐藏工具栏内容但保留顶栏和间距，组字时候选行在原位出现，键盘高度不变。两个开关会把各自的按钮从工具栏上去掉。
+  func testHiddenToolbarKeepsTheRowStableAndDropsItsButtons() throws {
     let defaults = TouchToolbarLocalPreference.defaults
     let keys = TouchToolbarLocalPreference.keys
     let saved = keys.map { defaults.object(forKey: $0) }
@@ -2595,7 +2595,7 @@ final class NineKeyKeyboardTests: XCTestCase {
     let space = try button("spaceKey", in: controller)
     let rowHeight = KeyboardViewController.topRowHeight(
       glossLines: KeyboardViewController.configuredGlossLines(fullAccess: false, onlineRoute: false))
-    XCTAssertEqual(strip.frame.height, 0, accuracy: 0.5)
+    XCTAssertEqual(strip.frame.height, rowHeight, accuracy: 0.5)
     XCTAssertTrue(toolbar.isHidden)
     XCTAssertTrue(reading.isHidden)
     let idleSpace = space.convert(space.bounds, to: controller.view)
@@ -2613,15 +2613,15 @@ final class NineKeyKeyboardTests: XCTestCase {
     XCTAssertTrue(toolbar.isHidden, "the bar stays hidden while composing")
     XCTAssertFalse(reading.isHidden)
     XCTAssertFalse(try button("candidate-1", in: controller).isHidden)
-    XCTAssertGreaterThan(space.convert(space.bounds, to: controller.view).minY, idleSpace.minY,
-                         "the row comes back above the keys")
-    // 收起时顶栏和它下面的间隔一起去掉，键盘高度的差正好是这两样，按键高度不跟着组字跳。
-    XCTAssertEqual(keyboardHeight.constant - idleHeight, rowHeight + KeyboardFormFactor.phone.topRowGap, accuracy: 0.5)
+    XCTAssertEqual(space.convert(space.bounds, to: controller.view), idleSpace,
+                   "hidden toolbar content must not move the keys while composing")
+    XCTAssertEqual(keyboardHeight.constant, idleHeight, accuracy: 0.5,
+                   "iOS must not resize the keyboard when composition starts")
 
     try button("candidate-1", in: controller).sendActions(for: .primaryActionTriggered)
     controller.view.layoutIfNeeded()
-    XCTAssertEqual(strip.frame.height, 0, accuracy: 0.5, "committing leaves nothing on the row")
-    XCTAssertEqual(space.convert(space.bounds, to: controller.view).minY, idleSpace.minY, accuracy: 0.5)
+    XCTAssertEqual(strip.frame.height, rowHeight, accuracy: 0.5, "the reserved row remains stable after committing")
+    XCTAssertEqual(space.convert(space.bounds, to: controller.view), idleSpace)
 
     TouchToolbarLocalPreference.hidden = false
     TouchToolbarLocalPreference.phrases = false
@@ -2636,8 +2636,8 @@ final class NineKeyKeyboardTests: XCTestCase {
     XCTAssertFalse(try button("dismissShortcut", in: controller).isHidden)
   }
 
-  /// 可选按钮全部关掉时只剩品牌键和收起键，这一行按显示方式「隐藏」处理：空闲时顶栏收起，组字时候选行照常出现；重新打开任何一个按钮，工具栏行就回来。与 Android 的 `toolbarRowHidden` 一致。
-  func testToolbarWithEveryOptionalButtonOffCollapsesLikeHidden() throws {
+  /// 可选按钮全部关掉时只剩品牌键和收起键，iOS 隐藏工具栏内容但保留顶栏高度；组字时候选行照常出现，重新打开任何一个按钮后工具栏内容回来。与 Android 的 `toolbarRowHidden` 只在内容显隐上保持一致。
+  func testToolbarWithEveryOptionalButtonOffKeepsTheRowStable() throws {
     let defaults = TouchToolbarLocalPreference.defaults
     let keys = TouchToolbarLocalPreference.keys
     let saved = keys.map { defaults.object(forKey: $0) }
@@ -2674,7 +2674,7 @@ final class NineKeyKeyboardTests: XCTestCase {
     XCTAssertEqual(toolbar.arrangedSubviews.filter { !$0.isHidden }.compactMap(\.accessibilityIdentifier),
                    ["moreShortcut", "dismissShortcut"])
     XCTAssertTrue(toolbar.isHidden, "a bar with only the brand and dismiss keys is not shown")
-    XCTAssertEqual(strip.frame.height, 0, accuracy: 0.5)
+    XCTAssertEqual(strip.frame.height, rowHeight, accuracy: 0.5)
 
     for letter in "ni" {
       let key = try XCTUnwrap(descendants(controller.view).first {
@@ -2683,11 +2683,11 @@ final class NineKeyKeyboardTests: XCTestCase {
       key.sendActions(for: .primaryActionTriggered)
     }
     controller.view.layoutIfNeeded()
-    XCTAssertEqual(strip.frame.height, rowHeight, accuracy: 0.5, "the candidate row still appears while composing")
+    XCTAssertEqual(strip.frame.height, rowHeight, accuracy: 0.5, "the candidate row stays in the reserved row while composing")
     XCTAssertFalse(try button("candidate-1", in: controller).isHidden)
     try button("candidate-1", in: controller).sendActions(for: .primaryActionTriggered)
     controller.view.layoutIfNeeded()
-    XCTAssertEqual(strip.frame.height, 0, accuracy: 0.5)
+    XCTAssertEqual(strip.frame.height, rowHeight, accuracy: 0.5)
 
     TouchToolbarLocalPreference.phrases = true
     controller.viewWillAppear(false)
