@@ -6993,12 +6993,12 @@ public final class MSIMEInputService extends InputMethodService {
         imePanels.renderClipboardHistory();
     }
 
-    /** 删除多选记录；每条仍经共享存储的单条契约，避免 Android 自己重写排序与固定规则。 */
+    /** 原子删除多选记录；排序、时间戳和固定规则仍由共享存储决定。 */
     void removeClipboardItems(java.util.List<String> texts) {
         if (clipboardHistory == null || texts == null || texts.isEmpty()) return;
         try {
-            for (String text : texts) if (text != null && !text.isEmpty()) clipboardHistory.remove(text);
-            clipboardUndoTexts = new java.util.ArrayList<>(texts);
+            clipboardUndoTexts = clipboardHistory.removeMany(texts);
+            if (clipboardUndoTexts.isEmpty()) return;
             if (clipboardUndoExpiry != null) main.removeCallbacks(clipboardUndoExpiry);
             clipboardUndoExpiry = () -> {
                 clipboardUndoTexts = null;
@@ -7013,7 +7013,7 @@ public final class MSIMEInputService extends InputMethodService {
         imePanels.renderClipboardHistory();
     }
 
-    private java.util.List<String> clipboardUndoTexts;
+    private java.util.List<ClipboardHistory.Item> clipboardUndoTexts;
     private Runnable clipboardUndoExpiry;
 
     boolean hasClipboardUndo() {
@@ -7022,11 +7022,11 @@ public final class MSIMEInputService extends InputMethodService {
 
     void undoClipboardItems() {
         if (!hasClipboardUndo() || clipboardHistory == null) return;
-        java.util.List<String> restore = clipboardUndoTexts;
+        java.util.List<ClipboardHistory.Item> restore = clipboardUndoTexts;
         clipboardUndoTexts = null;
         if (clipboardUndoExpiry != null) main.removeCallbacks(clipboardUndoExpiry);
         try {
-            for (String text : restore) if (text != null && !text.isEmpty()) clipboardHistory.add(text);
+            clipboardHistory.restoreMany(restore);
             notice("已撤销删除");
         } catch (IllegalStateException error) {
             notice("无法撤销剪贴板删除");
