@@ -3320,9 +3320,12 @@ static void TestSegmentEditingChords(MSIMEAppearancePreferences *appearance) {
     ModeController *controller = [ModeController alloc];
     ShortcutSession *session = [ShortcutSession new];
     ShortcutClient *client = [ShortcutClient new];
+    TestCandidatePanel *panel = [TestCandidatePanel new];
+    panel.visible = YES;
     [controller setValue:appearance forKey:@"appearance"];
     [controller setValue:session forKey:@"session"];
     [controller setValue:client forKey:@"activeClient"];
+    [controller setValue:panel forKey:@"panel"];
     appearance.englishMode = NO;
     NSDictionary *composing = @{ @"focused": @YES, @"editing_text": @"nihao", @"caret_position": @5,
                                  @"candidates": @[@{@"text": @"你好"}] };
