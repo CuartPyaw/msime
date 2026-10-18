@@ -7029,9 +7029,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     formFactor == .phone && letterRowViews.first?.isHidden == false
   }
 
-  /// 手机 26 键在存储行距之外增加 4pt 留白。
+  /// 手机竖屏 26 键把收紧键帽省下的高度分摊到三条排间距；横屏空间更紧，沿用存储行距。
   private var keyRowSpacing: CGFloat {
-    let letterPadding: CGFloat = showsPhoneLetterRows ? 4 : 0
+    let letterPadding: CGFloat = showsPhoneLetterRows && !isLandscape
+      ? KeyboardFormFactor.phoneLetterRowPadding : 0
     return CGFloat(KeyboardLayoutPreference.rowSpacing) + letterPadding
   }
 

@@ -1460,7 +1460,7 @@ final class NineKeyKeyboardTests: XCTestCase {
       XCTAssertEqual(InputSchemePreference.scheme, .quanpin)
       XCTAssertEqual(try button("schemeButton", in: controller).accessibilityValue, ChineseInputScheme.quanpin.title)
       try layoutAtRequestedHeight(controller)
-      XCTAssertEqual(controller.view.constraints.first { $0.identifier == "keyboardHeight" }?.constant, KeyboardViewController.defaultKeyboardHeight - 20)
+      XCTAssertEqual(controller.view.constraints.first { $0.identifier == "keyboardHeight" }?.constant, KeyboardViewController.defaultKeyboardHeight)
       try button("schemeButton", in: controller).sendActions(for: .primaryActionTriggered)
       XCTAssertEqual(try button("schemeCard-quanpin", in: controller).accessibilityValue, "已选中")
       // 高亮的 输入方式 图标关闭它自己的选择器。
@@ -1503,6 +1503,30 @@ final class NineKeyKeyboardTests: XCTestCase {
     XCTAssertTrue(descendants(controller.view).contains { $0 is KeyboardSkinPickerView })
     try button("skinShortcut", in: controller).sendActions(for: .primaryActionTriggered)
     XCTAssertFalse(descendants(controller.view).contains { $0 is KeyboardSkinPickerView })
+  }
+
+  /// 九键切到英文会复用 26 键字母行，但键盘外框高度保持不变。
+  func testNineKeyAndEnglishKeepTheSameKeyboardHeight() throws {
+    let previous = InputSchemePreference.scheme
+    defer { InputSchemePreference.scheme = previous }
+    InputSchemePreference.scheme = .nineKey
+    let controller = KeyboardViewController()
+    controller.loadViewIfNeeded()
+    controller.view.frame = CGRect(x: 0, y: 0, width: 393, height: KeyboardViewController.defaultKeyboardHeight)
+    controller.view.layoutIfNeeded()
+    let height = try XCTUnwrap(controller.view.constraints.first { $0.identifier == "keyboardHeight" }).constant
+    let language = try button("bottomLanguageKey", in: controller)
+    language.sendActions(for: .primaryActionTriggered)
+    controller.view.layoutIfNeeded()
+    let englishHeight = try XCTUnwrap(controller.view.constraints.first { $0.identifier == "keyboardHeight" }).constant
+    XCTAssertEqual(englishHeight, height, accuracy: 0.5)
+    let letter = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityLabel == "字母 Q" } as? UIButton)
+    XCTAssertEqual(letter.bounds.height, 44, accuracy: 0.5)
+    let returnKey = try button("returnKey", in: controller)
+    let letterBlockHeight = 4 * 44 + 3 * (7 + KeyboardFormFactor.phoneLetterRowPadding)
+    XCTAssertEqual(returnKey.convert(returnKey.bounds, to: controller.view).maxY
+                     - letter.convert(letter.bounds, to: controller.view).minY,
+                   letterBlockHeight, accuracy: 0.5)
   }
 
   func testVisibleInputViewReflectsSoundPreference() throws {
@@ -2282,7 +2306,7 @@ final class NineKeyKeyboardTests: XCTestCase {
             XCTAssertFalse(try button("symbolLayerDeleteKey", in: controller).isHidden)
           }
           XCTAssertEqual(controller.view.constraints.first { $0.identifier == "keyboardHeight" }?.constant,
-                         keyboardHeight + (paddedLetters ? -20 : 0), "\(scheme)")
+                         keyboardHeight, "\(scheme)")
           if !symbols && [.nineKey, .quanpin].contains(scheme) {
             // 输入方式 自己绘制设计稿的线框图标，不带会被皮肤处理画成键帽的 configuration。
             let selector = try XCTUnwrap(try button("schemeButton", in: controller) as? KeyboardToolbarButton)

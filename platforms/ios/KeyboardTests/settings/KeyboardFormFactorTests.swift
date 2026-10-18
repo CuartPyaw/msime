@@ -34,6 +34,11 @@ final class KeyboardFormFactorTests: XCTestCase {
                    "a phone has no digit row")
     // 更宽的排间距加在键盘总高上，而不是从键高里扣。
     XCTAssertEqual(phone.keyboardHeight(topRow: 50, rowSpacing: 10, landscape: false, handwriting: false), 298)
+    // 26 键使用 44pt 键帽，并把收紧键帽省下的高度分摊到三条排间距。
+    let letterSpacing = 7 + KeyboardFormFactor.phoneLetterRowPadding
+    XCTAssertEqual(phone.keyboardHeight(topRow: 50, rowSpacing: letterSpacing, landscape: false, handwriting: false, letterKeys: true), 289)
+    XCTAssertEqual(phone.keyboardHeight(topRow: 50, rowSpacing: 7, landscape: true, handwriting: false, letterKeys: true),
+                   phone.keyboardHeight(topRow: 50, rowSpacing: 7, landscape: true, handwriting: false))
     // 数字行是整整一排键，平板加一排的高度而不是压扁字母。
     let portrait = tablet.keyboardHeight(topRow: 50, rowSpacing: 7, landscape: false, handwriting: false)
     // 6 + 50 + 9 + 4 × 54 + 3 × 7 + 4，再加数字行这第五排 54pt 键及其 7pt 间距。
@@ -82,8 +87,9 @@ final class KeyboardFormFactorTests: XCTestCase {
               space.convert(space.bounds, to: controller.view), height)
     }
     let phone = try layout(tablet: false, width: 393)
-    XCTAssertEqual(phone.height, KeyboardViewController.defaultKeyboardHeight - 20)
-    XCTAssertEqual(phone.space.minY - phone.key.maxY, 11, accuracy: 0.5)
+    XCTAssertEqual(phone.height, KeyboardViewController.defaultKeyboardHeight)
+    XCTAssertEqual(phone.space.minY - phone.key.maxY,
+                   7 + KeyboardFormFactor.phoneLetterRowPadding, accuracy: 0.5)
     XCTAssertEqual(phone.key.height, 44, accuracy: 0.5)
     XCTAssertEqual(phone.space.height, 44, accuracy: 0.5)
     XCTAssertEqual(phone.strip.minY, 2, accuracy: 0.5)

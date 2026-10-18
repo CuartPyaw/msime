@@ -7,6 +7,9 @@ enum KeyboardFormFactor: Equatable {
   case phone
   case tablet
 
+  /// 26 键手机竖屏为较矮的键帽额外留出的排间距，按四排键省下的总高度分摊到三条间隔。
+  static let phoneLetterRowPadding: CGFloat = 32 / 3
+
   static func resolve(
     idiom: UIUserInterfaceIdiom, horizontalSizeClass: UIUserInterfaceSizeClass
   ) -> KeyboardFormFactor {
@@ -51,10 +54,11 @@ enum KeyboardFormFactor: Equatable {
   /// 用户调整之前的键盘高度，按设计稿的结构逐项相加：上边距、顶部那一行、它下面的间隔、各排按键连同排间距，以及下边距。顶部那一行收起（`topRow` 为 0，「显示方式」为隐藏时）时间隔也一起去掉，与 `applyKeyboardMetrics` 把那段间隔设为 0 一致，否则多出的高度会被分给按键，组字开始和结束时按键高度跟着跳。
   func keyboardHeight(topRow: CGFloat, rowSpacing: CGFloat, landscape: Bool, handwriting: Bool,
                       numberRow: Bool = false, letterKeys: Bool = false) -> CGFloat {
-    padding.top + topRow + (topRow > 0 ? topRowGap : 0)
-      + KeyboardHeightPercent.keyBlockHeight(
-        keyHeight: keyHeight(landscape: landscape, handwriting: handwriting, letterKeys: letterKeys), rows: keyRows(numberRow: numberRow),
-        rowSpacing: rowSpacing)
+    let keyBlock = KeyboardHeightPercent.keyBlockHeight(
+      keyHeight: keyHeight(landscape: landscape, handwriting: handwriting, letterKeys: letterKeys),
+      rows: keyRows(numberRow: numberRow), rowSpacing: rowSpacing)
+    return padding.top + topRow + (topRow > 0 ? topRowGap : 0)
+      + keyBlock
       + padding.bottom
   }
 
