@@ -415,3 +415,50 @@ test.each(["export", "reset"] as const)(
     }
   },
 );
+
+test("首次防抖查询保留词条保存错误，查询条件变化才清理", async () => {
+  vi.useFakeTimers();
+  const list = vi.fn().mockResolvedValue({ entries: [], has_more: false });
+  const edit = vi.fn().mockRejectedValue({ code: "dictionary_invalid_entry" });
+  const client: DictionaryManagerClient = { dictionary: { list, edit } };
+  const { result, unmount } = renderHook(() => useDictionaryManager({ client, confirm: vi.fn() }));
+  try {
+    act(() => {
+      result.current.setDictionaryKind("pinyin");
+      result.current.setPhraseForm({ key: "nhao", value: "合成", weight: 1, previous: null });
+    });
+    await act(async () => result.current.savePhrase());
+    const error = result.current.phraseError;
+    expect(error).toContain("完整音节");
+    expect(list).not.toHaveBeenCalled();
+    await act(async () => vi.advanceTimersByTimeAsync(280));
+    expect(list).toHaveBeenCalledExactlyOnceWith(0, 100, "pinyin", "");
+    expect(result.current.phraseError).toBe(error);
+    act(() => result.current.setPhraseSearch("合成查询"));
+    expect(result.current.phraseError).toBe("");
+  } finally {
+    unmount();
+    vi.useRealTimers();
+  }
+});
+
+test("显式刷新在查询成功后清除旧的读取错误", async () => {
+  vi.useFakeTimers();
+  const list = vi
+    .fn()
+    .mockRejectedValueOnce(new Error("synthetic-read-failure"))
+    .mockResolvedValueOnce({ entries: [], has_more: false });
+  const client: DictionaryManagerClient = { dictionary: { list, edit: vi.fn() } };
+  const { result, unmount } = renderHook(() => useDictionaryManager({ client, confirm: vi.fn() }));
+  try {
+    await act(async () => vi.advanceTimersByTimeAsync(280));
+    expect(result.current.phraseError).toBe("无法读取词库。");
+    await act(async () => result.current.loadPhrases());
+    expect(list).toHaveBeenCalledTimes(2);
+    expect(result.current.phraseError).toBe("");
+    expect(result.current.phrasePage.status).toBe("未找到匹配词条");
+  } finally {
+    unmount();
+    vi.useRealTimers();
+  }
+});

@@ -129,11 +129,15 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
     if (owner === phraseActionOwner.current) phraseActionBusy.current = false;
   }
 
-  async function loadPhrases(kind: LocalDictionaryKind = dictionaryKind, offset = 0) {
+  async function loadPhrases(
+    kind: LocalDictionaryKind = dictionaryKind,
+    offset = 0,
+    options: { preserveError?: boolean } = {},
+  ) {
     if (!client.dictionary || !mounted.current) return;
     const generation = ++phraseRequestGeneration.current;
     setPhraseBusy(true);
-    setPhraseError("");
+    if (!options.preserveError) setPhraseError("");
     setPhrasePage((current) => ({ ...current, status: "查询中…" }));
     try {
       const query = phraseSearch.trim();
@@ -175,8 +179,9 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
     if (!client.dictionary) return;
     // 查询条件变化时清理旧提示，延迟执行的查询不能擦掉期间完成的操作结果。
     setPhraseNotice("");
+    setPhraseError("");
     const timer = window.setTimeout(() => {
-      void loadPhrases(dictionaryKind, 0);
+      void loadPhrases(dictionaryKind, 0, { preserveError: true });
     }, 280);
     return () => {
       window.clearTimeout(timer);
