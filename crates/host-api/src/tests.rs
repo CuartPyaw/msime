@@ -12340,6 +12340,88 @@ fn refresh_keeps_the_language_dictionaries_in_step_with_the_installed_package() 
     assert_eq!(refresh(&installed), Some(current.clone()));
 }
 
+/// 下载代次旁没有随包语言词库时，刷新仍从已记录的安装包目录恢复语言入口。
+#[test]
+fn refresh_downloaded_generation_restores_bundled_language_dictionaries() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("bundle/resources");
+    let languages = root.path().join("bundle/language-dictionaries");
+    let state = root.path().join("state");
+    std::fs::create_dir_all(&resources).unwrap();
+    std::fs::create_dir_all(&languages).unwrap();
+    std::fs::create_dir_all(state.join("dictionary-updates")).unwrap();
+    std::fs::write(languages.join("msime-stroke.db"), b"synthetic").unwrap();
+    let baseline = Edition::full().resource_set().unwrap();
+    let version = msime_client_providers::dictionary_updates::baseline_version(&baseline);
+    let mut desktop = baseline.clone();
+    for file in &mut desktop.artifacts {
+        if file
+            .url
+            .starts_with("https://github.com/metasequoiaime/msime-dictionary/releases/download/")
+        {
+            file.url = format!(
+                "https://github.com/metasequoiaime/msime-dictionary/releases/download/{version}/{}",
+                file.name
+            );
+        }
+    }
+    let selection = msime_client_providers::dictionary_updates::Selection {
+        baseline_generation: baseline.generation().unwrap(),
+        version,
+        desktop,
+        languages: None,
+        bundled_resources: resources,
+    };
+    std::fs::write(
+        state.join("dictionary-updates/installed.json"),
+        serde_json::to_vec(&json!({"active": selection, "previous": null})).unwrap(),
+    )
+    .unwrap();
+    let downloaded = state.join("dictionary-updates/generations/synthetic");
+    std::fs::create_dir_all(&downloaded).unwrap();
+    let document = json!({
+        "resources": downloaded,
+        "user_data": state.join("user"),
+        "dictionaries": state.join("user/dictionaries/synthetic"),
+        "preferences_directory": state,
+    });
+    let mut expected = document.clone();
+    expected["language_dictionaries"] = json!(languages);
+    assert_eq!(
+        super::with_installed_language_dictionaries(&document).unwrap(),
+        Some(expected.clone())
+    );
+    assert_eq!(
+        super::with_installed_language_dictionaries(&expected).unwrap(),
+        None
+    );
+    // 已记录且仍存在的其他目录继续沿用原保护规则；词库缺文件由 Engine 判定不可用。
+    std::fs::remove_file(languages.join("msime-stroke.db")).unwrap();
+    assert_eq!(
+        super::with_installed_language_dictionaries(&expected).unwrap(),
+        None
+    );
+    std::fs::write(languages.join("msime-stroke.db"), b"synthetic").unwrap();
+    let custom = root.path().join("custom-languages");
+    std::fs::create_dir(&custom).unwrap();
+    let mut explicit = document.clone();
+    explicit["language_dictionaries"] = json!(custom);
+    assert_eq!(
+        super::with_installed_language_dictionaries(&explicit).unwrap(),
+        None
+    );
+    // 无效的更新选择不能作为随包目录来源。
+    let selection_file = state.join("dictionary-updates/installed.json");
+    let mut invalid: Value =
+        serde_json::from_slice(&std::fs::read(&selection_file).unwrap()).unwrap();
+    invalid["active"]["baseline_generation"] = json!("invalid");
+    std::fs::write(selection_file, serde_json::to_vec(&invalid).unwrap()).unwrap();
+    assert_eq!(
+        super::with_installed_language_dictionaries(&document).unwrap(),
+        None
+    );
+}
+
 /// The language directory follows the resources a stale generation was prepared from, not the ones the old document recorded.
 #[test]
 fn a_prepared_generation_records_the_language_dictionaries_beside_its_new_resources() {

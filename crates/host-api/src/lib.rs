@@ -2481,13 +2481,14 @@ fn refreshed_layout(
     Ok(refreshed)
 }
 
-/// `document` with `language_dictionaries` naming what is installed beside its resources, or `None` when it already does or is not in the prepared layout.
+/// 为准备流程生成的文档补齐语言词库路径；无需变化或布局不匹配时返回 `None`。
 ///
-/// The Cantonese, Zhuyin and Stroke dictionaries arrive with a package, not with a dictionary generation, so options published by an older package are brought up to what is installed even when the generation is current, and lose the key once the dictionaries are gone. Only the directory `prepare_host_configuration` records is kept in step; a document naming another directory that still exists keeps it.
+/// 优先资源相邻目录，其次已校验的下载语言代次，最后是更新记录中的原安装包目录。
+/// 主词库代次不变也需刷新；显式指定且仍存在的其他目录继续保留。
 fn with_installed_language_dictionaries(
     document: &Value,
 ) -> Result<Option<Value>, Box<dyn std::error::Error>> {
-    let Some((resources, _, _)) = prepared_layout(document) else {
+    let Some((resources, _, state)) = prepared_layout(document) else {
         return Ok(None);
     };
     let beside = language_dictionaries_directory(resources)
@@ -2501,7 +2502,19 @@ fn with_installed_language_dictionaries(
     {
         return Ok(None);
     }
-    let installed = installed_language_dictionaries(resources);
+    // 主词库可以位于下载代次中，语言词库仍由更新记录或原安装包提供。
+    let installed = installed_language_dictionaries(resources).or_else(|| {
+        let edition = Edition::of_host_options(document)?;
+        dictionary_updates::languages(state, edition)
+            .and_then(|path| path.to_str().map(str::to_owned))
+            .or_else(|| {
+                let baseline = edition.resource_set().ok()?;
+                let bundled = msime_client_providers::dictionary_updates::bundled_resources(
+                    state, &baseline,
+                )?;
+                installed_language_dictionaries(&bundled)
+            })
+    });
     if recorded == installed.as_deref() {
         return Ok(None);
     }
