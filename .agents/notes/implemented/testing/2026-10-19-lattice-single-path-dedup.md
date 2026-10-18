@@ -28,11 +28,15 @@ Status: implemented
 
 在同一工作区仅恢复旧集合条件构建精确基线，再还原新条件构建新版本；`finally` 逐字恢复生产文件。固定资源上的全拼 60 例与九键 81 例 `convert_eval` 报告逐字段一致，九键 top1 0.617、MRR 0.640。
 
+固定资源九键按旧／新／新／旧串行运行，四轮均为 81 例、两臂各 1791 键、热身 5 例，保留默认 16ms 预算；四轮均因超预算退出 1。修改版带模型均值 7.31/7.67ms、p95 19.95/21.11ms，旧版均值 6.78/14.32ms、p95 18.22/58.28ms。保存全部 [12 组摘要](../../../../docs/measurements/2026-10-19-lattice-single-path-nine-key-abba.csv)及 [102 次宿主机并发和负载观察](../../../../docs/measurements/2026-10-19-lattice-single-path-nine-key-monitor.json)。各轮观察到的外部编译器数量不同，最多 11 个 `rustc`、2 个 `cargo`、5 个 `clang`，一分钟负载 18.32–34.70；最后一轮旧版有明显调度干扰。本次不足以判断整体速度是否改变，不据此宣称整体无回退或稳定提速，16ms 目标仍未达到。后续整体验证需要无外部构建的窗口，公开例程目前只输出摘要，未保存逐键原始耗时。
+
 四项既有分配回归继续调用当前生产入口，在原精确等式内仅补计实际单路径、原本超过 64 边界且存在来源时的这一次收益。独立只读审查确认冻结对照一致、预算归因无重复，字段、容量、来源、纠错和重复规则保持。
 
 完整 `MSIME_NEURAL_MODEL_DIR=$PWD/target/neural-model cargo test --locked -p msime-engine -p msime-input-runtime --no-fail-fast` 退出 0：引擎 2334 项通过、46 项忽略，golden 31 项、运行时 320 项及文档测试通过。Clippy 两 crate 全目标 `-- -D warnings`、Rustfmt 与差异检查通过。
 
-本地 `bash scripts/verify-local.sh --quick` 退出 0：契约检查、157 项本机可运行 Windows 测试、HarmonyOS 设置 bundle、Rust workspace、Android target/Java 宿主、Wasm、Linux 桌面组件、Linux 原生宿主 90 项测试、macOS 原生工程及 Apple bridge 编译通过。Windows 交叉构建与 pipe-only 缺少 MinGW/交叉工程，HarmonyOS 真打包缺工具链及暂存资源而跳过；macOS 桌面 bundle 尚未构建，未参与 workspace 检查。未运行 macOS ctest、设备或系统输入法验收。本片没有触发 Android 模拟器强制门禁的改动。
+本地 `bash scripts/verify-local.sh --quick` 退出 0：契约检查、168 项本机可运行 Windows 测试、HarmonyOS 设置 bundle、Rust workspace、Android target/Java 宿主、Wasm、Linux 桌面组件、Linux 原生宿主 90 项测试、macOS 原生工程及 Apple bridge 编译通过。Windows 交叉构建与 pipe-only 缺少 MinGW/交叉工程，HarmonyOS 真打包缺工具链及暂存资源而跳过；macOS 桌面 bundle 尚未构建，未参与 workspace 检查。未运行 macOS ctest、设备或系统输入法验收。本片没有触发 Android 模拟器强制门禁的改动。
+
+同步 `b02a56d161` 后再次完整 quick 通过。第一次同步后运行在系统临时目录因 `No space left on device` 产生链接及临时目录失败，已中止该次运行；重跑设置 `TMPDIR=$PWD/target/tmp`，不减少测试或修改失败基线。初轮宿主库尚不可链接时为 157 项，通过构建宿主库后增加 11 项集成用例，最终 168 项通过。
 
 ## Consequences
 
