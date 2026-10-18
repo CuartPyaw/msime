@@ -14324,7 +14324,10 @@ fn plugins_boundary_lists_imports_removes_and_keeps_the_name_list() {
     assert_eq!(saved, json!({"ok": true, "value": null}));
     assert_eq!(
         call(json!({"operation": "load_mentions"}))["value"],
-        entries
+        json!([
+            {"text": "张三", "key": "zhang'san", "phone": ""},
+            {"text": "Alice", "key": "", "phone": ""}
+        ])
     );
     assert!(state.path().join("plugins/mentions.json").is_file());
     let invalid =
@@ -14335,7 +14338,10 @@ fn plugins_boundary_lists_imports_removes_and_keeps_the_name_list() {
         .is_some_and(|detail| detail.contains("张三")));
     assert_eq!(
         call(json!({"operation": "load_mentions"}))["value"],
-        entries
+        json!([
+            {"text": "张三", "key": "zhang'san", "phone": ""},
+            {"text": "Alice", "key": "", "phone": ""}
+        ])
     );
 
     // Requests the page could not have meant.
