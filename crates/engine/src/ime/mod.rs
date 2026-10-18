@@ -1022,7 +1022,10 @@ impl ImeSession {
         let pinyin_rows = self.registry.query(&mixed);
         self.mixed_pinyin_request = mixed;
         Decoded {
-            candidates: merge_pinyin_fallback(candidates, pinyin_rows),
+            // 没有完整五笔码命中时，码表返回的只是更长编码的前缀补全。
+            // 这类行不能盖过当前输入的拼音精确候选：`edu` 的 `edui`、`eduq`
+            // 会把“额度”挤到后面，空格就会选中罕见的五笔补全字。
+            candidates: merge_mixed_candidates(candidates, pinyin_rows, wubi_table_answered),
             wubi_table_answered,
         }
     }
@@ -1156,11 +1159,24 @@ fn wubi_table_answered(candidates: &[WordItem], code: &str) -> bool {
     candidates.iter().any(|item| item.pinyin == code)
 }
 
-/// Wubi rows first, so wubi ranking and fixed positions keep precedence, then the quanpin rows whose word is not shown yet, in quanpin order. Every row keeps its producer's scheme: the session reads "answered by the pinyin fallback" and routes pins, removals and learning from those tags (overlays.md §3.3), so no list-level flag is kept here.
-fn merge_pinyin_fallback(
-    mut candidates: Vec<WordItem>,
-    mut pinyin_rows: Vec<WordItem>,
+/// 按当前输入是否命中完整五笔码决定两组候选的先后；每行保留自己的生产方案，选词、固定、删除和学习仍按行的来源路由（overlays.md §3.3）。
+#[cfg(test)]
+fn merge_pinyin_fallback(candidates: Vec<WordItem>, pinyin_rows: Vec<WordItem>) -> Vec<WordItem> {
+    merge_mixed_candidates(candidates, pinyin_rows, true)
+}
+
+/// 合并五笔和拼音候选。完整五笔码命中时保留五笔优先；只有更长编码的前缀补全时，
+/// 拼音精确候选优先，避免用户输入拼音时被前缀补全抢走首位。
+fn merge_mixed_candidates(
+    candidates: Vec<WordItem>,
+    pinyin_rows: Vec<WordItem>,
+    wubi_first: bool,
 ) -> Vec<WordItem> {
+    let (mut candidates, mut pinyin_rows) = if wubi_first {
+        (candidates, pinyin_rows)
+    } else {
+        (pinyin_rows, candidates)
+    };
     if pinyin_rows.is_empty() {
         return candidates;
     }
@@ -1378,6 +1394,18 @@ mod tests {
         assert_eq!(list[0].scheme, SchemeType::Wubi);
         assert_eq!(list[2].scheme, SchemeType::Quanpin);
         assert!(!only_pinyin_rows(&list));
+    }
+
+    #[test]
+    fn unmatched_wubi_prefix_rows_follow_exact_pinyin_rows() {
+        let list = merge_mixed_candidates(
+            vec![wubi("edui", "膫"), wubi("eduq", "须将")],
+            vec![quanpin("e'du", "额度")],
+            false,
+        );
+        assert_eq!(words(&list), vec!["额度", "膫", "须将"]);
+        assert_eq!(list[0].scheme, SchemeType::Quanpin);
+        assert_eq!(list[1].scheme, SchemeType::Wubi);
     }
 
     #[test]

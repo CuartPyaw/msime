@@ -89,6 +89,12 @@ INSERT INTO wubi86 VALUES('hang','虛',10);\
 CREATE TABLE tbl_2_h(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
 INSERT INTO tbl_2_h VALUES('han''guo','hg','韩国',500496);";
 
+const WUBI_EDU_FIXTURE: &str = "CREATE TABLE wubi86(key TEXT,value TEXT,weight INTEGER);\
+INSERT INTO wubi86 VALUES('edui','膫',10);\
+INSERT INTO wubi86 VALUES('eduq','须将',9);\
+CREATE TABLE tbl_2_e(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_2_e VALUES('e''du','ed','额度',103485);";
+
 /// test_personal_context_input_session.cpp:136-149 with test_pick_pair_input_session.cpp:73-94's shan/shui rows.
 const CONTEXT_FIXTURE: &str = "CREATE TABLE tbl_1_n(key TEXT, jp TEXT, value TEXT, weight INTEGER);\
 INSERT INTO tbl_1_n VALUES('ni','n','甲',100),('ni','n','乙',90),('ni','n','丙',80);\
@@ -1601,6 +1607,21 @@ fn a_mixed_list_holds_both_producers_wubi_first() {
     assert!(!snapshot.answered_by_pinyin_fallback);
     // The quanpin rows beside the one wubi row keep the code open: the fourth key must not commit 工 over 哥哥 for someone typing pinyin.
     assert!(!snapshot.wubi_unique_four_code);
+}
+
+#[test]
+fn mixed_wubi_puts_exact_pinyin_before_unmatched_wubi_prefixes() {
+    let fixture = Fixture::new(WUBI_EDU_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Wubi;
+        options.wubi.mixed_pinyin = true;
+    });
+    type_text(&mut session, "edu");
+    let snapshot = session.snapshot();
+    assert_eq!(snapshot.candidates[0].word, "额度");
+    assert_eq!(snapshot.candidates[0].scheme, SchemeType::Quanpin);
+    assert!(snapshot.candidates.iter().any(|item| item.word == "膫"));
+    assert!(snapshot.candidates.iter().any(|item| item.word == "须将"));
 }
 
 #[test]
