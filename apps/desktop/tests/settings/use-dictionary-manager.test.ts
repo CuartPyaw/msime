@@ -462,3 +462,231 @@ test("显式刷新在查询成功后清除旧的读取错误", async () => {
     vi.useRealTimers();
   }
 });
+
+test("词条保存回执不能把切换后的词库列表换回旧类型", async () => {
+  vi.useFakeTimers();
+  let resolveEdit!: () => void;
+  const pendingEdit = new Promise<void>((resolve) => {
+    resolveEdit = resolve;
+  });
+  const pinyin = { kind: "pinyin" as const, key: "he'cheng", value: "合成拼音", weight: 10 };
+  const wubi = { kind: "wubi" as const, key: "wgkb", value: "合成五笔", weight: 10 };
+  const list = vi.fn(async (_offset: number, _limit: number, kind?: string) => ({
+    entries: kind === "pinyin" ? [pinyin] : kind === "wubi" ? [wubi] : [],
+    has_more: false,
+  }));
+  const client: DictionaryManagerClient = {
+    dictionary: { list, edit: vi.fn(() => pendingEdit) },
+  };
+  const { result, unmount } = renderHook(() => useDictionaryManager({ client, confirm: vi.fn() }));
+  try {
+    act(() => result.current.setDictionaryKind("pinyin"));
+    await act(async () => vi.advanceTimersByTimeAsync(280));
+    act(() =>
+      result.current.setPhraseForm({
+        key: pinyin.key,
+        value: pinyin.value,
+        weight: 20,
+        previous: pinyin,
+      }),
+    );
+    let saving!: Promise<void>;
+    act(() => {
+      saving = result.current.savePhrase();
+    });
+    act(() => {
+      result.current.setDictionaryKind("wubi");
+      result.current.setPhraseForm(null);
+      result.current.setPhrases([]);
+    });
+    await act(async () => vi.advanceTimersByTimeAsync(280));
+    expect(result.current.phrases).toEqual([wubi]);
+    await act(async () => {
+      resolveEdit();
+      await saving;
+    });
+    expect(result.current.dictionaryKind).toBe("wubi");
+    expect(result.current.phrases).toEqual([wubi]);
+  } finally {
+    unmount();
+    vi.useRealTimers();
+  }
+});
+
+test.each(["save", "remove", "import", "retry", "dismiss"] as const)(
+  "%s 回执不能覆盖新的搜索结果，后续操作仍可刷新",
+  async (action) => {
+    vi.useFakeTimers();
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const original = { kind: "quick_phrase" as const, key: "old", value: "合成旧词", weight: 10 };
+    const current = { ...original, key: "new", value: "合成新词" };
+    const list = vi.fn(async (_offset: number, _limit: number, _kind?: string, query?: string) => ({
+      entries: query === "new" ? [current] : [original],
+      has_more: false,
+    }));
+    const client: DictionaryManagerClient = {
+      dictionary: {
+        list,
+        edit: vi.fn(() => pending),
+        import: vi.fn(async () => {
+          await pending;
+          return { applied: 1, failed: 0 };
+        }),
+        retry: vi.fn(() => pending),
+        dismissFailure: vi.fn(() => pending),
+      },
+    };
+    const { result, unmount } = renderHook(() =>
+      useDictionaryManager({
+        client,
+        confirm: vi.fn().mockResolvedValue(true),
+      }),
+    );
+    try {
+      await act(async () => vi.advanceTimersByTimeAsync(280));
+      act(() => result.current.setPhraseForm({ ...original, previous: original }));
+      let operation!: Promise<void>;
+      await act(async () => {
+        switch (action) {
+          case "save":
+            operation = result.current.savePhrase();
+            break;
+          case "remove":
+            operation = result.current.removePhrase(original);
+            break;
+          case "import":
+            operation = result.current.importPhrases(
+              new File(["合成词\tfixture\t10\n"], "synthetic.txt"),
+              "standard",
+            );
+            break;
+          case "retry":
+            operation = result.current.retryDictionaryFailure("synthetic-request");
+            break;
+          case "dismiss":
+            operation = result.current.dismissDictionaryFailure("synthetic-request");
+            break;
+        }
+      });
+      // 文件读取完成后再切条件，确保导入请求也已开始等待回执。
+      if (action === "import") {
+        await vi.waitFor(() => expect(client.dictionary!.import).toHaveBeenCalled());
+      }
+      act(() => result.current.setPhraseSearch("new"));
+      await act(async () => vi.advanceTimersByTimeAsync(280));
+      expect(result.current.phrases).toEqual([current]);
+      await act(async () => {
+        finish();
+        await operation;
+      });
+      expect(result.current.phrases).toEqual([current]);
+      expect(result.current.phraseBusy).toBe(false);
+      await act(async () => result.current.retryDictionaryFailure("synthetic-next"));
+      expect(list).toHaveBeenLastCalledWith(0, 100, "quick_phrase", "new");
+      expect(result.current.phrases).toEqual([current]);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  },
+);
+
+test("旧保存回执刷新当前搜索并显示刚提交的匹配词条", async () => {
+  vi.useFakeTimers();
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  let committed = false;
+  const current = { kind: "quick_phrase" as const, key: "new", value: "合成新词", weight: 10 };
+  const list = vi.fn(async (_offset: number, _limit: number, _kind?: string, query?: string) => ({
+    entries: committed && query === "new" ? [current] : [],
+    has_more: false,
+  }));
+  const client: DictionaryManagerClient = {
+    dictionary: {
+      list,
+      edit: vi.fn(async () => {
+        await pending;
+        committed = true;
+      }),
+    },
+  };
+  const { result, unmount } = renderHook(() => useDictionaryManager({ client, confirm: vi.fn() }));
+  try {
+    await act(async () => vi.advanceTimersByTimeAsync(280));
+    act(() => result.current.setPhraseForm({ ...current, previous: null }));
+    let saving!: Promise<void>;
+    act(() => {
+      saving = result.current.savePhrase();
+    });
+    act(() => result.current.setPhraseSearch("new"));
+    await act(async () => vi.advanceTimersByTimeAsync(280));
+    expect(list).toHaveBeenLastCalledWith(0, 100, "quick_phrase", "new");
+    expect(result.current.phrases).toEqual([]);
+    await act(async () => {
+      finish();
+      await saving;
+    });
+    expect(result.current.phraseSearch).toBe("new");
+    expect(result.current.phrases).toEqual([current]);
+    expect(result.current.phraseBusy).toBe(false);
+  } finally {
+    unmount();
+    vi.useRealTimers();
+  }
+});
+
+test("新搜索首页等待时旧保存回执不能沿用上个搜索的页码", async () => {
+  vi.useFakeTimers();
+  let finishEdit!: () => void;
+  const pendingEdit = new Promise<void>((resolve) => {
+    finishEdit = resolve;
+  });
+  let finishSearch!: () => void;
+  const pendingSearch = new Promise<void>((resolve) => {
+    finishSearch = resolve;
+  });
+  const original = { kind: "quick_phrase" as const, key: "old", value: "合成旧词", weight: 10 };
+  const current = { ...original, key: "new", value: "合成新词" };
+  const list = vi.fn(async (offset: number, _limit: number, _kind?: string, query?: string) => {
+    if (query !== "new") return { entries: [original], has_more: true };
+    if (offset > 0) return { entries: [], has_more: false };
+    await pendingSearch;
+    return { entries: [current], has_more: false };
+  });
+  const client: DictionaryManagerClient = {
+    dictionary: { list, edit: vi.fn(() => pendingEdit) },
+  };
+  const { result, unmount } = renderHook(() => useDictionaryManager({ client, confirm: vi.fn() }));
+  try {
+    await act(async () => vi.advanceTimersByTimeAsync(280));
+    await act(async () => result.current.turnPhrasePage(100));
+    expect(result.current.phrasePage.offset).toBe(100);
+    act(() => result.current.setPhraseForm({ ...current, previous: null }));
+    let saving!: Promise<void>;
+    act(() => {
+      saving = result.current.savePhrase();
+    });
+    act(() => result.current.setPhraseSearch("new"));
+    await act(async () => vi.advanceTimersByTimeAsync(280));
+    expect(list).toHaveBeenLastCalledWith(0, 100, "quick_phrase", "new");
+    await act(async () => {
+      finishEdit();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      finishSearch();
+      await saving;
+    });
+    expect(list).toHaveBeenLastCalledWith(0, 100, "quick_phrase", "new");
+    expect(result.current.phrasePage.offset).toBe(0);
+    expect(result.current.phrases).toEqual([current]);
+  } finally {
+    unmount();
+    vi.useRealTimers();
+  }
+});
