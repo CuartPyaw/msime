@@ -27,7 +27,7 @@ use crate::local::emoji::{query_emoji_readings, query_kaomoji_readings, Expressi
 use crate::local::symbol_candidates::{query_symbol_readings, SymbolRow, MIXED_SYMBOL_LIMIT};
 use crate::nine_key_shuangpin::NineKeyShuangpin;
 use crate::paths::RuntimePaths;
-use crate::pinyin::segment::{cut_one_piece_min_segments, split_segments};
+use crate::pinyin::segment::{is_complete_pinyin_input, split_segments};
 use crate::pinyin::syllables::intact_pinyin_list;
 use crate::quanpin::QuanpinDictionary;
 use crate::session::{LocalClock, SessionSnapshot};
@@ -2435,7 +2435,8 @@ fn splits_into_syllables_at(key: &str, boundaries: &[usize]) -> bool {
         let Some(piece) = key.get(start..end) else {
             return false;
         };
-        if !piece.is_empty() && cut_one_piece_min_segments(piece, true).is_empty() {
+        // 单片编码不接受撇号；完整性接口接受撇号分段，因此在这里保留旧限制。
+        if !piece.is_empty() && (piece.contains('\'') || !is_complete_pinyin_input(piece)) {
             return false;
         }
         start = end;
@@ -6639,6 +6640,104 @@ CREATE TABLE tbl_2_y(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl
             allocations <= 1150,
             "symbols-only expressive path allocated an unused resource path: {allocations}"
         );
+    }
+
+    fn frozen_splits_into_syllables_at(key: &str, boundaries: &[usize]) -> bool {
+        let mut start = 0;
+        for &end in boundaries.iter().chain(std::iter::once(&key.len())) {
+            let Some(piece) = key.get(start..end) else {
+                return false;
+            };
+            if !piece.is_empty()
+                && crate::pinyin::segment::cut_one_piece_min_segments(piece, true).is_empty()
+            {
+                return false;
+            }
+            start = end;
+        }
+        true
+    }
+
+    #[test]
+    fn expressive_boundary_check_matches_owned_cuts() {
+        let mut inputs = vec![
+            String::new(),
+            "nihao".into(),
+            "meiguo".into(),
+            "xiangjiao".into(),
+            "xi'an".into(),
+            "ni''hao".into(),
+            "'ni".into(),
+            "ni'".into(),
+            "你好".into(),
+            "ni好".into(),
+            "NIHAO".into(),
+            "gamma".into(),
+            "ni".repeat(32),
+            "ni".repeat(33),
+            "ni".repeat(33) + "h",
+        ];
+        for syllable in intact_pinyin_list() {
+            for suffix in ["", "ni", "h", "'an", "好", "sahng", "zhonguo"] {
+                inputs.push(format!("{syllable}{suffix}"));
+            }
+        }
+        for key in inputs {
+            let mut boundaries = vec![
+                vec![],
+                vec![0],
+                vec![key.len()],
+                vec![0, key.len()],
+                vec![key.len(), key.len()],
+                vec![key.len() + 1],
+                vec![usize::MAX],
+                vec![key.len(), 0],
+            ];
+            boundaries.extend((0..=key.len()).map(|at| vec![at, at]));
+            for boundaries in boundaries {
+                assert_eq!(
+                    splits_into_syllables_at(&key, &boundaries),
+                    frozen_splits_into_syllables_at(&key, &boundaries),
+                    "编码 {key:?}，边界 {boundaries:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn expressive_boundary_check_does_not_materialize_syllables() {
+        use crate::ime::personal_rerank::allocations::count;
+        assert!(splits_into_syllables_at("nihao", &[]));
+        for (key, boundaries, expected_allocations) in [
+            ("nihao".to_owned(), vec![], 0),
+            ("meiguo".to_owned(), vec![3], 0),
+            ("xiangjiao".to_owned(), vec![2, 5], 0),
+            ("ni".repeat(32), vec![], 0),
+            ("ni".repeat(33), vec![], 1),
+        ] {
+            let (expected, old) = count(|| frozen_splits_into_syllables_at(&key, &boundaries));
+            let (actual, new) = count(|| splits_into_syllables_at(&key, &boundaries));
+            assert!(expected);
+            assert_eq!(actual, expected);
+            eprintln!("表情边界：{} 字节 {boundaries:?}，{old} → {new}", key.len());
+            assert_eq!(new, expected_allocations, "只应保留超长片段的 DP 表分配");
+            assert!(new < old);
+        }
+    }
+
+    #[test]
+    fn expressive_symbol_query_preserves_rows_without_cut_results() {
+        use crate::ime::personal_rerank::allocations::count;
+        let readings = vec!["zhengfu".to_owned()];
+        let boundaries = [5];
+        let current = |key: &str| splits_into_syllables_at(key, &boundaries);
+        let frozen = |key: &str| frozen_splits_into_syllables_at(key, &boundaries);
+        assert!(!query_symbol_readings(&readings, &current).is_empty());
+        let (expected, old) = count(|| query_symbol_readings(&readings, &frozen));
+        let (actual, new) = count(|| query_symbol_readings(&readings, &current));
+        assert_eq!(actual, expected);
+        eprintln!("符号查询：{old} → {new}");
+        assert!(new < old, "符号查询仍然物化了边界切分结果");
     }
 
     #[test]
