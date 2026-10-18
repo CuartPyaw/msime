@@ -5,6 +5,7 @@
 use std::borrow::Cow;
 use std::cmp::{Ordering, Reverse};
 use std::collections::{HashMap, HashSet};
+use std::hash::{BuildHasherDefault, Hasher};
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
@@ -1300,7 +1301,7 @@ impl NineKeySession {
         candidates.clear();
         let mut key = String::with_capacity(locked_key.len() + self.digits.len() * 4 + 1);
         // 各条切分的前缀组彼此大量重复，一次刷新会推入上万行，见 `push_ranked`。
-        let mut leading: HashMap<String, RankKey> = HashMap::new();
+        let mut leading = LeadingMap::default();
         // Only a split the user typed says where a syllable ends; without one, `3` must keep 的 (a completion of d) ahead of the rarer 额 (e).
         let prefer_exact = !self.splits.is_empty();
         // 每个数字都能当一个音节的首字母时也按简拼查（`68` 是 m't：明天、每天）。用户在每个数字之间都打了切分（`6'8`），说的就是简拼，简拼行排在前面；没打切分时数字也可能是完整音节（`68` 是 mu），简拼行排在同样覆盖的音节行之后。
@@ -1349,13 +1350,13 @@ impl NineKeySession {
                     }
                 }
                 if cached && filter_dominated {
-                    if let Some(best) = leading.get(word) {
+                    if let Some(best) = leading_rank(&leading, &candidates, word) {
                         let Some(covered) = grid.matching_code_prefix_len(matched, &self.digits)
                         else {
                             return false;
                         };
                         // 只查已接纳的前页结果；本页内的同词仍由 `push_ranked` 处理。
-                        if *best
+                        if best
                             <= rank_key_for_reading(
                                 candidate,
                                 covered,
@@ -2537,6 +2538,82 @@ fn query_key_is_new(
 /// `rank_candidates` 的排序键，小的在前。
 type RankKey = (Reverse<usize>, bool, bool, bool, bool, Reverse<i64>);
 
+const LEADING_FNV_OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
+const LEADING_FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
+
+#[derive(Default)]
+struct LeadingHasher(u64);
+
+impl Hasher for LeadingHasher {
+    fn finish(&self) -> u64 {
+        self.0
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.0 = bytes.iter().fold(LEADING_FNV_OFFSET, |state, &byte| {
+            (state ^ u64::from(byte)).wrapping_mul(LEADING_FNV_PRIME)
+        });
+    }
+
+    fn write_u64(&mut self, value: u64) {
+        self.0 = value;
+    }
+}
+
+#[derive(Clone, Copy)]
+struct LeadingEntry {
+    candidate: usize,
+    key: RankKey,
+}
+
+enum LeadingSlot {
+    One(LeadingEntry),
+    Many(Vec<LeadingEntry>),
+}
+
+impl LeadingSlot {
+    fn find(&self, candidates: &[WordItem], word: &str) -> Option<(usize, RankKey)> {
+        let entries: &[LeadingEntry] = match self {
+            Self::One(entry) => std::slice::from_ref(entry),
+            Self::Many(entries) => entries,
+        };
+        entries.iter().enumerate().find_map(|(slot, entry)| {
+            (candidates[entry.candidate].word == word).then_some((slot, entry.key))
+        })
+    }
+
+    fn update(&mut self, slot: usize, candidate: usize, key: RankKey) {
+        let entries: &mut [LeadingEntry] = match self {
+            Self::One(entry) => std::slice::from_mut(entry),
+            Self::Many(entries) => entries,
+        };
+        entries[slot] = LeadingEntry { candidate, key };
+    }
+
+    fn insert(&mut self, entry: LeadingEntry) {
+        match self {
+            Self::One(previous) => {
+                *self = Self::Many(vec![*previous, entry]);
+            }
+            Self::Many(entries) => entries.push(entry),
+        }
+    }
+}
+
+type LeadingMap = HashMap<u64, LeadingSlot, BuildHasherDefault<LeadingHasher>>;
+
+fn leading_hash(word: &str) -> u64 {
+    word.bytes().fold(LEADING_FNV_OFFSET, |state, byte| {
+        (state ^ u64::from(byte)).wrapping_mul(LEADING_FNV_PRIME)
+    })
+}
+
+fn leading_rank(leading: &LeadingMap, candidates: &[WordItem], word: &str) -> Option<RankKey> {
+    leading
+        .get(&leading_hash(word))
+        .and_then(|slot| slot.find(candidates, word).map(|(_, key)| key))
+}
+
 /// More digits covered first. Synthesised rows (whole-sentence Generated, Fallback) score on a different scale from dictionary weights, so within one coverage bucket dictionary rows lead; then exact before fuzzy, then weight.
 /// With `prefer_exact` (the user typed a split), a row the typed digits spell to its end then leads one that has to be completed past them: over `94'26` 西安 (xi'an) comes before 自从 (zi'cong), however common the longer word. Without a split the digits do not say where a syllable ends, so `3` keeps 的 (de) ahead of the rarer 额 (e) by weight.
 /// 简拼行（`is_initials_row`）在同样覆盖的词典行里的位置由 `initials_lead` 决定：用户在每个数字之间都打了切分时排在前面，否则先排在音节行之后、整句行之前，去重后再由 `interleave_initials` 按权重插进音节行里。
@@ -2732,24 +2809,43 @@ fn deduplicate_english_words(words: &mut Vec<WordItem>) {
 /// 推入一行，除非同一个词已有一行排得不比它靠后。`leading` 记着每个词目前排得最靠前的那一行的排序键。被跳过的行在稳定排序后必然落在那一行之后（键更大，或键相同而推入更晚），会被 `retain_unique_words` 删掉；它也不会让别的行多删或少删，因为它能挡住的行那一行同样挡得住。所以跳过与全部推入再 `rank_candidates`，结果完全相同。前提是两边用同一个 `prefer_exact`。
 fn push_ranked(
     candidates: &mut Vec<WordItem>,
-    leading: &mut HashMap<String, RankKey>,
+    leading: &mut LeadingMap,
     candidate: WordItem,
     prefer_exact: bool,
     initials_lead: bool,
     grid: KeyGrid,
 ) {
     let key = rank_key(&candidate, prefer_exact, initials_lead, grid);
-    match leading.get_mut(candidate.word.as_str()) {
-        Some(best) if *best <= key => return,
-        Some(best) => *best = key,
-        None => {
-            if leading.is_empty() {
-                leading.reserve(CANDIDATE_LIMIT);
-            }
-            leading.insert(candidate.word.clone(), key);
+    let hash = leading_hash(&candidate.word);
+    let existing = leading
+        .get(&hash)
+        .and_then(|slot| slot.find(candidates, &candidate.word));
+    if let Some((slot, best)) = existing {
+        if best <= key {
+            return;
         }
+        let candidate_index = candidates.len();
+        candidates.push(candidate);
+        leading
+            .get_mut(&hash)
+            .expect("leading hash entry remains present")
+            .update(slot, candidate_index, key);
+        return;
     }
+    if leading.is_empty() {
+        leading.reserve(CANDIDATE_LIMIT);
+    }
+    let candidate_index = candidates.len();
     candidates.push(candidate);
+    let entry = LeadingEntry {
+        candidate: candidate_index,
+        key,
+    };
+    if let Some(slot) = leading.get_mut(&hash) {
+        slot.insert(entry);
+    } else {
+        leading.insert(hash, LeadingSlot::One(entry));
+    }
 }
 
 /// 按 `rank_key` 稳定排序、按词去重，简拼交错和个人调频后再截断（NK:283-307）。
@@ -3999,7 +4095,7 @@ mod tests {
     #[test]
     fn push_ranked_defers_leading_capacity_until_a_candidate_exists() {
         let mut candidates = Vec::new();
-        let mut leading = HashMap::new();
+        let mut leading = LeadingMap::default();
         assert_eq!(leading.capacity(), 0);
 
         push_ranked(
@@ -4013,6 +4109,57 @@ mod tests {
 
         assert_eq!(candidates.len(), 1);
         assert!(leading.capacity() >= CANDIDATE_LIMIT);
+    }
+
+    #[test]
+    fn push_ranked_leading_map_allocation_profile() {
+        let rows: Vec<_> = (0..256)
+            .map(|index| {
+                item(
+                    &format!("合成词{index}"),
+                    "64426",
+                    index,
+                    CandidateSource::Database,
+                )
+            })
+            .collect();
+        let ((), allocations) = crate::ime::personal_rerank::allocations::count(|| {
+            let mut candidates = Vec::new();
+            let mut leading = LeadingMap::default();
+            for row in rows.iter().cloned() {
+                push_ranked(
+                    &mut candidates,
+                    &mut leading,
+                    row,
+                    false,
+                    false,
+                    KeyGrid::NineKey,
+                );
+            }
+        });
+        eprintln!("push-ranked-leading allocations: {allocations}");
+        assert!(allocations < 700, "leading map allocations: {allocations}");
+    }
+
+    #[test]
+    fn leading_slot_keeps_distinct_words_when_hashes_collide() {
+        let candidates = vec![
+            item("甲", "64", 1, CandidateSource::Database),
+            item("乙", "64", 2, CandidateSource::Database),
+        ];
+        let first = LeadingEntry {
+            candidate: 0,
+            key: rank_key(&candidates[0], false, false, KeyGrid::NineKey),
+        };
+        let second = LeadingEntry {
+            candidate: 1,
+            key: rank_key(&candidates[1], false, false, KeyGrid::NineKey),
+        };
+        let mut slot = LeadingSlot::One(first);
+        slot.insert(second);
+        assert!(slot.find(&candidates, "甲").is_some());
+        assert!(slot.find(&candidates, "乙").is_some());
+        assert!(slot.find(&candidates, "丙").is_none());
     }
 
     #[test]
@@ -4199,7 +4346,7 @@ mod tests {
             let mut everything = rows.clone();
             rank_candidates(&mut everything, prefer_exact, false, None, KeyGrid::NineKey);
             let mut skipped = Vec::new();
-            let mut leading = HashMap::new();
+            let mut leading = LeadingMap::default();
             for row in rows {
                 push_ranked(
                     &mut skipped,
