@@ -13371,6 +13371,90 @@ fn voice_local_models_list_install_cancel_and_remove_validate_their_requests() {
 }
 
 #[test]
+fn voice_local_model_initial_progress_can_cancel_before_provider_io() {
+    struct Observed {
+        events: Vec<Value>,
+        cancellations: Vec<Value>,
+        cancel_request: Vec<u8>,
+    }
+    unsafe extern "C" fn cancel_on_progress(
+        json: *const u8,
+        length: usize,
+        context: *mut std::ffi::c_void,
+    ) {
+        // 回调只记录事件并重入取消入口，断言留在 C ABI 返回后。
+        let observed = unsafe { &mut *context.cast::<Observed>() };
+        let bytes = unsafe { std::slice::from_raw_parts(json, length) };
+        observed
+            .events
+            .push(serde_json::from_slice(bytes).unwrap_or(Value::Null));
+        let result = unsafe {
+            msime_client_voice_local_model_cancel(
+                observed.cancel_request.as_ptr(),
+                observed.cancel_request.len(),
+            )
+        };
+        let response = unsafe { CString::from_raw(result) };
+        observed
+            .cancellations
+            .push(serde_json::from_slice(response.as_bytes()).unwrap_or(Value::Null));
+    }
+
+    // 默认模型和 sense-voice-small 已有并行安装测试，使用另一个目录 id。
+    let id = "x-asr-zh-en-offline";
+    let model = msime_client_providers::voice::local_models::catalog()
+        .models
+        .iter()
+        .find(|model| model.id == id)
+        .unwrap();
+    for from_files in [false, true] {
+        let state = tempfile::tempdir().unwrap();
+        let root = state.path().join("models");
+        let mut request = json!({ "root": root, "id": id });
+        if from_files {
+            request["files"] = json!([]);
+        } else {
+            // 初始回调即使回归，明文镜像也会在联网前被拒绝。
+            request["mirror"] = json!("http://synthetic.invalid/");
+        }
+        let request = serde_json::to_vec(&request).unwrap();
+        let mut observed = Observed {
+            events: Vec::new(),
+            cancellations: Vec::new(),
+            cancel_request: serde_json::to_vec(&json!({ "id": id })).unwrap(),
+        };
+        let result = read(unsafe {
+            msime_client_voice_local_model_install(
+                request.as_ptr(),
+                request.len(),
+                Some(cancel_on_progress),
+                (&mut observed as *mut Observed).cast(),
+            )
+        });
+        assert_eq!(result["error"], "local_model_cancelled", "{result}");
+        let stage = if from_files { "import" } else { "download" };
+        assert_eq!(
+            observed.events,
+            vec![json!({ "id": id, "stage": stage, "downloaded": 0, "total": model.archive.size })]
+        );
+        assert_eq!(
+            observed.cancellations,
+            vec![json!({ "ok": true, "value": true })]
+        );
+        assert!(!root.exists());
+        assert_eq!(
+            read(unsafe {
+                msime_client_voice_local_model_cancel(
+                    observed.cancel_request.as_ptr(),
+                    observed.cancel_request.len(),
+                )
+            }),
+            json!({ "ok": true, "value": false })
+        );
+    }
+}
+
+#[test]
 fn voice_model_setting_check_answers_what_the_preferences_store_accepts() {
     let check = |request: Value| {
         let body = request.to_string();
