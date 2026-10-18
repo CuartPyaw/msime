@@ -4770,13 +4770,6 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
           clearNineKeyFilter()
         },
         onClose: { [weak self] in self?.closeKeyboardPicker() },
-        // ⌫ 关闭候选网格并删除，与 Android 的底栏一致：网格列出的是正在编辑的组字的候选。九键三栏面板不画底栏，退格在右栏里。
-        onBackspace: { [weak self] in
-          guard let self else { return }
-          countKeyPress(TypingKeyID.backspace)
-          closeKeyboardPicker()
-          handleBackspace()
-        },
         columns: columns.map { ($0.leading, $0.trailing) })
       candidatePanel = panel
       candidatePanelSnapshot = snapshot
@@ -4790,7 +4783,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
   }
 
-  /// 全拼九键或 14 键正在组字时，展开的是三栏的九键面板（单字和笔画筛选照常可用）；其他方案、注音九键和本地模式照旧是带「返回」和 ⌫ 底栏的候选网格。
+  /// 全拼九键或 14 键正在组字时，展开的是三栏的九键面板（单字和笔画筛选照常可用）；其他方案、注音九键和本地模式使用铺满键区的候选网格，由顶部箭头收起。
   private var opensNineKeyPanel: Bool {
     (inputScheme.isMandarinNineKey || inputScheme == .fourteenKey) && isChineseMode && hasComposition && !isInLocalMode
   }
@@ -5075,7 +5068,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     guard appliedLayout != layout else { return }
     appliedLayout = layout
     keyboardRoot?.spacing = layout.rowSpacing
-    keyColumn.spacing = layout.rowSpacing
+    keyColumn.spacing = keyRowSpacing
     nineGrid?.spacing = layout.rowSpacing
     nineControls?.spacing = layout.rowSpacing
     numberPadSidebar.spacing = layout.rowSpacing
@@ -5243,6 +5236,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     let symbolLayer = Self.drawsSymbolLayer(symbols: showsSymbols, nineKey: numberPad, kana: kana, dachen: dachen)
     let letterRowsShown = !(showsSymbols || nineKeyFrame || writes || kana || dachen || fourteenKey)
     letterRowViews.forEach { $0.isHidden = !letterRowsShown }
+    keyColumn.spacing = keyRowSpacing
     applyTabletLetterKeys()
     let fullKeys = formFactor.canShowFullKeys && KeyboardLayoutPreference.tabletFullKeys
     numberRowView?.isHidden = !fullKeys || showsSymbols || nineKeyFrame || writes || kana || dachen || fourteenKey
@@ -7018,12 +7012,23 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     updateShadows(view)
   }
 
+  private var showsPhoneLetterRows: Bool {
+    formFactor == .phone && letterRowViews.first?.isHidden == false
+  }
+
+  /// 手机 26 键在存储行距之外增加 4pt 留白。
+  private var keyRowSpacing: CGFloat {
+    let letterPadding: CGFloat = showsPhoneLetterRows ? 4 : 0
+    return CGFloat(KeyboardLayoutPreference.rowSpacing) + letterPadding
+  }
+
   /// 用户调整之前的键盘高度：由内边距、当前尺寸的顶栏、顶栏下的间距和按存储行距排列的各排按键累加而成，所以顶栏变高（释义行、更大的候选字号）或行距变宽会加高键盘，而不是从按键里扣。
   private var preferredKeyboardHeight: CGFloat {
     // 手写共用顶栏，因此也共用竖屏的通用高度。
     formFactor.keyboardHeight(
-      topRow: shownTopRowHeight, rowSpacing: CGFloat(KeyboardLayoutPreference.rowSpacing),
-      landscape: isLandscape, handwriting: !handwriting.isHidden, numberRow: showsKeyboardNumberRow)
+      topRow: shownTopRowHeight, rowSpacing: keyRowSpacing,
+      landscape: isLandscape, handwriting: !handwriting.isHidden, numberRow: showsKeyboardNumberRow,
+      letterKeys: showsPhoneLetterRows)
   }
 
   /// 是否显示第五排按键：iPad 数字行、数字符号页补充行或大千各排。
