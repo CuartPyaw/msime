@@ -302,6 +302,7 @@ targets:
       - path: App/Services/DoubaoVoiceCoordinator.swift
       - path: App/Services/DoubaoWebSocketTransport.swift
       - path: App/Services/KeyboardAIService.swift
+      - path: App/Services/IOSResourcePackDownload.swift
       - path: App/Services/SkinCommunityAPI.swift
       - path: App/Sources/dictionary/TauriPersonalDictionaryBridge.swift
       - path: App/Sources/settings/CandidateOptionsSettingsView.swift
@@ -411,6 +412,7 @@ targets:
     sources:
       - path: tests
         excludes:
+          - resource-packs/**
           - input/EnglishCapitalizationPolicyTests.swift
           - settings/FrequencyAdjustmentPreferenceTests.swift
           - input/HandwritingTests.swift
