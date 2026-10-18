@@ -8374,6 +8374,99 @@ fn cloud_disable_removes_visible_row_and_invalidates_old_query_after_reenable() 
     read(msime_client_destroy(handle));
 }
 
+fn assert_cloud_seat_for_next_composition(handle: u64, enabled: bool) {
+    for byte in b"nihao" {
+        assert_eq!(
+            read(msime_client_character(handle, *byte, false))["ok"],
+            true
+        );
+    }
+    let view = read(msime_client_view(handle))["value"].clone();
+    let candidates = view["candidates"].as_array().unwrap();
+    assert!(candidates
+        .iter()
+        .any(|candidate| candidate["text"] == "本地"));
+    assert_eq!(
+        candidates.iter().any(|candidate| candidate["source"] == 15),
+        enabled,
+        "{view}"
+    );
+    assert_eq!(
+        read(msime_client_online_query(handle))["value"]["cloud_candidates"],
+        enabled
+    );
+}
+
+#[test]
+fn cloud_seat_survives_idle_preference_rebuild() {
+    for enabled in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut preferences = Preferences {
+            scheme: InputScheme::Quanpin,
+            cloud_candidates: !enabled,
+            ..chinese_preferences()
+        };
+        let handle = test_host_with_pinyin_fixture(dir.path(), preferences.clone());
+        assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+        preferences.cloud_candidates = enabled;
+        assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], false);
+        assert_cloud_seat_for_next_composition(handle, enabled);
+        read(msime_client_destroy(handle));
+    }
+}
+
+#[test]
+fn cloud_seat_survives_deferred_preference_rebuild() {
+    for enabled in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let mut preferences = Preferences {
+            scheme: InputScheme::Quanpin,
+            cloud_candidates: !enabled,
+            ..chinese_preferences()
+        };
+        let handle = test_host_with_pinyin_fixture(dir.path(), preferences.clone());
+        assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+        assert_cloud_seat_for_next_composition(handle, !enabled);
+        preferences.cloud_candidates = enabled;
+        assert_eq!(update(handle, 1, &preferences)["value"]["deferred"], true);
+        let committed = read(msime_client_command(handle, 1));
+        assert_eq!(committed["ok"], true);
+        assert_eq!(committed["value"]["commit"], "本地");
+        SESSIONS.with(|sessions| {
+            assert!(!sessions.borrow().get(&handle).unwrap().preferences_pending);
+        });
+        assert_cloud_seat_for_next_composition(handle, enabled);
+        read(msime_client_destroy(handle));
+    }
+}
+
+#[test]
+fn cloud_seat_survives_resource_only_engine_rebuild() {
+    for enabled in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let preferences = Preferences {
+            scheme: InputScheme::Quanpin,
+            cloud_candidates: enabled,
+            ..chinese_preferences()
+        };
+        let handle = test_host_with_pinyin_fixture(dir.path(), preferences);
+        assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+        SESSIONS.with(|sessions| {
+            let mut sessions = sessions.borrow_mut();
+            let session = sessions.get_mut(&handle).unwrap();
+            assert!(session.requested.is_none());
+            session.resources_pending = true;
+        });
+        assert_eq!(read(msime_client_focus(handle, false))["ok"], true);
+        assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+        SESSIONS.with(|sessions| {
+            assert!(!sessions.borrow().get(&handle).unwrap().resources_pending);
+        });
+        assert_cloud_seat_for_next_composition(handle, enabled);
+        read(msime_client_destroy(handle));
+    }
+}
+
 #[test]
 fn direct_cloud_callbacks_follow_a_pending_enable() {
     let dir = tempfile::tempdir().unwrap();
