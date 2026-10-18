@@ -311,6 +311,8 @@ pub struct NineKeySession {
     sentence_seeds: Vec<String>,
     /// 算下一批种子用的空缓冲，和 `sentence_seeds` 轮换，刷新时不再分配。
     seed_buffer: Vec<String>,
+    /// 九键切分路径的输出缓冲；相邻刷新复用路径及其音节字符串。
+    path_buffer: Vec<Path>,
     english_only: bool,
     /// 部分选择正在拼的词：已经选掉的各段的全拼（`'` 连接）和文字。整串数字选完时把它们连同最后一段存成用户词，下次打简拼就能出来（#5640）；有一段读不出一字一音节的全拼（英文词、模糊音行）时 `phrase_storable` 为假，这个词不存。
     phrase_pinyin: String,
@@ -418,6 +420,7 @@ impl NineKeySession {
             // 两个缓冲一开始就留够容量，按键时轮换着用，不再分配。
             sentence_seeds: Vec::with_capacity(SEED_RETAIN_LIMIT),
             seed_buffer: Vec::with_capacity(SEED_RETAIN_LIMIT),
+            path_buffer: Vec::new(),
             english_only: false,
             phrase_pinyin: String::new(),
             phrase_word: String::new(),
@@ -1224,9 +1227,12 @@ impl NineKeySession {
         let starts_right =
             |piece: &str| initial.is_none_or(|letter| piece.as_bytes().first() == Some(&letter));
         let dictionary_options = self.dictionary_options();
+        let mut alternatives = std::mem::take(&mut self.path_buffer);
         let alternatives = if remaining.is_empty() {
             self.spellings.clear();
-            vec![Vec::new()]
+            alternatives.clear();
+            alternatives.push(Vec::new());
+            alternatives
         } else {
             let dictionary = self
                 .dictionary
@@ -1243,7 +1249,7 @@ impl NineKeySession {
                 &mut self.spelling_match_indices,
             );
             self.spellings.retain(|syllable| starts_right(syllable));
-            let mut alternatives = table.split_paths(remaining, splits, prior);
+            table.split_paths_into(remaining, splits, prior, PATH_LIMIT, &mut alternatives);
             alternatives.retain(|path| path.first().is_none_or(|piece| starts_right(piece)));
             // 种子只在用户没锁定拼写、没打切分、没选首字母时用：那些情况下切分已经被用户限定，种子未必守得住这些限定。
             if self.locked.is_empty() && splits.is_empty() && initial.is_none() {
@@ -1567,6 +1573,7 @@ impl NineKeySession {
         self.write_reading(candidates.first(), &mut reading);
         self.reading = reading;
         self.candidates = candidates;
+        self.path_buffer = alternatives;
         let remaining = remaining_digits(&self.digits, locked_length);
         if remaining.is_empty() {
             // 数字全部锁定时，左列还是最后一次锁定时的选项，可以换选。
@@ -3177,6 +3184,7 @@ impl SpellingTable {
     /// 和 `paths` 一样，但每个 `splits` 位置（`digits` 里的下标）都必须有一个音节在那里结束，而且这个音节必须完整；同样音节数、同样收尾的路径按 `prior` 给的频度之和排，频度相同才按字典序。
     ///
     /// 每个位置只留 48 条，留哪些就决定了哪些读法还能查到。原先在字典序上截断，而 9 键是 wxyz、7 键是 pqrs，于是长串里 xi 开头的路径把 yi、zhe 开头的全部挤掉，`943426943426` 只剩「洗点一点」查不到「一点一点」，`7264685487` 只剩「盘后」查不到「然后」。
+    #[cfg(test)]
     fn split_paths(&self, digits: &str, splits: &[usize], prior: &SyllablePrior) -> Vec<Path> {
         self.split_paths_limited(digits, splits, prior, PATH_LIMIT)
     }
@@ -3189,6 +3197,20 @@ impl SpellingTable {
         prior: &SyllablePrior,
         output_limit: usize,
     ) -> Vec<Path> {
+        let mut paths = Vec::new();
+        self.split_paths_into(digits, splits, prior, output_limit, &mut paths);
+        paths
+    }
+
+    /// 将最终路径写入已有缓冲，保留路径和音节字符串的容量。
+    fn split_paths_into(
+        &self,
+        digits: &str,
+        splits: &[usize],
+        prior: &SyllablePrior,
+        output_limit: usize,
+        destination: &mut Vec<Path>,
+    ) {
         let length = digits.len();
         let mut suffix: Vec<Vec<SpellingPath<'_>>> = vec![Vec::new(); length + 1];
         suffix[length].push(SpellingPath {
@@ -3254,15 +3276,40 @@ impl SpellingTable {
             suffix[offset] = result;
         }
         // 后继一定在更大偏移，取出根页不影响回溯；只有最终保留路径才物化字符串。
-        std::mem::take(&mut suffix[0])
-            .into_iter()
-            .take(output_limit)
-            .map(|root| {
-                let mut path = Vec::with_capacity(root.length);
-                path.extend(root.pieces(&suffix).map(str::to_owned));
+        let roots = std::mem::take(&mut suffix[0]);
+        if destination.is_empty() {
+            *destination = roots
+                .into_iter()
+                .take(output_limit)
+                .map(|root| {
+                    let mut path = Vec::with_capacity(root.length);
+                    path.extend(root.pieces(&suffix).map(str::to_owned));
+                    path
+                })
+                .collect();
+            return;
+        }
+        let output_len = roots.len().min(output_limit);
+        destination.reserve(output_len.saturating_sub(destination.len()));
+        destination.truncate(output_len);
+        for (index, root) in roots.into_iter().take(output_limit).enumerate() {
+            let path = if let Some(path) = destination.get_mut(index) {
                 path
-            })
-            .collect()
+            } else {
+                destination.push(Vec::with_capacity(root.length));
+                destination.last_mut().expect("new path")
+            };
+            path.truncate(root.length);
+            path.reserve(root.length.saturating_sub(path.len()));
+            for (piece_index, piece) in root.pieces(&suffix).enumerate() {
+                if piece_index == path.len() {
+                    path.push(String::new());
+                }
+                path[piece_index].clear();
+                path[piece_index].push_str(piece);
+            }
+            path.truncate(root.length);
+        }
     }
 }
 
@@ -3343,6 +3390,9 @@ mod initials_code_tests;
 
 #[cfg(test)]
 mod path_chain_tests;
+
+#[cfg(test)]
+mod path_buffer_tests;
 
 #[cfg(test)]
 mod seed_tail_tests;
@@ -4453,6 +4503,19 @@ mod tests {
         let (_, allocations) =
             crate::ime::personal_rerank::allocations::count(|| session.refresh());
         assert!(allocations < 601, "九键读音热刷新分配了 {allocations} 次");
+    }
+
+    #[test]
+    fn refresh_reuses_split_path_storage() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, EnglishInputOptions::default());
+        session.digits = "64426".into();
+        session.refresh();
+        let pointer = session.path_buffer[0][0].as_ptr();
+        let capacity = session.path_buffer[0][0].capacity();
+        session.refresh();
+        assert_eq!(session.path_buffer[0][0].as_ptr(), pointer);
+        assert_eq!(session.path_buffer[0][0].capacity(), capacity);
     }
 
     #[test]

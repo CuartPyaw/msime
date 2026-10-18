@@ -67,3 +67,5 @@ Status: implemented
 局部配对不能推断九键 16 ms 达标；只有完整逐键模型运行能判断该预算。无公开接口、持久缓存、依赖和 unsafe 变化。
 
 后续[种子尾段按采用上限选择与物化](../../implemented/testing/2026-10-17-nine-key-seed-tail-materialization.md)只在根页选择前3条并物化；非根页仍保留完整48条搜索宽度，种子数量与采用条数不变。
+
+后续[最终路径输出缓冲](2026-10-18-nine-key-path-buffer.md)复用会话已有的路径和音节字符串，中间搜索规则与本篇上限保持不变。
