@@ -15,7 +15,6 @@ import {
   CloudDictionaryCatalogPanel,
   CloudDictionaryFilesPanel,
   CloudDictionaryPanel,
-  EmojiPanel,
   VoicePanel,
   completeOnboardingPreferences,
   useMobilePopState,
@@ -93,6 +92,7 @@ import { discoverFontReader } from "./candidate/system-font-client";
 import { DesktopKeyboard } from "./input/desktop-keyboard";
 import { useHostPlatform } from "./input/panel-host";
 import { DesktopPanelTheme } from "./input/desktop-panel-theme";
+import { DesktopEmojiPanel } from "./input/desktop-emoji-panel";
 import { DesktopHandwriting } from "./input/desktop-handwriting";
 import { DesktopCloudDictionary } from "./dictionary/desktop-cloud-dictionary";
 import { testDesktopApiCredential } from "./account/credential-test-client";
@@ -1195,53 +1195,6 @@ function DesktopCloudDictionarySurface() {
   };
   return <DesktopCloudDictionary client={cloudDictionary} />;
 }
-function DesktopEmojiPanel({
-  theme,
-  initialPage = "home",
-  client: providedClient,
-  close,
-}: {
-  theme: "dark" | "light";
-  initialPage?: "home" | "clipboard";
-  client?: EmojiPanelClient;
-  close?: () => Promise<void>;
-}) {
-  const [emojiClient, setEmojiClient] = useState<EmojiPanelClient | null>(null);
-  const panelLabel = initialPage === "clipboard" ? "clipboard-panel" : "emoji-panel";
-  useEffect(() => {
-    let active = true;
-    const capability = isTauri()
-      ? invoke<boolean>("supports_clipboard_paste").catch(() => false)
-      : Promise.resolve(false);
-    void capability.then((supported) => {
-      if (!active) return;
-      const baseClient = providedClient ?? panelClients.emoji;
-      const closePanel = close ?? (() => invoke("close_panel", { label: panelLabel }));
-      setEmojiClient(
-        supported
-          ? {
-              ...baseClient,
-              close: closePanel,
-              clipboard: baseClient.clipboard
-                ? {
-                    ...baseClient.clipboard,
-                    paste: (text) => invoke<void>("paste_clipboard_text", { text }),
-                  }
-                : undefined,
-            }
-          : { ...baseClient, close: closePanel },
-      );
-    });
-    return () => {
-      active = false;
-    };
-  }, [close, panelLabel, providedClient]);
-  return emojiClient ? (
-    <EmojiPanel client={emojiClient} theme={theme} initialPage={initialPage} />
-  ) : (
-    <StatusMessage role="status">正在连接面板…</StatusMessage>
-  );
-}
 
 const content =
   panel === "keyboard" ? (
@@ -1260,11 +1213,13 @@ const content =
     <DesktopCloudDictionarySurface />
   ) : panel === "clipboard" ? (
     <DesktopPanelTheme preferences={client} surface="emoji">
-      {(theme) => <DesktopEmojiPanel theme={theme} initialPage="clipboard" />}
+      {(theme) => (
+        <DesktopEmojiPanel client={panelClients.emoji} theme={theme} initialPage="clipboard" />
+      )}
     </DesktopPanelTheme>
   ) : panel === "emoji" ? (
     <DesktopPanelTheme preferences={client} surface="emoji">
-      {(theme) => <DesktopEmojiPanel theme={theme} />}
+      {(theme) => <DesktopEmojiPanel client={panelClients.emoji} theme={theme} />}
     </DesktopPanelTheme>
   ) : panel === "vocabulary" ? (
     <VocabularyReviewPanel client={vocabularyReview} />
