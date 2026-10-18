@@ -34,7 +34,7 @@ API 28、35 专用 AVD 均运行 client-base/core/providers/services 整套 Rust
 
 本地最终 quick 通过：Rust 工作区、Android 与 WebAssembly 目标、Android 宿主 Java、Linux 设置壳及原生 90 项、macOS 原生宿主、Apple bridge 与 168 项可在本机运行的 Windows 测试。MinGW/Windows 原生交叉构建和 pipe 因工具链缺失跳过，HarmonyOS 原生打包因暂存环境缺失跳过，不计通过。笔记校验、格式与差异检查通过。
 
-API 35 原生 APK 的独立导入套件通过：74 个合成词全部应用，第六项进入九键候选，活跃会话的请求保留 pending，关闭会话后重试成功。API 28 的整套核心验收发现[剪贴板取消选择器的旧用例重复返回](../feature/2026-10-16-android-clipboard-export.md)：诊断确认后台旧选择器导致多按一次返回，修正后独立两阶段通过；整套设备结果另行记录。
+API 35 原生 APK 的独立导入套件通过：74 个合成词全部应用，第六项进入九键候选，活跃会话的请求保留 pending，关闭会话后重试成功。API 28 的整套核心验收发现[剪贴板取消选择器的旧用例重复返回](../feature/2026-10-16-android-clipboard-export.md)：诊断确认后台旧选择器导致多按一次返回，修正后独立两阶段通过；API 28 的 `--core` 整套原生 smoke 通过。API 35 原生 smoke 分段执行：修正合成重启编辑器的系统栏边距后，前缀通过；剪贴板最终两阶段独立通过；后续十万辅助码、74 词真实导入和剪贴板分词拖选通过。数字键盘套件在笔画键面失败，后面的套件未运行，不计整套通过。设备词库文件存在，但运行配置缺少 `language_dictionaries`；配置丢失路径留待独立回归与修复，当前证据不归因为批量事务。
 
 ## Consequences
 
