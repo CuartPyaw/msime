@@ -3833,6 +3833,7 @@ test.each(["windows", "linux", "macos", "android", "ios", "harmony", undefined])
     render(<SettingsPage client={client} />);
     await settingsReady();
     fireEvent.click(screen.getByRole("button", { name: "关于" }));
+    selectSettingsTab("许可与隐私");
     const toggle = (await screen.findByRole("switch", {
       name: "匿名使用统计",
     })) as HTMLInputElement;
@@ -6474,6 +6475,7 @@ test("help, about and feedback pages expose their Windows content and actions", 
   await settingsReady();
 
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
+  selectSettingsTab("帮助与反馈");
   fireEvent.click(screen.getByRole("button", { name: "帮助" }));
   expect(await screen.findByText("快速上手")).toBeDefined();
   expect(screen.getByText(/Win \+ Space/)).toBeDefined();
@@ -6482,6 +6484,7 @@ test("help, about and feedback pages expose their Windows content and actions", 
 
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
   expect(await screen.findByText("Metasequoia IME")).toBeDefined();
+  selectSettingsTab("许可与隐私");
   fireEvent.click(screen.getByRole("button", { name: "开源许可协议" }));
   await waitFor(() =>
     expect(openExternalUrl).toHaveBeenCalledWith(
@@ -6490,6 +6493,7 @@ test("help, about and feedback pages expose their Windows content and actions", 
   );
 
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
+  selectSettingsTab("帮助与反馈");
   expect(await screen.findByText("GitHub Issues")).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "复制群号" }));
   await waitFor(() => expect(copyText).toHaveBeenCalledWith("829919142"));
@@ -6509,6 +6513,7 @@ test("Linux help quick start covers both Fcitx5 and IBus", async () => {
   await settingsReady();
 
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
+  selectSettingsTab("帮助与反馈");
   fireEvent.click(screen.getByRole("button", { name: "帮助" }));
   const intro = await screen.findByText(/Linux 桌面环境下的中文输入法/);
   expect(intro.textContent).toContain("Fcitx5");
@@ -6535,6 +6540,7 @@ test("Linux help network section says what goes online and where credentials liv
   await settingsReady();
 
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
+  selectSettingsTab("帮助与反馈");
   fireEvent.click(screen.getByRole("button", { name: "帮助" }));
   const network = await screen.findByText(/日常拼音输入无需联网/);
   const text = network.textContent ?? "";
@@ -6617,6 +6623,7 @@ test("the privacy link opens msime.app/privacy/ on every platform", async () => 
     );
     await settingsReady();
     fireEvent.click(screen.getByRole("button", { name: "关于" }));
+    selectSettingsTab("许可与隐私");
     // HarmonyOS 关于页把链接放在「隐私政策」行的「查看」按钮上。
     const privacy = platform === "harmony" ? "查看隐私政策" : "隐私政策";
     fireEvent.click(await screen.findByRole("button", { name: privacy }));
@@ -6687,6 +6694,7 @@ test("macOS support pages use client project and privacy links", async () => {
 
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
   await screen.findByText("Metasequoia IME");
+  selectSettingsTab("许可与隐私");
   fireEvent.click(screen.getByRole("button", { name: "开源许可协议" }));
   await waitFor(() =>
     expect(openExternalUrl).toHaveBeenCalledWith(
@@ -6699,6 +6707,7 @@ test("macOS support pages use client project and privacy links", async () => {
   await waitFor(() => expect(openThirdPartyLicenses).toHaveBeenCalledOnce());
 
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
+  selectSettingsTab("帮助与反馈");
   fireEvent.change(screen.getByRole("combobox", { name: "反馈类型" }), {
     target: { value: "候选词不对" },
   });
@@ -6731,6 +6740,8 @@ test("macOS and iOS help pages use their native host instructions", async () => 
   );
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
   // 帮助 is an entry on the 反馈 page, which is only drawn once the settings have loaded.
+  await settingsReady();
+  selectSettingsTab("帮助与反馈");
   fireEvent.click(await screen.findByRole("button", { name: "帮助" }));
   // macOS answers the three questions as term/description rows, not prose, so the page carries the
   // reference window's own terms rather than the shared platform intro.
@@ -6940,6 +6951,7 @@ test("the feedback report leads with the release and the scheme", async () => {
   );
   await settingsReady();
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
+  selectSettingsTab("帮助与反馈");
   fireEvent.click(await screen.findByRole("button", { name: "复制报告" }));
   await waitFor(() => expect(copyText).toHaveBeenCalledOnce());
   const report = copyText.mock.calls[0][0] as string;
@@ -6963,6 +6975,7 @@ test("a host that cannot name its release still reports something", async () => 
   );
   await settingsReady();
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
+  selectSettingsTab("帮助与反馈");
   fireEvent.click(await screen.findByRole("button", { name: "复制报告" }));
   await waitFor(() => expect(copyText).toHaveBeenCalledOnce());
   const report = copyText.mock.calls[0][0] as string;
@@ -7349,7 +7362,10 @@ test.each(referenceSections)(
       />,
     );
     await settingsReady();
-    if (via) fireEvent.click(screen.getByRole("button", { name: via }));
+    if (via) {
+      fireEvent.click(screen.getByRole("button", { name: via }));
+      if (via === "关于") selectSettingsTab("帮助与反馈");
+    }
     const pageName = mergedPages[button] ?? button;
     fireEvent.click(screen.getByRole("button", { name: pageName }));
     if (button === "输入" && group === "辅助码") selectSettingsTab("进阶");
@@ -7461,7 +7477,10 @@ test.each(referenceSections)(
       />,
     );
     await settingsReady();
-    if (via) fireEvent.click(screen.getByRole("button", { name: via }));
+    if (via) {
+      fireEvent.click(screen.getByRole("button", { name: via }));
+      if (via === "关于") selectSettingsTab("帮助与反馈");
+    }
     const pageName = mergedPages[button] ?? button;
     fireEvent.click(screen.getByRole("button", { name: pageName }));
     if (button === "输入" && group === "辅助码") selectSettingsTab("进阶");
@@ -7501,6 +7520,7 @@ test.each([
   await settingsReady();
   // 桌面上「帮助与反馈」并进了「关于」。
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
+  selectSettingsTab("帮助与反馈");
   const page = await screen.findByRole("group", { name: "关于" });
   for (const channel of ["GitHub Issues", "QQ 交流群", "Telegram 群组"]) {
     expect(within(page).getByText(channel)).toBeTruthy();
@@ -7526,6 +7546,7 @@ test("the feedback page opens with 帮助 and links the report to 诊断日志",
   await settingsReady();
   // 桌面上「帮助与反馈」并进了「关于」。
   fireEvent.click(screen.getByRole("button", { name: "关于" }));
+  selectSettingsTab("帮助与反馈");
   const page = await screen.findByRole("group", { name: "关于" });
   const help = within(page).getByRole("button", { name: "帮助" });
   const kind = within(page).getByRole("combobox", { name: "反馈类型" });
@@ -8382,34 +8403,37 @@ test("about page offers no update check without a host to ask", async () => {
   expect(screen.queryByRole("button", { name: "检查更新" })).toBeNull();
 });
 
-test("about page offers the release the host found and opens its page", async () => {
-  const checkUpdate = vi.fn().mockResolvedValue({
-    status: "available",
-    update: hostRelease("windows-v1.2.0", { signed: true }),
-  } satisfies UpdateCheckResult);
-  const openExternalUrl = vi.fn().mockResolvedValue(undefined);
-  render(
-    <SettingsPage
-      client={{
-        load: vi.fn().mockResolvedValue(initial),
-        save: vi.fn(),
-        openExternalUrl,
-        checkUpdate,
-        host: testHost({ platform: "windows" }),
-      }}
-    />,
-  );
-  fireEvent.click(screen.getByRole("button", { name: "关于" }));
-  fireEvent.click(await screen.findByRole("button", { name: "检查更新" }));
-  expect(await screen.findByText("发现新版本 v1.2.0")).toBeDefined();
-  expect(checkUpdate).toHaveBeenCalledWith(
-    expect.objectContaining({ platform: "windows", currentVersion: expect.any(String) }),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "前往下载" }));
-  await waitFor(() =>
-    expect(openExternalUrl).toHaveBeenCalledWith(`${releasesPage}/tag/windows-v1.2.0`),
-  );
-});
+test.each(["macos", "windows", "linux"] as const)(
+  "%s 关于页发现更新后打开官网下载页",
+  async (platform) => {
+    const checkUpdate = vi.fn().mockResolvedValue({
+      status: "available",
+      update: hostRelease(`${platform}-v1.2.0`, { signed: true }),
+    } satisfies UpdateCheckResult);
+    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+    render(
+      <SettingsPage
+        client={{
+          load: vi.fn().mockResolvedValue(initial),
+          save: vi.fn(),
+          openExternalUrl,
+          checkUpdate,
+          host: testHost({ platform }),
+        }}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "关于" }));
+    fireEvent.click(await screen.findByRole("button", { name: "检查更新" }));
+    expect(await screen.findByText("发现新版本 v1.2.0")).toBeDefined();
+    expect(checkUpdate).toHaveBeenCalledWith(
+      expect.objectContaining({ platform, currentVersion: expect.any(String) }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "前往下载" }));
+    await waitFor(() =>
+      expect(openExternalUrl).toHaveBeenCalledWith("https://msime.app/download/"),
+    );
+  },
+);
 
 test("a platform without a published release is a normal result", async () => {
   render(
@@ -8510,9 +8534,7 @@ test("Windows update notice shows the installer digest and the unsigned warning"
     screen.getByText("Get-FileHash .\\MetasequoiaIME-Full_Setup_v1.2.0.exe -Algorithm SHA256"),
   ).toBeDefined();
   fireEvent.click(screen.getByRole("button", { name: "前往下载" }));
-  await waitFor(() =>
-    expect(openExternalUrl).toHaveBeenCalledWith(`${releasesPage}/tag/windows-v1.2.0`),
-  );
+  await waitFor(() => expect(openExternalUrl).toHaveBeenCalledWith("https://msime.app/download/"));
 });
 
 test("a check the host could not complete says so", async () => {
