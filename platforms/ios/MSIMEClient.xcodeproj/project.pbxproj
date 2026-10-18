@@ -508,6 +508,7 @@
 		866795ED40842DC6D506E43A /* NineKeyShuangpinLayout.swift in Sources */ = {isa = PBXBuildFile; fileRef = C2A015A7C186EE5829EE62B4 /* NineKeyShuangpinLayout.swift */; };
 		86A47385D35C36B3CD7268D1 /* KeyboardEmojiPickerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1021E0816F83EFD2537CFB63 /* KeyboardEmojiPickerView.swift */; };
 		86FB68B9AD771D313C216BD7 /* KeyboardServiceFallback.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7513F9E654F6379AEB99C79 /* KeyboardServiceFallback.swift */; };
+		876C639845BB8DCFDE9FA43C /* IOSResourcePackDownload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22D630ABE061BC4F6C621106 /* IOSResourcePackDownload.swift */; };
 		877126391F00F1D41C4D2372 /* BackendChatClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4382C16C3E9BCE74058CA5F8 /* BackendChatClient.swift */; };
 		879694CEE726D8D6507DF076 /* DoubaoHostFrameCodec.swift in Sources */ = {isa = PBXBuildFile; fileRef = B958F722D77F264EB1AF5490 /* DoubaoHostFrameCodec.swift */; };
 		87A2E7E56167E588E57E0A26 /* SkinKeySurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1253B506002669ABD2E8323B /* SkinKeySurfaceView.swift */; };
@@ -932,6 +933,7 @@
 		FF54B8AC64127407336F27E6 /* KeyboardIconPaths.swift in Sources */ = {isa = PBXBuildFile; fileRef = B063B1760382A73A3B650384 /* KeyboardIconPaths.swift */; };
 		FF834C95C1D01DF89F5F19DB /* BackendCommunityResourceClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7FA6A2465AAF8B5759E2157 /* BackendCommunityResourceClient.swift */; };
 		FFB9B1C427032C4E50C3DFD5 /* KeyboardTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 268C07E14E8904421A470FCC /* KeyboardTheme.swift */; };
+		FFF62F9326C22CC657FA217A /* IOSResourcePackDownload.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22D630ABE061BC4F6C621106 /* IOSResourcePackDownload.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -1069,6 +1071,7 @@
 		216D8833B005F351FF4DEA8D /* PersonalDictionaryScelImportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonalDictionaryScelImportTests.swift; sourceTree = "<group>"; };
 		22B00BF172EF20CF2DA5EC53 /* DiagnosticLogSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiagnosticLogSettingsView.swift; sourceTree = "<group>"; };
 		22B07522F2ED6088AD7E8B8E /* WubiCodeHintPreferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WubiCodeHintPreferenceTests.swift; sourceTree = "<group>"; };
+		22D630ABE061BC4F6C621106 /* IOSResourcePackDownload.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = IOSResourcePackDownload.swift; sourceTree = "<group>"; };
 		233B73127608B29C985A362E /* VoiceRuntime-NOTICES.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = "VoiceRuntime-NOTICES.txt"; sourceTree = "<group>"; };
 		23AD43DB12DB02EE4097FCA9 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		241E775D6A085F275C789FCC /* language-dictionaries */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "language-dictionaries"; path = "../../target/ios/language-dictionaries"; sourceTree = SOURCE_ROOT; };
@@ -1627,6 +1630,7 @@
 				B958F722D77F264EB1AF5490 /* DoubaoHostFrameCodec.swift */,
 				C7FE5DEC53AAC548F03142BC /* DoubaoVoiceCoordinator.swift */,
 				E380781C2A6D1D0E5BD79134 /* DoubaoWebSocketTransport.swift */,
+				22D630ABE061BC4F6C621106 /* IOSResourcePackDownload.swift */,
 				C392EFA0F11B3F623EA2CD33 /* IOSResourcePackStore.swift */,
 				2A7F8933677814FA11B2E430 /* KeyboardAIService.swift */,
 				12239F7A8C13CF7CC7C376B5 /* LocalSpeechModel.swift */,
@@ -2936,6 +2940,7 @@
 				0A435C5432F68DF80143C641 /* HelpcodeSettingsView.swift in Sources */,
 				78480680705EF5C3D8FEE3F1 /* IOSCloudSettings.swift in Sources */,
 				1AA7DAEF1521ABCDA9A44F40 /* IOSPreferencePlan.swift in Sources */,
+				FFF62F9326C22CC657FA217A /* IOSResourcePackDownload.swift in Sources */,
 				0B2C4AC261B9DB29A5CD0519 /* IOSResourcePackTests.swift in Sources */,
 				52F479E64A93D99AE4B5C739 /* IOSResourcePacks.swift in Sources */,
 				E84C87D05719F5BA554925BC /* IOSSharedPaths.swift in Sources */,
@@ -3628,6 +3633,7 @@
 				B2D9B9A7A9E6AB944761C169 /* HelpcodeSettingsView.swift in Sources */,
 				3014ECA4EE0B5695576DD6F1 /* IOSCloudSettings.swift in Sources */,
 				1D139CCFBBB139A9340B9623 /* IOSPreferencePlan.swift in Sources */,
+				876C639845BB8DCFDE9FA43C /* IOSResourcePackDownload.swift in Sources */,
 				3C122AE0A408A6B74ACE65E0 /* IOSResourcePackStore.swift in Sources */,
 				D6B7F126F1138A54C102266D /* IOSResourcePacks.swift in Sources */,
 				9504DD18E9D108775FED3193 /* IOSSharedPaths.swift in Sources */,

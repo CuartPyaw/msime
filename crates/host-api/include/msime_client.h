@@ -544,11 +544,17 @@ char *msime_client_voice_local_model_install(
 char *msime_client_voice_local_model_cancel(const uint8_t *request, size_t length);
 char *msime_client_voice_local_model_remove(const uint8_t *request, size_t length);
 char *msime_client_voice_model_setting_check(const uint8_t *request, size_t length);
-/* On-demand resource packs under <state_root>/resource-packs/<id>/, where state_root is the HostOptions preferences_directory (Android: files/bootstrap/state); a session picks up a newly published pack at its next focus. Pack ids: japanese, language-dictionaries, handwriting, settled-model, offline-glosses, voice-runtime. JSON request buffers of length bytes (<=16384); standard responses. Install and adopt block: worker thread only. Errors are "invalid resource pack request", "invalid state root", "invalid source", "resource_pack_unknown", "resource_pack_busy" (that pack is already installing or adopting in this process) or a "local_model_*" code.
- * resource_packs: {state_root} -> [{id, state:"missing"|"installed"|"outdated", size, schemes:[...], import_files:[{name,url,size}]}], one entry per pack; size is the download size in bytes; import_files are the files an offline install needs (the archive for voice-runtime), url being the upstream download.
- * resource_pack_install: {state_root, pack, sources?:["https://mirror/", ...], files?:[absolute path]} -> {path}. Sources are mirror prefixes tried in order (at most 8, empty ones skipped), then the project's mirrors, then the URL in the compiled lock; integrity is always the compiled size and SHA-256. An unfinished file is resumed with an HTTP Range request next time. With files: [absolute path] (at most 16) it installs from those local files instead, matched by size and SHA-256 (never by name), sources ignored, the download phase reported as "import"; a missing file fails with "local_model_import_missing: <name>", an unreadable one with "local_model_import_unreadable: <detail>". progress (nullable) gets (context, phase "download"|"import"|"verify"|"done", done, total) on the calling thread; the phase string is valid only during the call. Cancelled installs fail with "local_model_cancelled".
- * resource_pack_cancel: pack is the raw UTF-8 id (not JSON); NULL/0 cancels every pack install in this process. Any thread; returns at once.
- * resource_pack_adopt: {state_root, pack, source: absolute dir} -> {path}. Renames the pack's files out of source on the same filesystem (no copy), verifies them against the compiled lock and publishes the pack; on failure every file is renamed back and nothing is published. A pack already installed with the same bytes is returned without touching source. */
+/* 按需资源包存放在 <state_root>/resource-packs/<id>/；state_root 是 HostOptions 的 preferences_directory（Android: files/bootstrap/state），会话下次取得焦点时读取新发布的包。
+ * 包 id：japanese、language-dictionaries、handwriting、settled-model、offline-glosses、voice-runtime。请求为 length 字节的 JSON（<=16384），响应使用标准封装。install 和 adopt 是阻塞调用，只能放在工作线程。
+ * 错误为 "invalid resource pack request"、"invalid state root"、"invalid source"、"resource_pack_unknown"、"resource_pack_busy"（本进程正在安装或收编该包）或 "local_model_*"。
+ * resource_packs: {state_root} -> [{id, state:"missing"|"installed"|"outdated", size, schemes:[...], import_files:[{name,url,size}]}]，每包一项；size 为下载字节数，import_files 为离线安装所需文件（voice-runtime 使用归档），url 为上游下载地址。
+ * resource_pack_install: {state_root, pack, sources?:["https://mirror/", ...], files?:[absolute path]} -> {path}。
+ * sources 是依次尝试的镜像前缀（最多 8 个，跳过空项），之后尝试项目镜像和编译锁中的 URL；始终按锁中的大小和 SHA-256 校验，未完成文件在下次调用时用 HTTP Range 续传。
+ * files（最多 16 个绝对路径）表示改从本地安装，按大小和 SHA-256 匹配而非文件名，忽略 sources，下载阶段改报 "import"；缺文件返回 "local_model_import_missing: <name>"，不可读返回 "local_model_import_unreadable: <detail>"。
+ * progress 可为空，在调用线程收到 (context, phase "download"|"import"|"verify"|"done", done, total)，阶段字符串仅在回调期间有效。
+ * 首次进度在任务登记后、任何文件或网络 I/O 前发送（done=0，total=资源包大小），回调可重入 resource_pack_cancel；取消后返回 "local_model_cancelled"。
+ * resource_pack_cancel: pack 是原始 UTF-8 id（不是 JSON）；NULL/0 取消本进程全部资源包安装。可在任何线程调用，立即返回，不触发进度回调。
+ * resource_pack_adopt: {state_root, pack, source: absolute dir} -> {path}。在同一文件系统内把包文件从 source 重命名移入（不复制），按编译锁校验后发布；失败则全部移回，不发布任何内容。已有相同字节的安装时直接返回，不改动 source。 */
 typedef void (*msime_client_resource_pack_progress_callback)(void *context, const char *phase,
                                                              uint64_t done, uint64_t total);
 char *msime_client_resource_packs(const uint8_t *request, size_t length);
