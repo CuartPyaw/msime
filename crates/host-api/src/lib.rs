@@ -694,8 +694,10 @@ impl HostSession {
             engine_chinese_punctuation(preferences.chinese_punctuation, options.punctuation_lock);
         // 繁体输出开关一变，`corner_when_traditional` 解析出的样式也跟着变；两者都是偏好，都会在空闲时走到这里重建。
         apply_punctuation_marks(&mut options, &preferences);
-        // Build and validate first; errors leave the original session usable.
+        // 先构建并校验，失败时原会话仍然可用。
         let mut engine = Session::new(&options).map_err(|e| e.to_string())?;
+        // 云候选席位不是 EngineOptions；新引擎默认关闭，每次重建都要恢复当前偏好。
+        engine.set_cloud_candidates_enabled(preferences.cloud_candidates);
         if self.punctuation_override.is_some() || self.punctuation_lock_override.is_some() {
             engine
                 .set_chinese_punctuation_enabled(engine_chinese_punctuation(
