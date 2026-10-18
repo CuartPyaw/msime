@@ -3562,6 +3562,10 @@ mod dominated_projection_tests;
 mod filter_projection_tests;
 #[cfg(test)]
 mod isolated_test;
+#[cfg(test)]
+mod leading_entry_refresh_tests;
+#[cfg(test)]
+mod leading_entry_tests;
 
 #[cfg(test)]
 mod cached_rank_tests;
