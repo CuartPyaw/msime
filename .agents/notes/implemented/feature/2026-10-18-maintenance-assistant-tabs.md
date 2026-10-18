@@ -2,6 +2,8 @@
 
 Status: implemented
 
+后续的 [MCP 独立设置页](../architecture/2026-10-18-mcp-independent-settings-page.md) 已取代本篇关于 MCP 当前承载位置的决定；本篇保留顶部标签实现的历史记录。
+
 ## Problem
 
 共享桌面设置的「连接 AI 助手」藏在维护页的一行二级入口里，查看连接命令和返回维护操作需要反复进入、退出页面。用户要求将它独立成页顶标签。
