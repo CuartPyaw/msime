@@ -1191,9 +1191,9 @@ impl NineKeySession {
 
     fn refresh(&mut self) {
         self.candidates.clear();
-        self.spellings.clear();
         self.reading.clear();
         if !self.active() {
+            self.spellings.clear();
             // 筛选和撤销记录只属于这一次组字。
             self.sentence_seeds.clear();
             self.lock_undo.clear();
@@ -1203,6 +1203,7 @@ impl NineKeySession {
             return;
         }
         if self.english_only || !self.pinyin {
+            self.spellings.clear();
             // No syllables to offer and no pinyin to look up: the digits stand for letters only.
             self.candidates = self.english_candidates(false);
             return;
@@ -1224,6 +1225,7 @@ impl NineKeySession {
             |piece: &str| initial.is_none_or(|letter| piece.as_bytes().first() == Some(&letter));
         let dictionary_options = self.dictionary_options();
         let alternatives = if remaining.is_empty() {
+            self.spellings.clear();
             vec![Vec::new()]
         } else {
             let dictionary = self
@@ -3118,9 +3120,9 @@ impl SpellingTable {
         destination: &mut Vec<String>,
         matches: &mut Vec<usize>,
     ) {
-        destination.clear();
         matches.clear();
         if remaining.is_empty() {
+            destination.clear();
             return;
         }
         matches.extend(
@@ -3155,7 +3157,15 @@ impl SpellingTable {
                 .then_with(|| prior.syllable_score(b).total_cmp(&prior.syllable_score(a)))
                 .then_with(|| a.cmp(b))
         });
-        destination.extend(matches.iter().map(|&index| self.syllables[index].0.clone()));
+        destination.truncate(matches.len());
+        for (position, &index) in matches.iter().enumerate() {
+            if let Some(spelling) = destination.get_mut(position) {
+                spelling.clear();
+                spelling.push_str(&self.syllables[index].0);
+            } else {
+                destination.push(self.syllables[index].0.clone());
+            }
+        }
     }
 
     /// Syllable paths spelling `digits`, built from the end. A piece may end a path early only if it is a complete syllable; each offset keeps the 48 best by fewer syllables, complete last syllable, then lexicographic (NK:122-156). 不带频度，测试用。
@@ -3339,6 +3349,9 @@ mod seed_tail_tests;
 
 #[cfg(test)]
 mod code_prefix_tests;
+
+#[cfg(test)]
+mod spelling_buffer_tests;
 
 #[cfg(test)]
 mod tests {
@@ -4468,6 +4481,65 @@ mod tests {
         session.refresh();
         assert_eq!(session.spellings.as_ptr(), pointer);
         assert_eq!(session.spellings.capacity(), capacity);
+    }
+
+    #[test]
+    fn refresh_keeps_spelling_string_buffers() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, EnglishInputOptions::default());
+        session.digits = "64".into();
+        session.refresh();
+        let expected = session.snapshot();
+        // 排名会移动行，给每个音节留下足够容量后，按指针集合检查复用。
+        let syllables = session.spellings.len() - session.key_choices("64").len();
+        assert!(syllables > 0);
+        for value in &mut session.spellings[..syllables] {
+            value.reserve(64);
+        }
+        let mut before: Vec<_> = session.spellings[..syllables]
+            .iter()
+            .map(|value| value.as_ptr())
+            .collect();
+        before.sort_unstable();
+        session.refresh();
+        assert_eq!(session.snapshot(), expected);
+        let mut after: Vec<_> = session.spellings[..syllables]
+            .iter()
+            .map(|value| value.as_ptr())
+            .collect();
+        after.sort_unstable();
+        assert_eq!(after, before, "刷新不应清空已有音节字符串");
+        assert!(session.spellings[..syllables]
+            .iter()
+            .all(|value| value.capacity() >= 64));
+    }
+
+    #[test]
+    fn refresh_discards_spellings_when_there_is_no_pinyin_target() {
+        let fixture = fixture();
+        let mut session = open(&fixture.paths, false, EnglishInputOptions::default());
+        session.digits = "64".into();
+        session.refresh();
+        assert!(!session.spellings.is_empty());
+        session.set_english_only(true);
+        assert!(session.spellings.is_empty());
+        session.set_english_only(false);
+        assert!(!session.spellings.is_empty());
+        session.pinyin = false;
+        session.refresh();
+        assert!(session.spellings.is_empty());
+        session.pinyin = true;
+        session.refresh();
+        assert!(!session.spellings.is_empty());
+        // 没有撤销选项的全锁定状态也不能带出上一次的读音。
+        session.locked = vec!["ni".to_owned()];
+        session.refresh();
+        assert!(session.spellings.is_empty());
+        session.locked.clear();
+        session.refresh();
+        assert!(!session.spellings.is_empty());
+        session.command(Command::Cancel);
+        assert!(session.spellings.is_empty());
     }
 
     #[test]
