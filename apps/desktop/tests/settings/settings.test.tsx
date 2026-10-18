@@ -3165,7 +3165,7 @@ test("dictionary manager queries, edits and removes Engine entries", async () =>
   );
 });
 
-test("dictionary lookup submits an ASCII or Chinese query with Enter", async () => {
+test("dictionary lookup waits for the current debounced query", async () => {
   const entry = { kind: "pinyin" as const, key: "ni'hao", value: "你好", weight: 100 };
   const list = vi.fn().mockResolvedValue({ entries: [entry], has_more: false });
   const client: SettingsClient = {
@@ -3181,8 +3181,8 @@ test("dictionary lookup submits an ASCII or Chinese query with Enter", async () 
   });
   const query = await screen.findByRole("searchbox", { name: "词条或编码" });
   fireEvent.change(query, { target: { value: "你好" } });
+  await waitFor(() => expect(list).toHaveBeenLastCalledWith(0, 100, "pinyin", "你好"));
   expect(await screen.findByText("你好")).toBeDefined();
-  expect(list).toHaveBeenLastCalledWith(0, 100, "pinyin", "你好");
 });
 
 test("a pinyin prefix typed without separators keeps the rows the host matched", async () => {
@@ -3437,9 +3437,9 @@ test("a host without saveExport keeps the download link", async () => {
   click.mockRestore();
 });
 
-// 「管理词库」直接提供个人词库选择，与「查词库」共用当前个人类型；导出应使用这里选中的类型。
-test("desktop dictionary transfer shows the current personal kind and exports the chosen kind", async () => {
-  const client = exportingDictionaryClient(vi.fn().mockResolvedValue(null));
+// 查询与管理标签共用个人词库类型，实际导出也必须使用管理标签中的当前选择。
+test("the desktop transfer kind stays synchronized with lookup and export", async () => {
+  const client = exportingDictionaryClient(vi.fn().mockResolvedValue("synthetic-export.tsv"));
   render(<SettingsPage client={client} />);
   await settingsReady();
   fireEvent.click(screen.getByRole("button", { name: "词库" }));
@@ -3449,15 +3449,21 @@ test("desktop dictionary transfer shows the current personal kind and exports th
   await waitFor(() => expect(kind.disabled).toBe(false));
   selectDictionaryTab("管理词库");
   const transfer = screen.getByRole("region", { name: "导入与导出" });
-  const personalKind = within(transfer).getByRole<HTMLSelectElement>("combobox", {
+  const managedKind = within(transfer).getByRole<HTMLSelectElement>("combobox", {
     name: "管理词库类型",
   });
-  expect(personalKind.value).toBe("pinyin");
+  expect(managedKind.value).toBe("pinyin");
   expect(transfer.textContent).toContain("导入和导出个人新增词条");
-  fireEvent.change(personalKind, { target: { value: "english" } });
+  await waitFor(() => expect(managedKind.disabled).toBe(false));
+  fireEvent.change(managedKind, { target: { value: "wubi" } });
+  await waitFor(() => expect(managedKind.disabled).toBe(false));
   fireEvent.click(within(transfer).getByRole("button", { name: "导出当前类型" }));
   await waitFor(() =>
-    expect(client.dictionary?.export).toHaveBeenCalledWith("english", "standard", 0, 1000),
+    expect(client.dictionary!.export).toHaveBeenCalledWith("wubi", "standard", 0, 1000),
+  );
+  selectDictionaryTab("查词库");
+  expect(screen.getByRole<HTMLSelectElement>("combobox", { name: "本地词库类型" }).value).toBe(
+    "wubi",
   );
 });
 
