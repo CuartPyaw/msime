@@ -18,7 +18,7 @@ Status: rejected — 完整矩阵未达预算且存在构建干扰
 
 - 所有页先选择前48条再排序：能减少被丢弃路径的排序和暂存，延续现有根页选择的做法；但原地分区会打散数据原有的顺序，额外选择未得到耗时预算支持，拒绝接入。
 - 完整页改用 `sort_unstable_by`：标准库保证原地且无堆暂存，改动很小；但排序算法的比较和搬移路径也改变，完整配对仍有明显回退，拒绝接入。[标准库接口](https://doc.rust-lang.org/std/primitive.slice.html#method.sort_unstable_by)的空间保证不能替代本项目的耗时测量。
-- 保留算法并复用搜索页容器：不改变排序、评分和剪枝规则，可以针对相邻按键的重复申请；作为独立的[页工作区复用](../../proposed/testing/2026-10-18-nine-key-path-scratch.md)继续验证，不把本轮失败格删掉后视为成功。
+- 保留算法并复用搜索页容器：不改变排序、评分和剪枝规则，可以针对相邻按键的重复申请；由独立的[页工作区复用](../../implemented/testing/2026-10-18-nine-key-path-scratch.md)验证并采用，不把本轮失败格删掉后视为成功。
 
 ## Verification
 
@@ -26,7 +26,7 @@ Status: rejected — 完整矩阵未达预算且存在构建干扰
 
 普通System分配器配对统一使用7形状、3网格、2频度、3/48根页限额和冷热输出，共168格；每格40对交替先后，旧臂校准至少5 ms，密集目标要求新/旧中位比小于0.98，其余控制小于1.05。完整收集后统一判定：先选择版32格失败，完整原地排序版31格失败。第二版比值范围0.922804–2.420805；有118次构建监测，其中30次观察到构建进程，首版起跑也观察到编译，因此都不作为正式性能成绩或算法独占基准。没有删除失败格、放宽预算或挑选通过结果接入；全部1791前缀的后续配对未运行，也没有端到端延迟结论。
 
-原始记录在本机 `nine-key-path-sort-paired.log`、`nine-key-path-sort-paired-v2.log` 和后者的 `.monitor.json`；实验测试源码保存为 `nine-key-path-sort-experiment.rs`，基线固定 `9878ab5a12`，两个改法分别是把 `keep < PATH_LIMIT && result.len() > keep` 扩展为 `result.len() > keep`，以及保留原选择分支只把 `sort_by(compare)` 替换为 `sort_unstable_by(compare)`。主实现已恢复原排序。
+原始记录在本机 `nine-key-path-sort-paired.log`、`nine-key-path-sort-paired-v2.log` 和后者的 `.monitor.json`；临时实验源码和程序在交付后删除。重现时基线固定 `9878ab5a12`，两个改法分别是把 `keep < PATH_LIMIT && result.len() > keep` 扩展为 `result.len() > keep`，以及保留原选择分支只把 `sort_by(compare)` 替换为 `sort_unstable_by(compare)`。主实现已恢复原排序。
 
 ## Consequences
 
