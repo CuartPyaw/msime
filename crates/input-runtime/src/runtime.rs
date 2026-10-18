@@ -236,6 +236,11 @@ fn order_rows(snapshot: &EngineSnapshot) -> ParallelOrderRows<'_> {
 impl Runtime<Session> {
     /// 打开或关闭云候选固定席位；宿主偏好变化时立即刷新当前组字。
     pub fn set_cloud_candidates_enabled(&mut self, enabled: bool) -> Result<(), RuntimeError> {
+        if self.engine.cloud_candidates_enabled() == enabled {
+            return Ok(());
+        }
+        // 开关会插入或移除云占位行，必须在修改引擎前使旧候选身份失效。
+        self.advance()?;
         self.engine.set_cloud_candidates_enabled(enabled);
         self.refresh()
     }

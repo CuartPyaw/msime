@@ -427,6 +427,11 @@ impl Session {
         self.nine_key.set_personal_context_enabled(enabled);
     }
 
+    /// 当前组字是否预留云候选席位；运行时在修改前据此判断候选身份是否会变化。
+    pub fn cloud_candidates_enabled(&self) -> bool {
+        self.input.cloud_candidates_enabled
+    }
+
     /// 让宿主把云候选的固定席位交给当前会话；关闭时立即去掉尚未回答的占位行。
     pub fn set_cloud_candidates_enabled(&mut self, enabled: bool) {
         self.input.set_cloud_candidates_enabled(enabled);
