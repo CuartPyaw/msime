@@ -44,7 +44,7 @@ test("keeps navigation groups and nested route ownership aligned", () => {
     { title: "打字", ids: ["input", "dictionary", "shortcuts", "expression"] },
     { title: "更多输入方式", ids: ["voice", "screen-keyboard", "handwriting"] },
     { title: "外观", ids: ["skin", "appearance", "floating-toolbar"] },
-    { title: "工具", ids: ["tools", "ai", "plugins", "typing-statistics"] },
+    { title: "工具", ids: ["tools", "ai", "mcp", "plugins", "typing-statistics"] },
     { title: "账号", ids: ["account"] },
     { title: "支持", ids: ["developer", "feedback", "about"] },
   ]);
@@ -55,12 +55,11 @@ test("keeps navigation groups and nested route ownership aligned", () => {
     "usage-reporting": "about",
     privacy: "account",
     "try-keyboard": "home",
-    mcp: "developer",
   });
   // 桌面上并进别的页、只留作路由别名的页面。
-  expect(desktopMergedPages).toEqual({ feedback: "about", mcp: "developer" });
+  expect(desktopMergedPages).toEqual({ feedback: "about" });
   expect(desktopPage("feedback")).toBe("about");
-  expect(desktopPage("mcp")).toBe("developer");
+  expect(desktopPage("mcp")).toBe("mcp");
   expect(desktopPage("help")).toBe("help");
 });
 

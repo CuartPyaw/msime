@@ -960,7 +960,7 @@ struct PageLabel {
 };
 
 // 「手写输入」并进了「屏幕键盘」页（见 `SettingsNavigation.h`），提供手写的版本里那一页叫「键盘手写」，与共享设置 UI 的 `screenKeyboardAndHandwritingTitle` 相同。
-constexpr std::array<PageLabel, 16> page_labels{{
+constexpr std::array<PageLabel, 17> page_labels{{
     {"typing", L"输入设置", 0xE765, L"选择输入方式；专属选项随当前方案变化。"},
     {"expression", L"标点翻译", 0xE8C1, L"调整标点、混输、输出和选词习惯。"},
     {"shortcuts", L"按键设置", 0xEDA7, L"设置中英文切换、选词和翻页使用的按键。"},
@@ -976,6 +976,7 @@ constexpr std::array<PageLabel, 16> page_labels{{
     {"stats", L"打字统计", 0xE9D2, L"查看输入量、速度和使用趋势。"},
     {"plugins", L"扩展插件", 0xEA86, L"管理输入扩展，浏览和安装社区插件。"},
     {"ai", L"智能辅助", 0xE99A, L"配置候选补全、文本整理和服务连接。"},
+    {"mcp", L"AI助手", 0xE99A, L"连接 AI 助手，管理设置、皮肤、词库和诊断。"},
     {"account", L"账号管理", 0xE77B, L"登录并管理跨设备同步与云端内容。"},
     {"dev", L"维护诊断", 0xE90F, L"导入导出设置，检查本机状态和诊断信息。"},
     {"about", L"关于水杉", 0xE946, L"查看版本和更新，查阅使用帮助、反馈问题，以及许可信息。"},
@@ -4739,6 +4740,8 @@ private:
       build_plugins_page(page);
     else if (id == "ai")
       build_ai_page(page);
+    else if (id == "mcp")
+      build_mcp_page(page);
     else if (id == "account")
       build_account_page(page);
     else if (id == "dev")
@@ -19582,10 +19585,15 @@ private:
             L"用导出的设置文件替换当前设置，立即生效。本机的服务配置与密钥、诊断日志、使用统计和剪贴板历史开关保持不变。",
             button_control(L"导入…", [this] { import_settings(); }, loaded_));
 
+  }
+
+  // ---- AI 助手 ----
+
+  void build_mcp_page(StackPanel const &page) {
     auto mcp = add_group(page, L"连接 AI 助手");
     record(L"连接 AI 助手", L"MCP msime-mcp Claude Desktop Cursor");
     if (!indexing_) {
-      // `add_group` 返回的就是卡片里的行面板，它已经带了卡片和 12 DIP 内边距：这里再套一张 `make_card` 和一份内边距，内容会比同页其他组的标签向右错开一整个缩进。直接放进行面板，和上面几组对齐。
+      // `add_group` 返回的就是卡片里的行面板，直接放进行面板与其他工具页对齐。
       StackPanel content;
       content.Spacing(10);
       content.Padding(Thickness{0, 4, 0, 4});
@@ -19919,9 +19927,9 @@ private:
     panel.Children().Append(block);
   }
 
-  // 「连接 AI 助手」: the msime-mcp entry an assistant runs, to copy or to write into Claude Desktop's or Cursor's configuration. The same section as the shared settings page, through msime_client_mcp_status and msime_client_mcp_install.
+  // 「连接 AI 助手」：展示助手运行的 `msime-mcp` 条目，可复制或写入 Claude Desktop、Cursor 的配置；通过 `msime_client_mcp_status` 和 `msime_client_mcp_install` 与共享设置页保持一致。
   void append_mcp_section(StackPanel const &panel) {
-    append_text(panel, L"连接后，直接告诉 AI 助手输入法哪里不对劲（比如卡顿、候选窗口不见了），它会打开诊断日志、请你把出问题的操作再做一遍，然后读日志帮你找原因。它也能读取快捷短语、设置、打字统计和已安装的候选窗口皮肤。通过 MCP（Model Context Protocol）在本机运行，不联网；除了开关诊断日志，默认不改动任何设置。");
+    append_text(panel, L"MCP（Model Context Protocol）让 AI 助手通过本机服务调用水杉输入法的功能，不联网。连接后，助手可以管理快捷短语和设置、制作候选窗口皮肤、读取打字统计和已安装皮肤；遇到卡顿或候选窗口问题时，也能读取诊断日志帮助排查。除开关诊断日志外，修改功能需要在下方明确开启对应权限。");
     const auto response =
         call_mcp(msime_client_mcp_status, mcp_request(runtime_options_path()));
     JsonObject status{nullptr};
@@ -20053,7 +20061,7 @@ private:
       mcp_result_ = mcp_failure(response_error(response), name);
     }
     mcp_busy_ = false;
-    if (!closed_ && current_page_ == "dev")
+    if (!closed_ && current_page_ == "mcp")
       render_page(true);
   }
 

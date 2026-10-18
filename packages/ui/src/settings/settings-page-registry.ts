@@ -97,10 +97,10 @@ export const pages = [
     title: "发送哪些内容",
     icon: settingsIcons.about,
   },
-  // 桌面打开「维护诊断」的「AI助手」标签；手机保留「连接 AI 助手」二级页面。只在宿主提供 MCP 状态时可用。
+  // 只在宿主提供 MCP 状态时显示；桌面和触屏宿主都作为独立设置页。
   {
     id: "mcp",
-    title: "连接 AI 助手",
+    title: "AI 助手",
     icon: settingsIcons.developer,
   },
   // 触屏宿主「我的 › 隐私」打开：数据怎么处理的几句话、匿名使用统计开关和完整隐私政策的链接。桌面的这些在「关于」里。
@@ -128,7 +128,7 @@ export const settingsNavGroups = [
   { title: "打字", ids: ["input", "dictionary", "shortcuts", "expression"] },
   { title: "更多输入方式", ids: ["voice", "screen-keyboard", "handwriting"] },
   { title: "外观", ids: ["skin", "appearance", "floating-toolbar"] },
-  { title: "工具", ids: ["tools", "ai", "plugins", "typing-statistics"] },
+  { title: "工具", ids: ["tools", "ai", "mcp", "plugins", "typing-statistics"] },
   { title: "账号", ids: ["account"] },
   { title: "支持", ids: ["developer", "feedback", "about"] },
 ] as const satisfies readonly { title: string; ids: readonly SettingsPageId[] }[];
@@ -141,7 +141,6 @@ export const subPageParents: Partial<Record<SettingsPageId, SettingsPageId>> = {
   "usage-reporting": "about",
   privacy: "account",
   "try-keyboard": "home",
-  mcp: "developer",
 };
 
 /**
@@ -151,7 +150,6 @@ export const subPageParents: Partial<Record<SettingsPageId, SettingsPageId>> = {
  */
 export const desktopMergedPages: Partial<Record<SettingsPageId, SettingsPageId>> = {
   feedback: "about",
-  mcp: "developer",
 };
 
 /** 桌面上真正显示的页面：并进别的页的 id 换成承载它的页，其他原样返回。 */
@@ -169,6 +167,7 @@ const desktopPageTitles: Partial<Record<SettingsPageId, string>> = {
   "floating-toolbar": "快捷工具",
   tools: "剪贴管理",
   ai: "智能辅助",
+  mcp: "AI助手",
   plugins: "扩展插件",
   account: "账号管理",
   developer: "维护诊断",

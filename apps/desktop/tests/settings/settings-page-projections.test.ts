@@ -52,7 +52,7 @@ test("projects the desktop sidebar into the titled navigation groups", () => {
     { title: "打字", ids: ["input", "dictionary", "shortcuts", "expression"] },
     { title: "更多输入方式", ids: ["voice", "screen-keyboard", "handwriting"] },
     { title: "外观", ids: ["skin", "appearance", "floating-toolbar"] },
-    { title: "工具", ids: ["tools", "ai", "plugins", "typing-statistics"] },
+    { title: "工具", ids: ["tools", "ai", "mcp", "plugins", "typing-statistics"] },
     { title: "账号", ids: ["account"] },
     // 桌面上「帮助与反馈」并进「关于」，侧栏不再列出它；它仍是可路由的页面。
     { title: "支持", ids: ["developer", "about"] },
@@ -75,6 +75,7 @@ test("projects the desktop sidebar into the titled navigation groups", () => {
     "快捷工具",
     "剪贴管理",
     "智能辅助",
+    "AI助手",
     "扩展插件",
     "打字统计",
     "账号管理",
@@ -97,17 +98,18 @@ test("projects the desktop sidebar into the titled navigation groups", () => {
     { title: "打字", ids: ["input", "dictionary", "shortcuts", "expression"] },
     { title: "更多输入方式", ids: ["voice", "screen-keyboard", "handwriting"] },
     { title: "外观", ids: ["skin", "appearance", "floating-toolbar"] },
-    { title: "工具", ids: ["tools", "ai"] },
+    { title: "工具", ids: ["tools", "ai", "mcp"] },
     { title: "支持", ids: ["developer", "about"] },
   ]);
 });
 
-test("the 连接 AI 助手 page exists only where the host reports the MCP server, and is never in the sidebar", () => {
+test("MCP is an independent 工具 page only where the host reports the server", () => {
   const desktop = project();
   expect(desktop.availablePages.map((page) => page.id)).toContain("mcp");
-  expect(
-    desktop.sidebarGroups.flatMap((group) => group.pages.map((page) => page.id)),
-  ).not.toContain("mcp");
+  expect(desktop.sidebarGroups.flatMap((group) => group.pages.map((page) => page.id))).toContain(
+    "mcp",
+  );
+  expect(desktop.availablePages.find((page) => page.id === "mcp")?.title).toBe("AI 助手");
   expect(project({ hasMcp: false }).availablePages.map((page) => page.id)).not.toContain("mcp");
 });
 
@@ -159,7 +161,7 @@ test("projects mobile pages into tabs, grouped settings, and sidebar sections", 
     { title: "打字", ids: ["input", "dictionary", "expression"] },
     { title: "键盘、语音与手写", ids: ["voice", "screen-keyboard", "handwriting"] },
     { title: "外观", ids: ["skin", "appearance"] },
-    { title: "工具", ids: ["tools", "ai", "plugins"] },
+    { title: "工具", ids: ["tools", "ai", "mcp", "plugins"] },
     { title: "支持", ids: ["developer"] },
   ]);
   expect(mobile.sidebarGroups[0].pages.map((page) => page.id)).toEqual(["home"]);
@@ -223,6 +225,7 @@ test("places the 插件 page in 工具 and drops it where the host does not back
   expect(group?.pages.map((page) => page.id)).toEqual([
     "tools",
     "ai",
+    "mcp",
     "plugins",
     "typing-statistics",
   ]);
