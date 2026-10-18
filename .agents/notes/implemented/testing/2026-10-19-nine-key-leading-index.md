@@ -12,6 +12,14 @@ Status: implemented
 
 生产路径、冻结参考路径和投影测试都使用相同的过滤边界。候选排序、覆盖长度、简拼交错、同词最终稳定去重以及公开结果字段保持不变。
 
+## Historical audit
+
+已检索 `proposed`、`implemented`、`rejected` 的 `leading`、`前页` 和 `push_ranked`。以下为部分重叠，其余命中属于路径链或最终排名：
+
+- [排序表延迟预留](2026-10-10-nine-key-leading-map-storage.md)继续持有空表零申请和首次 `reserve(CANDIDATE_LIMIT)` 的决定，本片只改变表内键和值。
+- [复制前支配过滤](2026-10-16-nine-key-dominated-row-projection.md)继续持有仅热页提前拒绝及同页不更新表的边界，本片从候选索引恢复同词查询。
+- [领先表复用排名键与获胜行的否决](../../rejected/testing/2026-10-17-nine-key-ranked-leaders.md)尝试用领先表替换最终排名，126 形状中 10 个目标失败。本片保持原最终排名，仅减少表内词面所有权，不翻转该否决。
+
 ## Alternatives considered
 
 - **继续使用 `HashMap<String, RankKey>`**：实现最简单，但每个唯一词都要拥有一份重复词面，且热路径申请数随词数增长。
@@ -23,9 +31,9 @@ Status: implemented
 
 合成 256 个唯一词的 `push_ranked` 申请次数从旧实现的 777 次降到 521 次。碰撞槽测试确认不同词和未命中词都能正确区分；随机排序对照、空结果、过滤投影和音节数量测试通过。
 
-普通分配器下对 126 种形状做完整旧/新配对预算，所有形状通过：长度至少 64 的长输入比值低于 0.98，其余形状低于 1.05。九键 81 例、两臂各 1791 键的串行 ABBA 延迟测量中，修改版引擎端均值 6.75ms、p95 22.24ms，带模型均值 12.18ms、p95 46.58ms；对照版带模型 p95 为 55.58ms。该端到端样本受系统调度和模型工作负载影响，只证明没有超过 1000ms 预算，不把单次差值作为稳定收益承诺。
+普通分配器下对 126 种形状做完整旧/新配对预算，所有形状通过：无最终过滤且长度至少 64 的形状比值低于 0.98，其余形状低于 1.05；36 个目标形状中位比为 0.761644–0.964269，90 个控制形状为 0.356303–0.994146；原始 [2646 对计时](../../../../docs/measurements/2026-10-19-nine-key-leading-index.csv)随代码保存（每形状 21 对，交替先后；三网格与两种最终过滤状态）。九键 81 例、两臂各 1791 键的旧/新各一次的延迟观察（并非完整 ABBA，未记录完整并发监测）中，修改版引擎端均值 6.75ms、p95 22.24ms，带模型均值 12.18ms、p95 46.58ms；对照版带模型 p95 为 55.58ms。该次命令将退出预算设为 1000ms，不能用它替代原 16ms 验收；两臂均未达到 16ms 目标。缺少完整 ABBA 与并发监测，不据此宣称整体无回退或稳定提速。
 
-已运行：九键相关测试 241 passed、11 ignored；`cargo test --locked -p msime-engine -p msime-input-runtime --no-fail-fast --quiet`（引擎 2332 passed、45 ignored；运行时 31 与 320 项测试均通过）；两 crate 全 targets Clippy、Rustfmt 和差异检查通过。改动不涉及文件读写、目录遍历、权限或 Android 资源，因此不需要设备验收。
+已运行：九键相关测试 241 passed、11 ignored；`cargo test --locked -p msime-engine -p msime-input-runtime --no-fail-fast --quiet`（引擎 2332 passed、45 ignored；golden 31 项、运行时 320 项均通过）；两 crate 全 targets Clippy、Rustfmt、笔记与差异检查、`bash scripts/verify-local.sh --quick` 通过；Linux 原生宿主 90 项 ctest、Android target/JNI/Java、WASM、macOS 与共享 Apple bridge 编译通过。Windows MinGW、HarmonyOS 真工程和 pipe-only 按环境跳过。改动不涉及文件读写、目录遍历、权限或 Android 资源，因此不需要设备验收。
 
 ## Consequences
 
