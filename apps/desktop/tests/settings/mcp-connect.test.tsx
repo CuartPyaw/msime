@@ -99,9 +99,11 @@ async function openMcp(extra: Partial<SettingsClient>) {
   await settingsFormReady();
 }
 
-/** 连接内容的分组；手机的外层 fieldset 同名，因此取最里面的一组。 */
+/** 等待宿主状态填入连接分组；手机的外层 fieldset 同名，因此取最里面的一组。 */
 async function mcpGroup() {
-  return (await screen.findAllByRole("group", { name: "连接 AI 助手" })).at(-1)!;
+  const group = (await screen.findAllByRole("group", { name: "连接 AI 助手" })).at(-1)!;
+  await within(group).findByRole("radio", { name: "Claude Code" });
+  return group;
 }
 
 test("a host without the server shows no section", async () => {

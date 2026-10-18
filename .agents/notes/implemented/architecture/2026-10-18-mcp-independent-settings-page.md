@@ -30,4 +30,6 @@ MCP 使用独立的 `mcp` 设置路由，在桌面和触屏宿主都显示为「
 
 ## Verification
 
+页面的连接分组在宿主状态加载前就存在，`settingsFormReady` 也只代表设置表单可用。命令测试共用的 `mcpGroup` 因此等待分组内的「Claude Code」标签出现后才返回，避免把空分组当成连接内容已就绪。CI 曾在移除命令测试中读到只有说明的分组；既有命令与交互断言保持不变。不使用固定延时或扩大超时，它们不能证明状态已经填入。[MCP 宿主状态刷新](../bug-fix/2026-10-14-mcp-load-owner-refresh.md)仍持有生产组件的请求所有者与代次规则，本项只修正测试等待条件。
+
 `cargo test -p msime-client-core host_surface` 覆盖 `settings:mcp` 的解析和全部路由往返；共享设置的 MCP 连接、页面投影和社区皮肤测试通过，TypeScript 类型检查、格式检查和 `git diff --check` 通过。Windows `settings_navigation` 独立编译运行通过；macOS 设置路由覆盖脚本确认 `mcp` 已由共享路由类别覆盖，不再列为未路由页面。笔记门禁使用 `pnpm run verify-notes`。
