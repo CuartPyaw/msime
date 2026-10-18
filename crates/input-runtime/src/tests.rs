@@ -8940,3 +8940,63 @@ mod rerank_declined;
 mod online_slot_order_equivalence;
 
 mod translation_reply_allocations;
+
+#[test]
+fn cloud_switch_invalidates_candidate_ids_in_both_directions() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = ai_answer_runtime(directory.path(), 5);
+    type_characters(&mut runtime, "ni");
+    for enabled in [true, false] {
+        let before = runtime.view();
+        let old = before.candidates[2].id;
+        runtime.set_cloud_candidates_enabled(enabled).unwrap();
+        let after = runtime.view();
+        assert_eq!(after.candidates.iter().any(|row| row.text == "☁"), enabled);
+        assert!(after.generation > before.generation);
+        assert!(matches!(
+            runtime.dispatch(Action::Select(old)),
+            Err(RuntimeError::StaleCandidate)
+        ));
+        assert_eq!(runtime.view().editing_text, "ni");
+    }
+    let after = runtime.view();
+    let selected = runtime
+        .dispatch(Action::Select(after.candidates[0].id))
+        .unwrap();
+    assert_eq!(
+        selected.commit.as_deref(),
+        Some(after.candidates[0].text.as_str())
+    );
+}
+
+#[test]
+fn cloud_switch_repeated_value_preserves_candidate_ids() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = ai_answer_runtime(directory.path(), 5);
+    type_characters(&mut runtime, "ni");
+    for enabled in [true, false] {
+        runtime.set_cloud_candidates_enabled(enabled).unwrap();
+        let before = runtime.view();
+        runtime.set_cloud_candidates_enabled(enabled).unwrap();
+        assert_eq!(
+            serde_json::to_value(runtime.view()).unwrap(),
+            serde_json::to_value(before).unwrap()
+        );
+    }
+}
+
+#[test]
+fn cloud_switch_does_not_change_engine_after_generation_exhaustion() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut runtime = ai_answer_runtime(directory.path(), 5);
+    type_characters(&mut runtime, "ni");
+    runtime.generation = u64::MAX;
+    let before = runtime.engine.snapshot().unwrap();
+    assert!(matches!(
+        runtime.set_cloud_candidates_enabled(true),
+        Err(RuntimeError::IdentityExhausted)
+    ));
+    assert_eq!(runtime.engine.snapshot().unwrap(), before);
+    runtime.set_cloud_candidates_enabled(false).unwrap();
+    assert_eq!(runtime.engine.snapshot().unwrap(), before);
+}

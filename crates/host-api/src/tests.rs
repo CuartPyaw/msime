@@ -14324,7 +14324,10 @@ fn plugins_boundary_lists_imports_removes_and_keeps_the_name_list() {
     assert_eq!(saved, json!({"ok": true, "value": null}));
     assert_eq!(
         call(json!({"operation": "load_mentions"}))["value"],
-        entries
+        json!([
+            {"text": "张三", "key": "zhang'san", "phone": ""},
+            {"text": "Alice", "key": "", "phone": ""}
+        ])
     );
     assert!(state.path().join("plugins/mentions.json").is_file());
     let invalid =
@@ -14335,7 +14338,10 @@ fn plugins_boundary_lists_imports_removes_and_keeps_the_name_list() {
         .is_some_and(|detail| detail.contains("张三")));
     assert_eq!(
         call(json!({"operation": "load_mentions"}))["value"],
-        entries
+        json!([
+            {"text": "张三", "key": "zhang'san", "phone": ""},
+            {"text": "Alice", "key": "", "phone": ""}
+        ])
     );
 
     // Requests the page could not have meant.
@@ -16955,3 +16961,34 @@ fn touch_quick_symbols_use_the_shared_rules_across_the_abi() {
 
 #[path = "dictionary/batch_tests.rs"]
 mod dictionary_batch_tests;
+
+#[test]
+fn enabling_cloud_candidates_invalidates_the_preference_update_previous_ids() {
+    let dir = tempfile::tempdir().unwrap();
+    let preferences = Preferences {
+        scheme: InputScheme::Quanpin,
+        cloud_candidates: false,
+        ..chinese_preferences()
+    };
+    let handle = test_host_with_pinyin_fixture(dir.path(), preferences.clone());
+    read(msime_client_focus(handle, true));
+    let before = type_letters(handle, b"nihao");
+    let generation = before["generation"].as_u64().unwrap();
+    assert_eq!(before["candidates"][1]["text"], "拟好");
+    let enabled = Preferences {
+        cloud_candidates: true,
+        ..preferences
+    };
+    let updated = update(handle, 1, &enabled);
+    assert_eq!(updated["value"]["deferred"], true);
+    assert_eq!(updated["value"]["view"]["candidates"][1]["text"], "☁");
+    let stale = read(msime_client_select(handle, generation, 1));
+    assert_eq!(stale["ok"], false, "旧词条身份不能被解释为新席位：{stale}");
+    let current = updated["value"]["view"]["generation"].as_u64().unwrap();
+    assert!(current > generation);
+    let repeated = update(handle, 2, &enabled);
+    assert_eq!(repeated["value"]["view"]["generation"], current);
+    let selected = read(msime_client_select(handle, current, 2));
+    assert_eq!(selected["value"]["commit"], "拟好");
+    read(msime_client_destroy(handle));
+}
