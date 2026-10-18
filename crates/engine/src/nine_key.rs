@@ -2374,21 +2374,58 @@ fn seeded_paths(
         if kept == 0 {
             continue;
         }
-        let tail = &remaining[covered..];
-        let tails = if tail.is_empty() {
-            vec![Vec::new()]
-        } else {
-            table.split_paths_limited(tail, &[], prior, SEED_TAIL_LIMIT)
+        // 实际会话最多 32 位；常见前缀只切分一次，超长纯函数调用仍走完整迭代。
+        let mut pieces = [""; DIGIT_LIMIT];
+        if kept <= pieces.len() {
+            for (slot, piece) in pieces.iter_mut().zip(seed.split('\'').take(kept)) {
+                *slot = piece;
+            }
+        }
+        let mut append = |tail_path| {
+            if kept <= pieces.len() {
+                append_seeded_path(
+                    alternatives,
+                    pieces[..kept].iter().copied(),
+                    kept,
+                    tail_path,
+                );
+            } else {
+                append_seeded_path(alternatives, seed.split('\'').take(kept), kept, tail_path);
+            }
         };
-        for tail_path in tails.into_iter().take(SEED_TAIL_LIMIT) {
-            let mut path: Path = Vec::with_capacity(kept + tail_path.len());
-            path.extend(seed.split('\'').take(kept).map(str::to_owned));
-            path.extend(tail_path);
-            if !alternatives.contains(&path) {
-                alternatives.push(path);
+        let tail = &remaining[covered..];
+        if tail.is_empty() {
+            append(Vec::new());
+        } else {
+            for tail_path in table
+                .split_paths_limited(tail, &[], prior, SEED_TAIL_LIMIT)
+                .into_iter()
+                .take(SEED_TAIL_LIMIT)
+            {
+                append(tail_path);
             }
         }
     }
+}
+
+/// 先用借用音节检查重复，只为新增组合建立路径和复制种子前缀。
+fn append_seeded_path<'a>(
+    alternatives: &mut Vec<Path>,
+    prefix: impl Iterator<Item = &'a str> + Clone,
+    kept: usize,
+    tail_path: Path,
+) {
+    if alternatives.iter().any(|path| {
+        path.len() == kept + tail_path.len()
+            && path[..kept].iter().map(String::as_str).eq(prefix.clone())
+            && path[kept..] == tail_path
+    }) {
+        return;
+    }
+    let mut path = Vec::with_capacity(kept + tail_path.len());
+    path.extend(prefix.map(str::to_owned));
+    path.extend(tail_path);
+    alternatives.push(path);
 }
 
 fn remaining_digits(digits: &str, locked_length: usize) -> &str {
@@ -3396,6 +3433,9 @@ mod path_buffer_tests;
 
 #[cfg(test)]
 mod seed_tail_tests;
+
+#[cfg(test)]
+mod seed_dedup_tests;
 
 #[cfg(test)]
 mod code_prefix_tests;
