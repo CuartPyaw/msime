@@ -1849,3 +1849,6 @@ mod alternative_row_stream_tests;
 
 #[cfg(test)]
 mod filtered_query_tests;
+
+#[cfg(test)]
+mod empty_projection_tests;
