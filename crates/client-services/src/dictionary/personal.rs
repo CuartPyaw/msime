@@ -113,12 +113,12 @@ impl PersonalWord {
     }
 }
 
-/// What applying one request did, as the keyboard reports it to [`PersonalDictionaryStore::synchronize_reporting_present`].
+/// 键盘通过 [`PersonalDictionaryStore::synchronize_reporting_present`] 报告应用一条请求后的结果。
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PersonalWordApplied {
-    /// The Engine dictionary was changed.
+    /// Engine 词库已改变。
     Written,
-    /// The addition named a word the user's dictionary already held, and it was left as it was. The replacement's identity is kept in [`PersonalDictionaryState::already_present`] until the host acknowledges it.
+    /// 要加入的词已在用户词库中，因此保持原样。替换词的身份会保存在 [`PersonalDictionaryState::already_present`] 中，直到宿主确认。
     AlreadyPresent,
 }
 
@@ -178,7 +178,7 @@ pub struct PersonalDictionaryState {
     pub refresh_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub completed_refresh_id: Option<String>,
-    /// Identities of additions the keyboard found already in the user's dictionary and did not write, oldest first. The dictionary collections store reads them so that turning a collection off never removes a word the user had before the collection added it. Applied requests themselves are pruned to a short history, so the receipt lives here until it is acknowledged.
+    /// 键盘发现已在用户词库中而未写入的加入项身份，按最早在前排列。词库集合存储会读取它们，因此停用集合时不会删除集合加入前用户已有的词。已应用的请求本身只保留短历史，所以回执会留在这里直到确认。
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub already_present: Vec<String>,
 }
