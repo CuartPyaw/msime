@@ -12,6 +12,7 @@ Status: implemented
 - 对上之后用 `LocalFileFetcher`（实现已有的 `Fetcher` trait，把目录里的下载地址映射到本地文件）调用原来的 `install_model`，镜像列表为空。校验、暂存、解压、写 `msime-model.json`、整体改名发布全部复用下载的那一套，文件不对或被改过时什么也不会装上。进度里原来的 `download` 阶段报成 `import`，其余阶段不变。
 - `LocalModelStatus` 新增 `import_files: [{name, url, size}]`，设置页据此列出不联网安装要下载的文件，每个文件直接链到目录里的上游下载地址（`github.com/k2-fsa/sherpa-onnx` 的 release 资产），不另建官网页面。
 - C ABI 不新增函数：`msime_client_voice_local_model_install` 的请求多一个可选的 `files`（至多 16 个绝对路径），带了就走 `import`。这样导入和下载共用同一个按 id 的登记，取消、互斥（`local_model_install_running`）和删除时的拒绝不用另写；iOS 和 HarmonyOS 的绑定也不用加新符号。
+- C ABI 在验证目录 id、登记任务并释放登记锁后，先同步报告一次 `download`（带 `files` 时为 `import`）的零字节进度，`total` 沿用归档字节数，然后检查取消标记。初始回调必须先于 provider 调用，宿主因此能重入取消，且在文件访问、HTTP 客户端构造和网络请求前结束。Android 的 `ResourcePackService.CANCELLING` 已保存登记前的取消意图，首次回调让它及时补发；只在安装开始前检查一次仍有检查与 C ABI 登记之间的窗口。未知 id 不登记、不回调。
 - 只接受内置目录里的 id，不开放自定义或第三方模型：安装器、删除和识别器都只认目录 id 和清单格式，放开要先定清单格式和安全边界。
 - 各宿主：
   - 三个桌面宿主（macOS、Windows、Linux 共用 Tauri 设置页）新增命令 `voice_local_model_import(id)`，在宿主侧用 `tauri_plugin_dialog` 的 `blocking_pick_files` 多选文件，不按扩展名过滤（认文件靠内容），用户关掉对话框时返回 `null`。命令只在三个桌面目标上注册，`main.tsx` 也只在这三个平台给 `localVoiceModels` 加 `import`。
@@ -25,6 +26,7 @@ Status: implemented
 
 - **按文件名对应** — 实现最简单，用户也容易理解「把这几个文件选上」。但下载工具常会改名（加序号、`.download` 后缀、浏览器去掉扩展名），按名字对应会让一个字节完全正确的文件被拒；内容是唯一可靠的身份，长度先筛一遍，大多数情况下不用额外读一遍文件。
 - **新增 `msime_client_voice_local_model_import` C ABI** — 分诊建议的形状，名字更直白。但它要复制一遍 install 的登记、取消、进度回调和删除互斥，iOS 的 `@_silgen_name`、HarmonyOS 的 NAPI async work 也都要再加一套；在 install 请求上加一个可选字段，所有这些都自动成立。
+- **只靠后续进度补发登记前的取消** — 宿主已有补发逻辑，不必改共享接口。但模型下载首次进度在读取数据后才出现，无法在阻塞网络读取前取消；导入也可能在报告进度前以缺文件失败。初始回调复用已有阶段和 JSON 字段，不增加新状态或 ABI 符号。
 - **复用手填目录（`VoiceModelPathSection`）让用户自己解压** — 不需要任何新代码。但用户解压出的目录没有 `msime-model.json`，识别器拒绝它；就算补写清单，也没人校验里面的文件是否完整、是否被替换过，这正是安装器要挡住的东西。
 - **官网建一个「语音数据包」下载页** — issue 的原意，能放国内镜像。需要有人建页面并跟着目录版本持续同步；直接链到目录里的上游地址不用维护，国内访问不畅时用户仍可以用镜像或别的下载工具拿到同一个文件，导入时照样按 SHA-256 校验。
 
@@ -34,5 +36,7 @@ Status: implemented
 - **代价与已知上限**：导入时同一个文件最多读两遍（长度相同的候选有几个时先算摘要，安装时再校验一遍），842 MB 的 Fun-ASR-Nano 归档在慢盘上要多花几秒；HarmonyOS 先复制进缓存，峰值占用是原文件、缓存副本和解压结果三份。所选文件打不开或读到一半出错（权限、文件被移走、可移动磁盘拔掉、iCloud 占位文件）报 `local_model_import_unreadable`：`LocalFileFetcher` 打开和定位失败、算摘要时读失败直接报它；复用的 `download()` 把来源读错误都归成 `Network`，而导入根本不联网，所以 `import_model` 把结果里的 `Network` 改成它。最初的版本把前者报成 `local_model_io`（页面说「无法写入，请检查存储空间」）、后者报成 `local_model_network`，都把问题指向了别处。Android 原生应用要补模型管理和 `voice-runtime` 离线导入时，需要重新拆一期；其中下载、选用和删除已由 [Android 本地语音模型](2026-10-12-android-local-voice-models.md)补上，从文件导入模型和运行库由 [Android 不联网安装](2026-10-12-android-offline-voice-import.md)补上。
 
 ## Verification
+
+`cargo test -p msime-host-api --locked voice_local_model_initial_progress_can_cancel_before_provider_io` 通过真实 C ABI 在首次回调重入指定 id 的取消，覆盖下载与导入，断言初始阶段、零字节、归档总量、取消时任务已登记、退出后登记释放且模型根目录未创建。下载请求带明文合成镜像，即使初始回调回归也会在联网前被拒绝；导入使用空文件列表。旧实现回归先以 `local_model_invalid_mirror` 失败，修复后两条路径均以 `local_model_cancelled` 结束。此回归不代表设备上真实下载验收。
 
 `cargo test -p msime-client-core voice::local_models`（`importing_*`、`cancelling_an_import_leaves_nothing_behind`、`listing_names_the_files_an_offline_install_needs`）；`cargo test -p msime-host-api voice_local_model_install_from_files`；`cargo test -p msime-desktop local_model`；`apps/desktop` 的 `vitest run tests/voice/local-voice-models.test.tsx`；HarmonyOS 的 `platforms/harmony/tests/keyboard-logic.test.ts`（`LocalVoiceModelPolicy` 组）。没有在真机上断网导入过真实的上游归档。
