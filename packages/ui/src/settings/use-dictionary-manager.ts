@@ -1,5 +1,5 @@
 import { downloadBlob } from "../core/download-blob";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { runAsyncAction } from "../core/async-action";
 import { randomRequestId } from "../core/random-id";
 import { utf8ByteLength } from "../core/text";
@@ -77,6 +77,24 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
   const [phraseForm, setPhraseForm] = useState<DictionaryPhraseForm | null>(null);
   const [dictionaryKind, setDictionaryKind] = useState<LocalDictionaryKind>("quick_phrase");
   const [dictionaryFormat, setDictionaryFormat] = useState<DictionaryPageFormat>("standard");
+  const phraseQuery = useMemo(
+    () => ({ dictionaryKind, phraseSearch }),
+    [dictionaryKind, phraseSearch],
+  );
+  const currentPhraseQuery = useRef({
+    query: phraseQuery,
+    load: loadPhrases,
+    offset: 0,
+  });
+  useEffect(() => {
+    currentPhraseQuery.current = {
+      query: phraseQuery,
+      load: loadPhrases,
+      // 新查询从首页开始，后续记录已经发出的页码，不能沿用上个查询尚未替换的显示页码。
+      offset:
+        currentPhraseQuery.current.query === phraseQuery ? currentPhraseQuery.current.offset : 0,
+    };
+  });
   const phraseRequestGeneration = useAsyncGeneration(client.dictionary);
   const phraseActionBusy = useRef(false);
   const phraseActionOwner = useAsyncGeneration();
@@ -133,8 +151,12 @@ export function useDictionaryManager({ client, confirm }: UseDictionaryManagerOp
     kind: LocalDictionaryKind = dictionaryKind,
     offset = 0,
     options: { preserveError?: boolean } = {},
-  ) {
+  ): Promise<void> {
     if (!client.dictionary || !mounted.current) return;
+    // 旧回执仍需刷新写入后的数据，但必须使用当前查询和页码，避免旧条件赢得最新请求代次。
+    const current = currentPhraseQuery.current;
+    if (phraseQuery !== current.query) return current.load(undefined, current.offset, options);
+    current.offset = offset;
     const generation = ++phraseRequestGeneration.current;
     setPhraseBusy(true);
     if (!options.preserveError) setPhraseError("");
