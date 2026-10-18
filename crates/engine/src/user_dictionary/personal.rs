@@ -12,7 +12,7 @@ use crate::lattice::personal::PersonalTransition;
 use crate::paths::RuntimePaths;
 use crate::pinyin::syllables::intact_pinyin_set;
 use crate::types::{PersonalDictionaryEntry, PersonalDictionaryKind};
-use crate::user_dictionary::journal::{ensure_user_database, open_database};
+use crate::user_dictionary::journal::{ensure_user_database, open_database, pinyin_table};
 use crate::user_dictionary::ngram_store::{
     delete_personal_ngram_word, flush_journal, forget_journal_rows,
 };
@@ -363,7 +363,7 @@ fn apply_normalized_edit(
                 "SELECT 1 FROM personal_journal.user_dictionary_operations WHERE dictionary=?1 AND key=?2 AND value=?3 AND operation='upsert' AND user_inserted=1",
                 params![new.kind.journal_name(), new.key, new.value], |_| Ok(()),
             ).optional().map_err(|_| failed(DICTIONARY_NOT_READ))?;
-            if present.is_some() {
+            if present.is_some() || bundled_entry_present(transaction, new)? {
                 return Ok(AppliedEdit {
                     outcome: PersonalDictionaryApplied::AlreadyPresent,
                     forgotten: None,
@@ -413,6 +413,54 @@ fn apply_normalized_edit(
         outcome: PersonalDictionaryApplied::Written,
         forgotten,
     })
+}
+
+/// 集合新增不能覆盖当前代次里已经存在的发布词条；集合与用户词库共用同一工作库连接，所以这里直接检查实际表。
+fn bundled_entry_present(connection: &Connection, entry: &PersonalDictionaryEntry) -> Result<bool> {
+    let (schema, table, key_column, value_column) = match entry.kind {
+        PersonalDictionaryKind::Pinyin => {
+            let Some(table) = pinyin_table(&entry.key) else {
+                return Ok(false);
+            };
+            ("main", table, "key", "value")
+        }
+        PersonalDictionaryKind::Wubi | PersonalDictionaryKind::Wubi98 => {
+            let Some(table) = entry.kind.wubi_table() else {
+                return Ok(false);
+            };
+            ("main", table.to_owned(), "key", "value")
+        }
+        PersonalDictionaryKind::QuickPhrase => ("main", "quick_parases".to_owned(), "key", "value"),
+        PersonalDictionaryKind::English => (
+            "replay_english",
+            "english_words".to_owned(),
+            "word",
+            "display",
+        ),
+    };
+    let table_exists = connection
+        .query_row(
+            &format!("SELECT 1 FROM {schema}.sqlite_master WHERE type='table' AND name=?1"),
+            [&table],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(|_| failed(DICTIONARY_NOT_READ))?
+        .is_some();
+    if !table_exists {
+        return Ok(false);
+    }
+    connection
+        .query_row(
+            &format!(
+                "SELECT 1 FROM {schema}.\"{table}\" WHERE \"{key_column}\"=?1 AND \"{value_column}\"=?2 LIMIT 1"
+            ),
+            params![entry.key, entry.value],
+            |_| Ok(()),
+        )
+        .optional()
+        .map(|row| row.is_some())
+        .map_err(|_| failed(DICTIONARY_NOT_READ))
 }
 
 /// User-inserted entries (auto-created words included) in kind/key/value order; with `include_learned_pinyin`, also learned or edited pinyin weights of shipped multi-character words.

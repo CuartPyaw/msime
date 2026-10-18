@@ -90,6 +90,60 @@ fn collection_retry_after_database_commit_keeps_collection_ownership() {
 }
 
 #[test]
+fn a_collection_addition_of_a_shipped_word_keeps_the_shipped_weight() {
+    let root = tempfile::tempdir().unwrap();
+    let options = host_options_with_main_dictionary(root.path());
+    let dictionary =
+        rusqlite::Connection::open(root.path().join("dictionaries/msime-pinyin.db")).unwrap();
+    dictionary
+        .execute(
+            "INSERT INTO tbl_2_n(key,jp,value,weight) VALUES('ni''hao','nh','你好',4321)",
+            [],
+        )
+        .unwrap();
+    let shipped = PersonalWord {
+        kind: PersonalWordKind::Pinyin,
+        key: "ni'hao".into(),
+        value: "你好".into(),
+        weight: 10_000,
+    };
+    let store = PersonalDictionaryStore::new(root.path().join("PersonalDictionary"));
+    store
+        .enqueue_import(vec![shipped.clone()], "collections-shipped".into())
+        .unwrap();
+
+    let response = call_android_data(msime_client_personal_dictionary_sync, options);
+    assert_eq!(response["ok"], true, "{response}");
+    assert_eq!(response["value"]["pending_count"], 0, "{response}");
+    assert_eq!(response["value"]["failed_count"], 0, "{response}");
+    assert_eq!(
+        store.read().unwrap().already_present,
+        vec![shipped.identity()]
+    );
+    assert_eq!(
+        dictionary
+            .query_row(
+                "SELECT weight FROM tbl_2_n WHERE key='ni''hao' AND value='你好'",
+                [],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap(),
+        4321
+    );
+    let journal = rusqlite::Connection::open(root.path().join("user/msime_user.db")).unwrap();
+    assert_eq!(
+        journal
+            .query_row(
+                "SELECT count(*) FROM user_dictionary_operations WHERE dictionary='pinyin' AND key='ni''hao' AND value='你好' AND user_inserted=1",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
 fn a_sql_failure_rolls_back_only_its_entry() {
     let root = tempfile::tempdir().unwrap();
     let options = host_options_with_main_dictionary(root.path());
