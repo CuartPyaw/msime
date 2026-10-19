@@ -1200,4 +1200,3 @@ failures:
     lattice::decode::borrowed_fields_tests::borrowed_graph_release_comparison
 
 test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 2398 filtered out; finished in 117.09s
-

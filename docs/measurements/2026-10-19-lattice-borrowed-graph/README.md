@@ -23,7 +23,7 @@ git diff --exit-code HEAD -- crates/engine/src/ime/personal_rerank.rs
 python3 docs/measurements/2026-10-19-lattice-borrowed-graph/run.py.txt target/borrowed-graph-system-tests target/borrowed-graph-paired.txt target/borrowed-graph-monitor.json
 ```
 
-System二进制只运行ignored计时测试，不能用于验证普通分配断言。两个入口均从工作树根目录执行；本次已按同样命令构建并记录身份，文本构建脚本是方便复现的整理版。复现需运行新构建，二进制没有上传。
+System二进制只运行ignored计时测试，不能用于验证普通分配断言。归档补丁去掉空白上下文行的尾随空格，日志去掉末尾空行；样本内容和失败保持原样，补丁通过 `git apply --check`。两个入口均从工作树根目录执行；本次已按同样命令构建并记录身份，文本构建脚本是方便复现的整理版。复现需运行新构建，二进制没有上传。
 
 ## 结果与限制
 

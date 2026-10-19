@@ -1063,16 +1063,17 @@
     "local build timing cannot prove default Runtime p95 16ms"
   ],
   "files_sha256": {
-    "README.md": "bc16e94fbf4237abbfde396438ffca3d02f1a151553ec74cfe08d355da80e304",
+    "README.md": "d231d37fb9c16bfc96d1ce3743cc0b2897fc4b82d397284ec3f7f65641cf3852",
     "build-system.py.txt": "7c0c1504b3cb1b886f6a923d97179c5dcd183046663289eeacb9d2cdbd22507b",
-    "candidate.patch.txt": "368c614d02752354334a61b3c8e79ec3257d6689395bef52fc0ee2791564c1d7",
+    "candidate.patch.txt": "538dd36a9c9f441261ab28c821ee590bda7f5a0e49730741c0e5c374780323e7",
     "green-initial-compile-error.txt": "153bb9286da8594955ecbc8c7ab9f5df0d97993398ab5c527aeed0e252654033",
-    "green.txt": "e2cf948b5082b6d30fc476346d2b107dea1cf723a2ded2e0903a9df51d759a6d",
+    "green.txt": "a798446f76466367bede9e4ce96f660e27d7de6423cada07ccbc1a7a85bb2b56",
     "monitor-round1.json": "9169e9b61689f2cbde57e111db70338a3b81867188223742b3bb5c6108bf74e3",
     "monitor-round2.json": "36c12bc4744eaa281a203ddf6a3235b167ed0c9071282728ae2a1b574eb28b1f",
-    "paired-round1.txt": "c979ec03691a3dbe1e80f5989c06d22b494025abdb501efacf9a98dbd6abe179",
-    "paired-round2.txt": "9c9d9d5a5e9107fcadfc45781d34375335349eaad9ece7fac7ef59ccd51c0dfb",
+    "paired-round1.txt": "0d7dab3cf768200f8bd23be4ef981051106cbf4d97a08940f13c03008760cd69",
+    "paired-round2.txt": "e7f5a01d163e62359e252a05da1bea58c5909aabc9c4e4e19db3c8098511d531",
     "red.txt": "77a8202c7f41bc484db7d195c9a495a12713fa4f86af1791986588362f7722f1",
     "run.py.txt": "b7400fd5051247855e6bbf066f0e8e0671864657c5fffef510c8f57502a727f2"
-  }
+  },
+  "archive_normalization": "patch context trailing spaces and final empty log lines removed; sample values unchanged; git apply --check passed"
 }
