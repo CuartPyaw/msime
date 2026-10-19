@@ -266,13 +266,13 @@ test("saving a relay on the clipboard page checks the cloud clipboard again over
     />,
   );
   await settingsFormReady();
-  // 历史记录和中继配置分在「历史记录」「剪贴板」两个标签里。
+  // 历史记录和中继配置分在「历史记录」「设置」两个标签里。
   fireEvent.click(screen.getByRole("tab", { name: "历史记录" }));
   expect(await screen.findByText(CLOUD_CLIPBOARD_SIGNED_OUT)).toBeDefined();
   const send = await screen.findByRole("button", { name: "发到云剪贴板" });
   expect(send.hasAttribute("disabled")).toBe(true);
 
-  fireEvent.click(screen.getByRole("tab", { name: "剪贴板" }));
+  fireEvent.click(screen.getByRole("tab", { name: "设置" }));
   fireEvent.click(screen.getByRole("radio", { name: "自建中继" }));
   fireEvent.change(screen.getByRole("textbox", { name: "中继地址" }), {
     target: { value: "https://relay.example.test/msime" },

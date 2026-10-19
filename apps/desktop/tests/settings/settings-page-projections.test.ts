@@ -1,7 +1,6 @@
 import { expect, test } from "vitest";
 import { mobilePageTitle } from "../../../../packages/ui/src/settings/mobile-tab-helpers";
 import { settingsPageProjections } from "../../../../packages/ui/src/settings/settings-page-projections";
-import { desktopPageTitle } from "../../../../packages/ui/src/settings/settings-page-registry";
 
 const project = (overrides: Partial<Parameters<typeof settingsPageProjections>[0]> = {}) =>
   settingsPageProjections({
@@ -52,35 +51,33 @@ test("projects the desktop sidebar into the titled navigation groups", () => {
     { title: "打字", ids: ["input", "dictionary", "shortcuts", "expression"] },
     { title: "输入方式", ids: ["voice", "screen-keyboard", "handwriting"] },
     { title: "外观", ids: ["skin", "appearance", "floating-toolbar"] },
-    { title: "工具", ids: ["tools", "ai", "mcp", "plugins"] },
+    { title: "工具", ids: ["tools", "ai", "plugins"] },
     { title: "数据", ids: ["typing-statistics", "account"] },
     // 桌面上「帮助与反馈」并进「关于」，侧栏不再列出它；它仍是可路由的页面。
     { title: "支持", ids: ["developer", "about"] },
   ]);
-  // 完整桌面菜单统一四字名称，版本裁剪后不产生空入口。
+  // 桌面标题直接说明功能，不限制字数；版本裁剪后不产生空入口。
   const desktop = project({
     hasHomePage: false,
     handwritingOnScreenKeyboardPage: true,
-    desktopPageTitle,
   });
   expect(desktop.sidebarGroups.flatMap((group) => group.pages.map((page) => page.title))).toEqual([
-    "输入设置",
-    "词库管理",
-    "按键设置",
-    "标点翻译",
+    "输入",
+    "词库",
+    "快捷键",
+    "标点与翻译",
     "语音输入",
-    "键盘手写",
-    "主题外观",
+    "键盘与手写",
+    "主题",
     "候选窗口",
-    "快捷工具",
-    "剪贴管理",
-    "智能辅助",
-    "AI助手",
-    "扩展插件",
+    "悬浮工具栏",
+    "剪贴板",
+    "AI",
+    "插件",
     "打字统计",
-    "账号管理",
-    "维护诊断",
-    "关于水杉",
+    "账号与同步",
+    "维护与诊断",
+    "关于",
   ]);
   expect(project().availablePages.map((page) => page.id)).toContain("feedback");
   // 宿主不提供的页从所在组里消失；整组为空时整组不出现。
@@ -98,29 +95,25 @@ test("projects the desktop sidebar into the titled navigation groups", () => {
     { title: "打字", ids: ["input", "dictionary", "shortcuts", "expression"] },
     { title: "输入方式", ids: ["voice", "screen-keyboard", "handwriting"] },
     { title: "外观", ids: ["skin", "appearance", "floating-toolbar"] },
-    { title: "工具", ids: ["tools", "ai", "mcp"] },
+    { title: "工具", ids: ["tools", "ai"] },
     { title: "支持", ids: ["developer", "about"] },
   ]);
 });
 
-test("MCP is an independent 工具 page only where the host reports the server", () => {
+test("桌面 MCP 并入 AI 导航但保留能力条件路由，触屏仍独立", () => {
   const desktop = project();
   expect(desktop.availablePages.map((page) => page.id)).toContain("mcp");
-  expect(desktop.sidebarGroups.flatMap((group) => group.pages.map((page) => page.id))).toContain(
-    "mcp",
-  );
+  expect(
+    desktop.sidebarGroups.flatMap((group) => group.pages.map((page) => page.id)),
+  ).not.toContain("mcp");
   expect(desktop.availablePages.find((page) => page.id === "mcp")?.title).toBe("AI 助手");
   expect(project({ hasMcp: false }).availablePages.map((page) => page.id)).not.toContain("mcp");
 });
 
-test("桌面账号页统一叫账号管理，触屏仍叫我的", () => {
+test("桌面账号页覆盖账号与同步，触屏仍叫我的", () => {
+  expect(project().availablePages.find((page) => page.id === "account")?.title).toBe("账号与同步");
   expect(
-    project({ desktopPageTitle }).availablePages.find((page) => page.id === "account")?.title,
-  ).toBe("账号管理");
-  expect(
-    project({ mobilePlatform: true, desktopPageTitle }).availablePages.find(
-      (page) => page.id === "account",
-    )?.title,
+    project({ mobilePlatform: true }).availablePages.find((page) => page.id === "account")?.title,
   ).toBe("我的");
 });
 
@@ -222,7 +215,7 @@ test("places the 插件 page in 工具 and drops it where the host does not back
     item.pages.some((page) => page.id === "tools"),
   );
   expect(group?.title).toBe("工具");
-  expect(group?.pages.map((page) => page.id)).toEqual(["tools", "ai", "mcp", "plugins"]);
+  expect(group?.pages.map((page) => page.id)).toEqual(["tools", "ai", "plugins"]);
   expect(desktop.availablePages.find((page) => page.id === "plugins")?.title).toBe("插件");
 
   expect(project({ hasPlugins: false }).availablePages.map((page) => page.id)).not.toContain(
@@ -298,7 +291,7 @@ test("folds 手写输入 into the screen keyboard page where the host asks for i
   expect(merged.handwritingOnScreenKeyboardPage).toBe(true);
   expect(merged.availablePages.map((page) => page.id)).not.toContain("handwriting");
   expect(merged.availablePages.find((page) => page.id === "screen-keyboard")?.title).toBe(
-    "键盘手写",
+    "键盘与手写",
   );
   expect(groupIds(merged.sidebarGroups)).toContainEqual({
     title: "输入方式",

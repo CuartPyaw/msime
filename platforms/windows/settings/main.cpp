@@ -342,7 +342,7 @@ bool make_input_method_default() {
   return set_default && set_default(input_method_id, 0) != FALSE;
 }
 
-// The page this window opens on: `--route=settings:<id>` from the Server and the other launchers. Either a settings category of the shared route vocabulary or a page id of this window; anything else opens the default page.
+// 保留启动请求的类别，窗口解析承载页时也恢复旧路由对应的顶部标签。
 std::string route_page() {
   int argc = 0;
   auto *argv = CommandLineToArgvW(GetCommandLineW(), &argc);
@@ -363,7 +363,7 @@ std::string route_page() {
     }
     LocalFree(argv);
   }
-  return std::string(nav::offered_page_for_route(page.value_or(std::string()), MSIME_EDITION_HANDWRITING != 0));
+  return page.value_or(std::string());
 }
 
 // The runtime options file the Server hands this window, or the one the Server reads at startup when started from the Start menu. None before the input method is set up.
@@ -999,27 +999,26 @@ struct PageLabel {
   const wchar_t *summary;
 };
 
-// 「手写输入」并进了「屏幕键盘」页（见 `SettingsNavigation.h`），提供手写的版本里那一页叫「键盘手写」，与共享设置 UI 的 `screenKeyboardAndHandwritingTitle` 相同。
-constexpr std::array<PageLabel, 17> page_labels{{
-    {"typing", L"输入设置", 0xE765, L"选择输入方式；专属选项随当前方案变化。"},
-    {"expression", L"标点翻译", 0xE8C1, L"调整标点、混输、输出和选词习惯。"},
-    {"shortcuts", L"按键设置", 0xEDA7, L"设置中英文切换、选词和翻页使用的按键。"},
-    {"lexicon", L"词库管理", 0xE82D, L"管理本机词库、个人词条和常用语。"},
-    {"themes", L"主题外观", 0xE790, L"选择候选窗口皮肤，搭配自己的字体和配色。"},
-    {"candidate", L"候选窗口", 0xE8FD, L"调整候选的排列、文字和显示位置。"},
-    {"toolbar", L"快捷工具", 0xE7F4, L"选择悬浮工具栏显示的内容和交互方式。"},
-    {"osk", MSIME_EDITION_HANDWRITING ? L"键盘手写" : L"屏幕键盘", 0xE92E,
+// 「手写输入」并进了「屏幕键盘」页（见 `SettingsNavigation.h`），提供手写的版本里那一页叫「键盘与手写」，与共享设置 UI 的 `screenKeyboardAndHandwritingTitle` 相同。
+constexpr std::array<PageLabel, 16> page_labels{{
+    {"typing", L"输入", 0xE765, L"选择输入方式；专属选项随当前方案变化。"},
+    {"expression", L"标点与翻译", 0xE8C1, L"调整标点、混输、输出和选词习惯。"},
+    {"shortcuts", L"快捷键", 0xEDA7, L"设置中英文切换、选词和翻页使用的按键。"},
+    {"lexicon", L"词库", 0xE82D, L"管理本机词库、个人词条和常用语。"},
+    {"themes", L"主题", 0xE790, L"选择皮肤与配色；布局、字体和显示方式在「候选窗口」中设置。"},
+    {"candidate", L"候选窗口", 0xE8FD, L"调整布局、字体和显示方式；皮肤与配色在「主题」中设置。"},
+    {"toolbar", L"悬浮工具栏", 0xE7F4, L"选择悬浮工具栏显示的内容和交互方式。"},
+    {"osk", MSIME_EDITION_HANDWRITING ? L"键盘与手写" : L"屏幕键盘", 0xE92E,
      MSIME_EDITION_HANDWRITING ? L"设置屏幕键盘的布局、按键和外观，打开手写识别板。"
                                : L"设置屏幕键盘的布局、按键和外观。"},
     {"voice", L"语音输入", 0xE720, L"选择识别方式，配置语音转写和文本整理。"},
-    {"clip", L"剪贴管理", 0xE77F, L"管理剪贴板记录和跨设备发送。"},
+    {"clip", L"剪贴板", 0xE77F, L"管理剪贴板记录和跨设备发送。"},
     {"stats", L"打字统计", 0xE9D2, L"查看输入量、速度和使用趋势。"},
-    {"plugins", L"扩展插件", 0xEA86, L"管理输入扩展，浏览和安装社区插件。"},
-    {"ai", L"智能辅助", 0xE99A, L"配置候选补全、文本整理和服务连接。"},
-    {"mcp", L"AI助手", 0xE99A, L"连接 AI 助手，管理设置、皮肤、词库和诊断。"},
-    {"account", L"账号管理", 0xE77B, L"登录并管理跨设备同步与云端内容。"},
-    {"dev", L"维护诊断", 0xE90F, L"导入导出设置，检查本机状态和诊断信息。"},
-    {"about", L"关于水杉", 0xE946, L"查看版本和更新，查阅使用帮助、反馈问题，以及许可信息。"},
+    {"plugins", L"插件", 0xEA86, L"管理输入扩展，浏览和安装社区插件。"},
+    {"ai", L"AI", 0xE99A, L"配置 AI 辅助功能，连接本机 AI 助手。"},
+    {"account", L"账号与同步", 0xE77B, L"登录并管理跨设备同步与云端内容。"},
+    {"dev", L"维护与诊断", 0xE90F, L"导入导出设置，检查本机状态和诊断信息。"},
+    {"about", L"关于", 0xE946, L"查看版本和更新，查阅使用帮助、反馈问题，以及许可信息。"},
 }};
 static_assert(page_labels.size() == nav::pages.size());
 static_assert(page_labels[0].id == nav::default_page);
@@ -2932,7 +2931,9 @@ Canvas chart_overlay(std::function<void(Canvas const &, double, double)> draw) {
 }
 
 struct MainWindow : WindowT<MainWindow> {
-  explicit MainWindow(std::string page) : current_page_(std::move(page)) {
+  explicit MainWindow(std::string page)
+      : current_page_(nav::offered_page_for_route(page, MSIME_EDITION_HANDWRITING != 0)) {
+    ai_mcp_view_ = page == "mcp";
     // 窗口标题和侧栏的产品名按版本取，full 仍是「水杉输入法」。
     Title(MSIME_EDITION_DISPLAY_NAME L"设置");
     ExtendsContentIntoTitleBar(true);
@@ -4824,8 +4825,6 @@ private:
       build_plugins_page(page);
     else if (id == "ai")
       build_ai_page(page);
-    else if (id == "mcp")
-      build_mcp_page(page);
     else if (id == "account")
       build_account_page(page);
     else if (id == "dev")
@@ -18032,7 +18031,7 @@ private:
     std::wstring backend, id, label;
   };
 
-  // 共享语音页（`voice-settings-content.tsx` 的桌面分支）在 Windows 上的内容。共享页把服务的配置收进页内的「服务配置」子视图，这个原生页没有子视图控件，所以仍是一整页，但按共享页的先后排：按识别服务说明怎么用的一组，「识别」（开关、服务、识别语言、豆包的自动添加标点、边说边显示），语音快捷键，录音行为，然后是子视图里的那些：「识别服务配置」（接入说明、豆包鉴权方式、旧版 App Key、凭据，「更多选项」里是接口地址、识别模型、资源 ID 和豆包选项；本地模型；末尾是测试），识别结果，文本润色，录音设备。没有子视图可开，所以不画「服务配置」那一行。服务目录经 `msime_client_voice_provider_catalog` 从共享 Rust 读取，换服务的控件规则和本地模型的文字在 `VoiceSettings.h`。输入框边输入边写进设置、停下后保存，不重建页面，跟着输入内容变的下拉框选中项和测试按钮由 voice_sync_ 就地更新；下拉框和开关的改动保存后重画整页。
+  // 对齐共享桌面页的内容归属：识别与结果提交、快捷键、录音行为与设备、识别服务接入、文本润色。原生页继续使用直列，逐项搜索仍由现有索引负责。输入框就地更新以保留焦点，服务切换后重画页面。
   void build_voice_page(StackPanel const &page) {
     if (!indexing_) {
       credential_test_views_.clear();
@@ -18090,6 +18089,14 @@ private:
     bool_row(recognition, 0xE8D2, L"边说边显示", L"识别服务支持时显示实时识别片段",
              L"voice_input.stream_inline_preedit", true);
 
+    // 「识别结果」（VoiceRecognitionResultSection）：边说边显示已经移到「识别」组，这里只剩结果提交策略。
+    auto result = add_group(page, L"识别结果");
+    select_row(result, 0xE8C8, L"结果提交策略", L"由当前桌面宿主决定如何把识别结果交给前台窗口",
+               L"voice_input.commit_mode",
+               {{L"tsf", L"输入法会话"}, {L"sendinput", L"系统按键"}, {L"ctrl_v", L"剪贴板粘贴"}},
+               L"tsf");
+
+
     build_voice_hotkey_group(page);
 
     // 「录音行为」只剩提示音总开关和静音：宿主不再分别读开始、结束提示音（`voice_cue_switches` 为 false）。
@@ -18112,7 +18119,9 @@ private:
     add_row(recording, 0xE767, L"录音行为", L"录音期间的提示音与静音由输入法在本机处理",
             nullptr, checks_panel(std::move(sound_checks), 200));
 
-    // 「识别服务配置」：系统识别没有要配的，这一组不画。共享页把它收在「服务配置」子视图里，这里没有子视图，排在常用的几组下面。
+    build_capture_device_group(page);
+
+    // 「识别服务配置」只负责服务接入与测试；共享页在「服务配置」下钻显示，原生页接在录音设备后面。
     if (!system_voice || indexing_) {
       auto config = add_group(page, L"识别服务配置");
       if (service_voice || indexing_)
@@ -18140,15 +18149,8 @@ private:
       }
     }
 
-    // 「识别结果」（VoiceRecognitionResultSection）：边说边显示已经移到「识别」组，这里只剩结果提交策略。
-    auto result = add_group(page, L"识别结果");
-    select_row(result, 0xE8C8, L"结果提交策略", L"由当前桌面宿主决定如何把识别结果交给前台窗口",
-               L"voice_input.commit_mode",
-               {{L"tsf", L"输入法会话"}, {L"sendinput", L"系统按键"}, {L"ctrl_v", L"剪贴板粘贴"}},
-               L"tsf");
 
     build_polish_group(page);
-    build_capture_device_group(page);
   }
 
   // 「语音快捷键」（VoiceHotkeysSection）：三个长按录音的组合键合成一个「长按录音」选择，末项「不使用」，宿主同一时刻只认一个。以前可以同时打开几个，这样的配置在用户改动之前照旧显示第一个，打开页面时不改写存储；换一项时三个一起写。空格锁定固定为开（宿主不再读 hotkey_hold_space_lock），不给开关。Ctrl+F9 收在「更多选项」里，与共享页一致。
@@ -19467,6 +19469,27 @@ private:
 
   // 共享 AI 页（`ai-settings-content.tsx`、`ai-settings-page-section.tsx`）在 Windows 上的内容，顺序也相同：只有「服务」一组（开关、服务提供商、API Token、接入说明、模型（预置的和获取到的模型在一个下拉里，末项「自定义…」）、「更多选项」里的接口地址、获取模型列表和当前槽位的自定义提示词，末尾是「测试 AI 辅助配置」）。Windows 固定 AI 候选数量为 3（client-core 的 `HostPlatform::fixed_ai_candidate_limit`，TSF 从 host-api 的在线查询读这个值），所以没有「联想」组；桌面上这份配置只给拼音联想用，没有「AI 润色测试」。Windows 的设置应用没有 AI 对话（宿主不提供 chat），所以最后没有「AI 对话」一组。Token 存在偏好文件里，按接口地址的来源键分开存（ai_assistant.tokens）。服务商表和规则在 AiSettings.h。
   void build_ai_page(StackPanel const &page) {
+    if (!indexing_ && !focus_row_.empty())
+      ai_mcp_view_ = focus_row_ == L"连接 AI 助手";
+    if (!indexing_) {
+      auto tabs = segmented_control(
+          L"AI 设置分类", {{L"assistance", L"输入辅助"}, {L"connection", L"连接助手"}},
+          ai_mcp_view_ ? L"connection" : L"assistance",
+          [this](std::wstring const &value) {
+            ai_mcp_view_ = value == L"connection";
+            queue_refresh();
+          }, true, false, 3, L"ai-settings");
+      tabs.HorizontalAlignment(HorizontalAlignment::Left);
+      tabs.Margin(Thickness{0, 0, 0, 12});
+      page.Children().Append(tabs);
+    }
+    if (indexing_ || !ai_mcp_view_)
+      build_ai_assistance_page(page);
+    if (indexing_ || ai_mcp_view_)
+      build_mcp_page(page);
+  }
+
+  void build_ai_assistance_page(StackPanel const &page) {
     if (!indexing_) {
       credential_test_views_.clear();
       ai_sync_.clear();
@@ -20270,7 +20293,7 @@ private:
       mcp_result_ = mcp_failure(response_error(response), name);
     }
     mcp_busy_ = false;
-    if (!closed_ && current_page_ == "mcp")
+    if (!closed_ && current_page_ == "ai" && ai_mcp_view_)
       render_page(true);
   }
 
@@ -20317,6 +20340,7 @@ private:
 
   std::wstring mcp_result_;
   bool mcp_busy_ = false;
+  bool ai_mcp_view_ = false;
 
   // 「标点与翻译」页三个「测试配置」的结果，按服务记，跨页面重建保留（共享页 useProviderCredentials 的 credentialTests）；signature 是测试时的配置。刷新函数属于当前页面上的那一组按钮，测试结束时用它就地更新，不重画整页，免得输入框丢掉焦点和没能写入的内容。
   struct CredentialTest {

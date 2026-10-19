@@ -202,16 +202,22 @@ function SettingsShell(props: SettingsPageProps) {
       macShell,
       onError: setError,
     });
-  const { parentPage, goBack, shownSidebarGroups, navSearchField } = useSettingsShellNavigation({
-    page,
-    navigationPage,
-    launchPage,
-    availablePages,
-    sidebarGroups,
-    navQuery,
-    setNavQuery,
-    selectPage,
-  });
+  const { parentPage, goBack, shownSidebarGroups, navSearchField, navSearchResults } =
+    useSettingsShellNavigation({
+      contentRef: pageColumnRef,
+      onRevealPage: (target) => {
+        if (target === "skin") setSkinView("mine");
+        if (target === "plugins") setPluginView("mine");
+      },
+      page,
+      navigationPage,
+      launchPage,
+      availablePages,
+      sidebarGroups,
+      navQuery,
+      setNavQuery,
+      selectPage,
+    });
   return (
     <div
       className={settings.shell}
@@ -260,6 +266,7 @@ function SettingsShell(props: SettingsPageProps) {
             shownSidebarGroups={shownSidebarGroups}
             navigationPage={navigationPage}
             navSearchField={navSearchField}
+            navSearchResults={navSearchResults}
             windowDragHandlers={windowDragHandlers}
             selectPage={selectPage}
           />
