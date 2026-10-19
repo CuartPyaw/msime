@@ -1688,6 +1688,7 @@ export {
   KeyboardPanel,
   VoicePanel,
 } from "./keyboard/panels";
+export { HandwritingModelNotice } from "./keyboard/handwriting-model-notice";
 export type {
   CloudCandidate,
   CloudCandidateKind,
@@ -1947,3 +1948,10 @@ export {
 export { useEmojiPanel, type EmojiPanelState, type EmojiPage } from "./keyboard/use-emoji-panel";
 
 export { useKeyboardPanel, type KeyboardPanelState } from "./keyboard/use-keyboard-panel";
+
+export {
+  isKeyboardLetter,
+  keyboardKeyLabel,
+  type KeyboardKey,
+  type Modifier,
+} from "./keyboard/keyboard-input";
