@@ -261,6 +261,8 @@ const localVoiceModels: LocalVoiceModelClient = {
 const clipboardClient = createDesktopClipboardClient();
 const client: SettingsClient = {
   readAppVersion: getVersion,
+  // 发布日期由 src-tauri/build.rs 在编译时写进设置应用，拿不到时是空字符串。
+  readAppReleaseDate: () => invoke<string>("app_release_date"),
   resolveFontFamilies: (names) => invoke("resolve_font_families", { names }),
   scanSkinCatalog: () => invoke("scan_skin_catalog"),
   listHelpcodeSchemas: () => invoke<CustomHelpcodeSchema[]>("list_helpcode_schemas"),

@@ -125,6 +125,8 @@ interface NativeBridge {
   /** `{profile,sourceCommit}` from the packaged dictionary manifest, or a refusal. */
   dictionaryManifest(): string;
   appVersion(): string;
+  /** 发布日期 `YYYY-MM-DD`，不知道时为空串。 */
+  appReleaseDate(): string;
   dictionary(action: string): string;
   /** 只计算九键双拼键位和错误，不读写偏好。 */
   nineKeyShuangpinLayout(request: string): string;
@@ -1328,6 +1330,7 @@ function makeClient(
       };
     },
     readAppVersion: async () => native.appVersion(),
+    readAppReleaseDate: async () => native.appReleaseDate(),
     // GitHub 的发布列表由 Rust 在原生工作线程上读取和比较（`msime_client_update_check`），平台由 ArkTS 填入。
     checkUpdate: async (request: UpdateCheckRequest) =>
       unwrap<UpdateCheckResult>(

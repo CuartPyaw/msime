@@ -155,6 +155,12 @@ fn supports_font_catalog() -> bool {
     font_catalog_supported()
 }
 
+/// 关于页写在版本号后面的发布日期 `YYYY-MM-DD`，由 `build.rs` 在编译时写入；构建时拿不到日期时是空字符串，页面只显示版本号。
+#[tauri::command]
+fn app_release_date() -> String {
+    env!("MSIME_APP_RELEASE_DATE").to_owned()
+}
+
 /// iOS lists UIKit's families through the mobile-platform plugin rather than host-api, the way the HarmonyOS page asks ArkUI.
 fn font_catalog_supported() -> bool {
     cfg!(target_os = "ios") || system_fonts::supported()
@@ -5487,6 +5493,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             host_capabilities,
+            app_release_date,
             notices::notices_list,
             notices::notice_dismiss,
             update_check::update_check,

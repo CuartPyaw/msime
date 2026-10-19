@@ -310,6 +310,11 @@ export {
 } from "./settings/use-settings-window-interactions";
 export { useAppVersion, type UseAppVersionOptions } from "./settings/use-app-version";
 export {
+  formatAppVersion,
+  parseReleaseDate,
+  useAppReleaseDate,
+} from "./settings/use-app-release-date";
+export {
   useCustomHelpcodeSchemas,
   useHelpcodeCatalog,
   useHelpcodePacks,

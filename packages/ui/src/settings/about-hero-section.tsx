@@ -28,6 +28,8 @@ export type AboutUpdateState = "idle" | "checking" | "latest";
 export interface HarmonyAboutHeroProps {
   /** 当前运行的应用版本，显示为 `版本 {version} · {platformLabel}`。 */
   version: string;
+  /** 发布日期 `YYYY-MM-DD`；给了时版本行是 `版本 {version}（{releaseDate} 发布） · {platformLabel}`。 */
+  releaseDate?: string;
   /** 手机上为 `HarmonyOS`，2in1 上为 `HarmonyOS 2in1`。 */
   platformLabel: string;
   update: AboutUpdateState;
@@ -48,6 +50,7 @@ const updateLabels: Record<AboutUpdateState, string> = {
  */
 export function HarmonyAboutHero({
   version,
+  releaseDate,
   platformLabel,
   update,
   updateStatus,
@@ -61,7 +64,7 @@ export function HarmonyAboutHero({
       <div className={doc.appHeroText}>
         <span className={doc.appHeroTitle}>水杉输入法</span>
         <span className={doc.appHeroVersion}>
-          版本 {version} · {platformLabel}
+          {`版本 ${version}${releaseDate ? `（${releaseDate} 发布）` : ""} · ${platformLabel}`}
         </span>
         <span className={doc.appHeroCopyright}>© 2026 Metasequoia</span>
         {updateStatus && (
