@@ -2,17 +2,19 @@
 import ctypes
 import configparser
 from collections import Counter
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 import io
 import json
 import os
 from pathlib import Path
 import re
 import sqlite3
+import socket
 import struct
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import zlib
 
@@ -163,6 +165,58 @@ SELECTED = (7, 91, 173)
 WIDGET = (255, 0, 171)
 
 
+def synthetic_translation_provider(root, cleanups):
+    """只返回合成释义，通过真实本地 socket 进入宿主刷新链。"""
+    path = root / "translation.sock"
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(path))
+    server.listen(4)
+    server.settimeout(0.2)
+    stopped, errors = threading.Event(), []
+
+    def serve():
+        while not stopped.is_set():
+            try:
+                client, _ = server.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                if not stopped.is_set():
+                    errors.append("合成释义 socket 意外关闭")
+                return
+            try:
+                with client:
+                    client.settimeout(2)
+                    request = b""
+                    while b"\n" not in request and len(request) < 65536:
+                        chunk = client.recv(4096)
+                        if not chunk:
+                            break
+                        request += chunk
+                    document = json.loads(request)
+                    assert document["kind"] == "translation"
+                    texts = document["query"]["candidates"]
+                    reply = {"translations": ([{"text": texts[0], "translation": "proper n. MMM；n. MMM"}]
+                                               if texts else [])}
+                    client.sendall(json.dumps(reply).encode() + b"\n")
+            except Exception as error:
+                if not stopped.is_set():
+                    errors.append(type(error).__name__)
+
+    thread = threading.Thread(target=serve, name="synthetic-canvas-translation", daemon=True)
+    thread.start()
+
+    def close():
+        stopped.set()
+        server.close()
+        thread.join(timeout=3)
+        assert not thread.is_alive(), "合成释义服务未退出"
+        assert not errors, f"合成释义协议失败：{errors}"
+
+    cleanups.callback(close)
+    return str(path)
+
+
 def native_window():
     result = subprocess.run(["xdotool", "search", "--onlyvisible", "--class", "^MSIMECandidateCanvas$"],
                             stdout=subprocess.PIPE, text=True, timeout=5)
@@ -208,6 +262,142 @@ def color_position(color):
             if data[offset:offset + 3] == bytes(color):
                 return x + 2, y + 2
     raise AssertionError("未找到预期颜色")
+
+
+def color_bounds(color):
+    image, _ = screenshot()
+    channels, stride, data = image.get_n_channels(), image.get_rowstride(), image.get_pixels()
+    bounds = window_geometry(native_window())
+    left, top, width, height = (int(bounds[key]) for key in ("X", "Y", "WIDTH", "HEIGHT"))
+    points = [(x, y) for y in range(top, top + height) for x in range(left, left + width)
+              if data[y * stride + x * channels:y * stride + x * channels + 3] == bytes(color)]
+    assert points, f"原生窗口缺少配色 {color}"
+    return min(x for x, _ in points), min(y for _, y in points), max(x for x, _ in points) + 1, max(y for _, y in points) + 1
+
+
+def accept_appearance(manifest, preferences, publish, entry):
+    original = manifest.read_text()
+    bar, hover, background, divider, caret = (22, 180, 240), (242, 128, 17), (61, 20, 80), (153, 77, 222), (0, 255, 204)
+    style = original.replace("[candidate_window]\n", "[candidate_window]\nitem_corner_radius_dip = 12\ncorner_radius_dip = 20\n")
+    for mode in ("light", "dark"):
+        style = style.replace(f"[candidate.{mode}]\n", f"[candidate.{mode}]\n"
+                              "show_selected_bar = true\nselected_bar = '#16B4F0'\nhover = '#F28011'\n"
+                              "preedit_background = '#3D1450'\npreedit_divider = '#994DDE'\n"
+                              "preedit_text = '#FDE75A'\npreedit_caret = '#00FFCC'\n")
+    style += (f"\n[candidate_window.{preferences['candidate_layout']}]\n"
+              "selected_bar_width = 5\nselected_bar_height_em = 1.1\nselected_bar_inside = true\n"
+              "item_extra_height = 24\nitem_gap = 12\n")
+    for mode in ('light', 'dark'):
+        style += (f"\n[candidate.{mode}.menu]\nbackground = '#1F252B'\nborder = '#556677'\n"
+                  "text = '#E1E2E3'\nhover = '#515B65'\n")
+    manifest.write_text(style)
+    wait(lambda: palette_visible((bar, background, divider, caret)))
+    save_image("native-appearance")
+    left, top, right, bottom = color_bounds(SELECTED)
+    _, counts = screenshot()
+    assert counts[SELECTED] < (right - left) * (bottom - top), "高亮仍然是无圆角矩形"
+    bar_box = color_bounds(bar)
+    assert bar_box[2] - bar_box[0] == 5 * NATIVE_SCALE, "选中条宽度未进入实际像素"
+    # 指针只改变 hover，不改变键盘选中项；按下后离开并释放不提交。
+    if preferences['candidate_layout'] == 'horizontal':
+        point = (right + 12 * NATIVE_SCALE + 8 * NATIVE_SCALE, (top + bottom) // 2)
+    else:
+        point = ((left + right) // 2, bottom + 12 * NATIVE_SCALE + 8 * NATIVE_SCALE)
+    subprocess.run(["xdotool", "mousemove", *map(str, point)], check=True, timeout=5)
+    wait(lambda: palette_visible((hover,)))
+    assert color_bounds(SELECTED) == (left, top, right, bottom), "悬停改变了键盘选中项"
+    save_image("native-hover")
+    subprocess.run(["xdotool", "mousedown", "1"], check=True, timeout=5)
+    wait(lambda: not palette_visible((hover,)))
+    save_image("native-pressed")
+    subprocess.run(["xdotool", "mousemove", "0", "0", "mouseup", "1"], check=True, timeout=5)
+    wait(lambda: not palette_visible((hover,)))
+    assert entry.get_text() == "", "拖出候选后的释放错误上屏"
+    # 菜单独立配色进入真实原生窗口；返回仍保留同一候选快照。
+    subprocess.run(["xdotool", "mousemove", str((left + right) // 2), str((top + bottom) // 2), "click", "3"],
+                   check=True, timeout=5)
+    wait(lambda: palette_visible(((31, 37, 43), (225, 226, 227))))
+    assert not palette_visible((background,)), "候选预编辑背景渗进右键菜单"
+    bounds = window_geometry(native_window())
+    point = (int(bounds['X']) + 40 * NATIVE_SCALE,
+             int(bounds['Y']) + int(bounds['HEIGHT']) - 22 * NATIVE_SCALE)
+    subprocess.run(["xdotool", "mousemove", *map(str, point)], check=True, timeout=5)
+    wait(lambda: palette_visible(((81, 91, 101),)))
+    save_image("native-menu")
+    subprocess.run(["xdotool", "click", "1"], check=True, timeout=5)
+    wait(lambda: palette_visible((bar, background, divider, caret)))
+    assert entry.get_text() == "", "返回菜单意外提交候选"
+    # 文字取色器必须覆盖皮肤预编辑文字，再恢复全部外观。
+    preferences['custom_theme'].setdefault('candidate_colors', {})['text'] = '#12EF45'
+    publish()
+    def picked_preedit():
+        # 字体抗锯齿不保证存在足够多纯色像素；只查预编辑背景框内向取色器绿色收敛的字形。
+        left, top, right, bottom = color_bounds(background)
+        image, _ = screenshot()
+        data, stride, channels = image.get_pixels(), image.get_rowstride(), image.get_n_channels()
+        return sum(data[y * stride + x * channels + 1] > data[y * stride + x * channels] + 100 and
+                   data[y * stride + x * channels + 1] > data[y * stride + x * channels + 2] + 100
+                   for y in range(top, bottom) for x in range(left, right)) > 10
+    wait(picked_preedit)
+    del preferences['custom_theme']['candidate_colors']['text']
+    publish()
+    manifest.write_text(original)
+    wait(lambda: all(screenshot()[1][color] < 16 for color in (bar, background, divider, caret)))
+
+
+def accept_translation(manifest, preferences, publish, entry):
+    original = manifest.read_text()
+    normal = ((239, 48, 64), (20, 223, 90), (40, 112, 255))
+    selected = ((255, 212, 42), (250, 57, 224), (38, 231, 231))
+    keys = ("translation", "translation_pos", "translation_separator", "selected_translation",
+            "selected_translation_pos", "selected_translation_separator")
+    style = original
+    for mode in ("light", "dark"):
+        slots = "".join(f"{key} = '#{r:02X}{g:02X}{b:02X}'\n"
+                        for key, (r, g, b) in zip(keys, normal + selected))
+        style = style.replace(f"[candidate.{mode}]\n", f"[candidate.{mode}]\n{slots}")
+    manifest.write_text(style)
+    preferences.update(candidate_translations=True, candidate_english_gloss=False, translation_target_language="en")
+    publish()
+
+    def visible(colors, background=SELECTED):
+        _, counts = screenshot()
+        # 小字号分号可能只有一个纯色像素；检查前景与已知底色之间的抗锯齿混合线。
+        def ink(color):
+            delta = tuple(value - base for value, base in zip(color, background))
+            length = sum(value * value for value in delta)
+            result = 0
+            for actual, count in counts.items():
+                alpha = sum((value - base) * change for value, base, change in zip(actual, background, delta)) / length
+                if 0.6 <= alpha <= 1.02 and all(abs(value - (base + alpha * change)) <= 4
+                                               for value, base, change in zip(actual, background, delta)):
+                    result += count
+            return result
+        return all(ink(color) >= 2 for color in colors)
+
+    wait(lambda: visible(selected))
+    save_image("native-translation-selected")
+    subprocess.run(["xdotool", "key", "Down"], check=True, timeout=5)
+    wait(lambda: visible(normal, LIGHT[4]))
+    save_image("native-translation-normal")
+    subprocess.run(["xdotool", "key", "Up"], check=True, timeout=5)
+    wait(lambda: visible(selected))
+    replacement = (198, 103, 241)
+    manifest.write_text(style.replace("#FA39E0", "#C667F1"))
+    wait(lambda: visible((selected[0], replacement, selected[2])))
+    save_image("native-translation-hot-update")
+    left, top, right, bottom = color_bounds(SELECTED)
+    subprocess.run(["xdotool", "mousemove", str((left + right) // 2), str((top + bottom) // 2), "click", "1"],
+                   check=True, timeout=5)
+    wait(lambda: entry.get_text() == "你")
+    assert "MMM" not in entry.get_text(), "释义进入了上屏文字"
+    wait(lambda: native_window() is None)
+    preferences["candidate_translations"] = False
+    publish()
+    manifest.write_text(original)
+    entry.set_text("")
+    subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "100", "ni"], check=True, timeout=5)
+    wait(lambda: palette_visible((SELECTED,)))
 
 
 def click_color(color, button):
@@ -277,7 +467,7 @@ def main():
     if WAYLAND:
         assert profile and os.environ.get("XDG_DATA_HOME") == str(Path(profile) / "data"), "需要启动前固定的合成配置目录"
     profile_context = nullcontext(profile) if profile else tempfile.TemporaryDirectory(prefix="msime-canvas-editor-")
-    with profile_context as directory:
+    with profile_context as directory, ExitStack() as cleanups:
         root = Path(directory)
         if WAYLAND:
             assert GLib.get_user_data_dir() == str(root / "data"), "GLib 缓存了夹具以外的数据目录"
@@ -319,6 +509,8 @@ def main():
                            candidate_layout=os.environ.get("MSIME_TEST_CANVAS_LAYOUT", "vertical"))
         if NATIVE:
             preferences["navigation"]["mouse_wheel"] = True
+            preferences.update(candidate_translations=False, candidate_english_gloss=False)
+            options["translation_provider_socket"] = synthetic_translation_provider(root, cleanups)
         preferences["custom_theme"].update(base="system", candidate_skin="canvas-fixture",
                                            candidate_skin_dark="canvas-fixture")
 
@@ -439,6 +631,38 @@ def main():
                     manifest.write_text(manifest.read_text().replace("line_gap_dip = 39", "line_gap_dip = 19"))
                     wait(lambda: palette_top(SELECTED) == selected_before)
                     save_image("native-layout")
+                    # 同一原生窗口热更新布局，测量、高亮和点击区域必须同步改变。
+                    original_manifest = manifest.read_text()
+                    original_selected = selected_pixels()
+                    layout = preferences["candidate_layout"]
+                    styled_manifest = original_manifest + (
+                        f"\n[candidate_window.{layout}]\nitem_extra_height = 34\n"
+                        "number_scale = 0.45\nnumber_inset = 16\nnumber_gap = 24\n"
+                        "item_padding_right = 20\nitem_gap = 12\npreedit_margin_dip = [7, 11, 9, 13]\n")
+                    manifest.write_text(styled_manifest)
+                    wait(lambda: selected_pixels() is not None and
+                         selected_pixels()[1] >= original_selected[1] + 24 * NATIVE_SCALE)
+                    assert palette_top(SELECTED) == selected_before + 7 * NATIVE_SCALE, "拼音上边距未进入真实候选布局"
+                    before_font = selected_pixels()
+                    manifest.write_text(styled_manifest.replace("[candidate_window]\n", "[candidate_window]\nfont_family = 'monospace'\n"))
+                    wait(lambda: selected_pixels() is not None and selected_pixels() != before_font)
+                    save_image("native-skin-layout")
+                    assert focused(), "布局或字体热更新抢走编辑器焦点"
+                    # 点击新增行高底部，若命中仍用旧矩形就会错选下一项。
+                    x, y = color_position(SELECTED)
+                    y += selected_pixels()[1] - 4
+                    subprocess.run(["xdotool", "mousemove", str(x), str(y), "click", "1"], check=True, timeout=5)
+                    wait(lambda: entry.get_text() == "你")
+                    wait(lambda: native_window() is None)
+                    entry.set_text("")
+                    subprocess.run(["xdotool", "type", "--clearmodifiers", "--delay", "100", "ni"], check=True, timeout=5)
+                    wait(lambda: palette_visible((SELECTED,)))
+                    manifest.write_text(original_manifest)
+                    wait(lambda: selected_pixels() == original_selected)
+                    accept_appearance(manifest, preferences, publish, entry)
+                    wait(lambda: selected_pixels() == original_selected)
+                    accept_translation(manifest, preferences, publish, entry)
+                    wait(lambda: selected_pixels() == original_selected)
                     before_move = window_geometry(native_window())
                     window.move(100, 80)
                     # GTK 3 在下一次光标更新时上报根坐标，候选窗按该坐标重新定位。

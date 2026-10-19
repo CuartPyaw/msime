@@ -18,7 +18,276 @@ std::uint32_t pixel(cairo_surface_t *surface, int x, int y) {
   std::memcpy(&value, cairo_image_surface_get_data(surface) + y * cairo_image_surface_get_stride(surface) + x * 4, 4);
   return value;
 }
+void skin_layout() {
+  const auto target = image(1000, 1000, 0);
+  auto *cr = cairo_create(target.get());
+  host::NativeCanvasAssets assets;
+  host::NativeCanvasContent content;
+  content.font = "Sans 12";
+  content.preedit = "synthetic";
+  content.items = {{"1. ", "alpha"}, {"2. ", "beta"}};
+  const auto original = host::measure_native_canvas(cr, assets, content);
+  // 12 point 在默认 96dpi 下是 16 DIP；绝对字号不得再乘 point 换算。
+  assert(std::abs(original.metrics.font_size - 16) < 0.001);
+  content.font = "Sans 16px";
+  assert(host::measure_native_canvas(cr, assets, content).metrics.font_size == 16);
+  content.font = "Sans 12";
+  assets.geometry = {{"padding", {{"value", 0.5}, {"em", true}}},
+      {"itemGap", {{"value", 1.1}, {"em", true}}},
+      {"itemExtraHeight", {{"value", 20}, {"em", false}}},
+      {"numberInset", {{"value", 12}, {"em", false}}},
+      {"itemPaddingRight", {{"value", 14}, {"em", false}}},
+      {"numberGap", {{"value", 9}, {"em", false}}}, {"numberScale", 0.5},
+      {"preeditMarginDip", {{"top", 3}, {"right", 5}, {"bottom", 7}, {"left", 11}}}};
+  assets.horizontal = {{"itemGap", {{"value", 10}, {"em", false}}},
+      {"itemMinWidth", {{"value", 150}, {"em", false}}}};
+  assets.vertical = {{"numberGap", {{"value", 13}, {"em", false}}}};
+  auto vertical = host::measure_native_canvas(cr, assets, content);
+  assert(vertical.metrics.content[0] == 8 && vertical.metrics.gap == 18);
+  assert(vertical.metrics.number_gap == 13);
+  assert(vertical.preedit.x == 19 && vertical.preedit.y == 11);
+  assert(vertical.items[0].y == vertical.preedit.y + vertical.preedit.height + 7);
+  assert(vertical.items[0].height >= 41.6 && vertical.items[0].height < 41.601);
+  assert(vertical.items[1].y == vertical.items[0].y + vertical.items[0].height + 18);
+  assert(vertical.items[0].contains(vertical.items[0].x + 1, vertical.items[0].y + 1));
+  assert(!vertical.items[0].contains(vertical.items[0].x + 1, vertical.items[0].y + vertical.items[0].height + 1));
+  assert(host::native_canvas_text_size(cr, vertical.metrics.number_font, "12.").first <
+         host::native_canvas_text_size(cr, vertical.metrics.font, "12.").first);
+  content.horizontal = true;
+  auto horizontal = host::measure_native_canvas(cr, assets, content);
+  assert(horizontal.items[0].width == 150 && horizontal.metrics.number_gap == 9);
+  assert(horizontal.items[1].x - horizontal.items[0].x == 166);
+  assets.fit_content = true;
+  horizontal = host::measure_native_canvas(cr, assets, content);
+  assert(horizontal.items[1].x - horizontal.items[0].x == 160);
+  assert(horizontal.metrics.right == horizontal.metrics.number_inset);
+  assets.min_width = 500;
+  assets.horizontal["justifyRows"] = true;
+  horizontal = host::measure_native_canvas(cr, assets, content);
+  assert(horizontal.panel.width == 500);
+  assert(horizontal.items[0].width == horizontal.items[1].width);
+  assert(horizontal.items.back().x + horizontal.items.back().width == horizontal.panel.width - 8);
+  assets.horizontal["justifyRows"] = false;
+  horizontal = host::measure_native_canvas(cr, assets, content);
+  assert(horizontal.items[0].width == 150 && horizontal.panel.width == 500);
+  content.items[1].text = "synthetic\nsecond line\nthird line";
+  const auto multiline = host::measure_native_canvas(cr, assets, content);
+  assert(multiline.items[0].height == multiline.items[1].height);
+  assert(multiline.items[0].height >= host::native_canvas_text_size(cr, multiline.metrics.font, content.items[1].text).second);
+  content.items[1].text = "beta";
+  // 显式 content insets 优先；九宫格边宽与 padding 相加只用于未指定 insets 的包。
+  assets.width = {2, 3, 4, 5};
+  auto metrics = host::native_canvas_metrics(cr, assets, content);
+  assert((metrics.content == std::array<double, 4>{10, 11, 12, 13}));
+  assets.explicit_content = true;
+  assets.content = {20, 21, 22, 23};
+  metrics = host::native_canvas_metrics(cr, assets, content);
+  assert(metrics.content == assets.content);
+  assets.explicit_line_gap = true;
+  assets.line_gap = 0;
+  vertical = host::measure_native_canvas(cr, assets, content);
+  assert(vertical.items[0].y == vertical.preedit.y + vertical.preedit.height);
+  content.preedit.clear();
+  vertical = host::measure_native_canvas(cr, assets, content);
+  assert(vertical.items[0].y == 20);
+  assets.font_family = "monospace";
+  metrics = host::native_canvas_metrics(cr, assets, content);
+  auto *font = pango_font_description_from_string(metrics.font.c_str());
+  assert(std::string(pango_font_description_get_family(font)) == "monospace,Sans");
+  pango_font_description_free(font);
+  assert(metrics.font_size == 16);
+  // 实际绘制后的文字像素必须全部落在测量与点击共用的候选矩形中。
+  assets = {};
+  assets.geometry = {{"itemExtraHeight", {{"value", 24}, {"em", false}}},
+      {"numberScale", 0.5}, {"numberGap", {{"value", 18}, {"em", false}}}};
+  content = {};
+  content.font = "Sans 12";
+  content.items = {{"1.", "synthetic"}};
+  content.selected = 0;
+  auto painted = host::measure_native_canvas(cr, assets, content);
+  host::paint_native_canvas(cr, assets, content, painted,
+      {{"surface", "#000000"}, {"selected", "#000000"}, {"selected_text", "#FFFFFF"}, {"selected_number", "#FFFFFF"}});
+  int ink = 0;
+  for (int y = 0; y < painted.height; ++y) for (int x = 0; x < painted.width; ++x) {
+    if ((pixel(target.get(), x, y) & 0xffffff) == 0) continue;
+    ++ink;
+    assert(painted.items[0].contains(x, y));
+  }
+  assert(ink > 100);
+  // 序号缩放为零时不绘制，但仍保留来源的 9 DIP 序号栏与 number_gap。
+  assets.geometry["numberScale"] = 0.0;
+  const auto no_numbers = host::measure_native_canvas(cr, assets, content);
+  const auto zero_target = image(400, 200, 0);
+  auto *zero_cr = cairo_create(zero_target.get());
+  host::paint_native_canvas(zero_cr, assets, content, no_numbers,
+      {{"surface", "#000000"}, {"selected", "#000000"}, {"selected_text", "#FFFFFF"}, {"selected_number", "#FFFFFF"}});
+  const double text_left = no_numbers.items[0].x + no_numbers.metrics.number_inset + 9 + 18;
+  int text_ink = 0;
+  for (int y = 0; y < no_numbers.height; ++y) for (int x = 0; x < no_numbers.width; ++x) {
+    if ((pixel(zero_target.get(), x, y) & 0xffffff) == 0) continue;
+    ++text_ink;
+    assert(x >= text_left && no_numbers.items[0].contains(x, y));
+  }
+  assert(text_ink > 100);
+  cairo_destroy(zero_cr);
+  content.items[0].label.clear();
+  assert(no_numbers.width - host::measure_native_canvas(cr, assets, content).width == 27);
+  cairo_destroy(cr);
+}
+
+void skin_appearance() {
+  host::NativeCanvasAssets assets;
+  assets.card_radius = 0;
+  assets.item_radius = 12;
+  assets.geometry = {{"itemCornersFollowCard", true}, {"itemExtraHeight", {{"value", 24}, {"em", false}}},
+      {"itemMinWidth", {{"value", 120}, {"em", false}}}, {"selectedBarWidth", {{"value", 1}, {"em", false}}},
+      {"selectedBarHeightEm", 0.0}};
+  host::NativeCanvasContent content;
+  content.font = "Sans 12";
+  content.horizontal = true;
+  content.items = {{"", " "}, {"", " "}};
+  content.selected = 0;
+  const auto target = image(500, 300, 0);
+  auto *cr = cairo_create(target.get());
+  auto layout = host::measure_native_canvas(cr, assets, content);
+  const auto rect = layout.items[0];
+  // 显式零卡片圆角仍保持贴角；中间的两个角保留普通圆角。
+  assert((host::native_canvas_item_corners(content, layout, 0) == std::array<double, 4>{0, 12, 12, 0}));
+  assets.min_width = 400;
+  layout = host::measure_native_canvas(cr, assets, content);
+  assert((host::native_canvas_item_corners(content, layout, 1) == std::array<double, 4>{12, 12, 12, 12}));
+  assets.min_width = 0;
+  Json palette = {{"surface", "#000000"}, {"selected", "#FF0000"}, {"hover", "#00FF00"},
+      {"accent", "#0000FF"}, {"selected_bar", "#00000000"}, {"show_selected_bar", true}};
+  layout = host::measure_native_canvas(cr, assets, content);
+  assert(layout.metrics.bar_width == 3 && layout.metrics.bar_height == 6);
+  host::paint_native_canvas(cr, assets, content, layout, palette);
+  assert((pixel(target.get(), rect.x, rect.y) & 0xffffff) == 0xff0000);
+  assert((pixel(target.get(), rect.x + rect.width - 1, rect.y) & 0xffffff) == 0);
+  const int middle = rect.y + rect.height / 2;
+  // 外置条骑在左缘；透明条色回退到 accent，不能变成消失。
+  assert((pixel(target.get(), rect.x - 1, middle) & 0xffffff) == 0x0000ff);
+  assets.horizontal["selectedBarInside"] = true;
+  layout = host::measure_native_canvas(cr, assets, content);
+  host::paint_native_canvas(cr, assets, content, layout, palette, 0, {1, -1});
+  assert((pixel(target.get(), rect.x - 1, middle) & 0xffffff) == 0);
+  assert((pixel(target.get(), layout.items[1].x + 15, middle) & 0xffffff) == 0x00ff00);
+  host::paint_native_canvas(cr, assets, content, layout, palette, 0, {1, 1});
+  assert((pixel(target.get(), layout.items[1].x + 15, middle) & 0xffffff) == 0xff0000);
+  host::paint_native_canvas(cr, assets, content, layout, palette);
+  assert((pixel(target.get(), layout.items[1].x + 15, middle) & 0xffffff) == 0);
+  content.preedit = "synthetic";
+  content.preedit_cursor = 2;
+  palette.update({{"text", "#FFFFFF"}, {"preedit_text", "#FFFF00"}, {"preedit_caret", "#00FFFF"},
+      {"preedit_background", "#880088"}, {"preedit_divider", "#FF8800"}});
+  layout = host::measure_native_canvas(cr, assets, content);
+  assert((host::native_canvas_item_corners(content, layout, 0) == std::array<double, 4>{12, 12, 12, 0}));
+  host::paint_native_canvas(cr, assets, content, layout, palette);
+  int text_ink = 0, caret_ink = 0, background_ink = 0, divider_ink = 0;
+  for (int y = layout.preedit.y; y < layout.preedit.y + layout.preedit.height; ++y)
+    for (int x = layout.preedit.x; x < layout.panel.x + layout.panel.width - layout.metrics.content[1]; ++x) {
+      const auto color = pixel(target.get(), x, y) & 0xffffff;
+      text_ink += color == 0xffff00; caret_ink += color == 0x00ffff;
+      background_ink += color == 0x880088; divider_ink += color == 0xff8800;
+    }
+  assert(text_ink > 10 && caret_ink > 20 && background_ink > 100 && divider_ink > 100);
+  // 显式透明预编辑文字保持透明，不能套用选中条的 alpha 0 跟随规则。
+  palette["preedit_text"] = "#00000000";
+  palette["preedit_background"] = "#000000";
+  palette["preedit_divider"] = "#000000";
+  content.preedit_cursor = -1;
+  host::paint_native_canvas(cr, assets, content, layout, palette);
+  for (int y = layout.preedit.y; y < layout.preedit.y + layout.preedit.height; ++y)
+    for (int x = layout.preedit.x + 12; x < layout.preedit.x + layout.preedit.width - 12; ++x)
+      assert((pixel(target.get(), x, y) & 0xffffff) == 0);
+  // 非 UTF-8 边界不画伪光标，不将变换后的文字偏移当作编辑位置。
+  content.preedit = "合成"; content.preedit_cursor = 1;
+  layout = host::measure_native_canvas(cr, assets, content);
+  host::paint_native_canvas(cr, assets, content, layout, palette);
+  for (int y = layout.preedit.y; y < layout.preedit.y + layout.preedit.height; ++y)
+    for (int x = layout.preedit.x; x < layout.panel.width; ++x)
+      assert((pixel(target.get(), x, y) & 0xffffff) != 0x00ffff);
+  const auto merged = host::native_canvas_palette({{"candidate", {{"text", "#112233"}, {"selected_text", "#FFFFFF"}}},
+      {"candidate_details", {{"preedit_text", "#445566"}, {"menu_surface", "#123456"}, {"selected_bar", nullptr}}}});
+  assert(merged.at("text") == "#112233" && merged.at("selected_text") == "#FFFFFF");
+  assert(merged.at("preedit_text") == "#445566" && !merged.contains("selected_bar"));
+  content.preedit = "menu"; content.menu = true;
+  assets.panel = image(30, 30, 0xff00ff);
+  palette.update({{"menu_surface", "#123456"}, {"menu_hover", "#654321"}, {"preedit_background", "#FF00FF"}});
+  layout = host::measure_native_canvas(cr, assets, content);
+  host::paint_native_canvas(cr, assets, content, layout, palette, 0, {1, -1});
+  assert((pixel(target.get(), 5, 5) & 0xffffff) == 0x123456);
+  assert((pixel(target.get(), layout.panel.width - 20, layout.preedit.y + 5) & 0xffffff) == 0x123456);
+  assert((pixel(target.get(), layout.items[1].x + 15, layout.items[1].y + 15) & 0xffffff) == 0x654321);
+  cairo_destroy(cr);
+}
+
+void translation_appearance() {
+  host::NativeCanvasAssets assets;
+  host::NativeCanvasContent content;
+  content.font = "Sans 30px";
+  content.items = {{"", "MMMM", "n. MMM；v. MMM", " MM", Json::array({
+      Json{{"start", 0}, {"length", 2}, {"role", "pos"}},
+      Json{{"start", 6}, {"length", 3}, {"role", "separator"}},
+      Json{{"start", 9}, {"length", 2}, {"role", "pos"}}})}};
+  Json palette = {{"surface", "#000000"}, {"selected", "#000000"}, {"hover", "#000000"},
+      {"text", "#FFFFFF"}, {"selected_text", "#FFFFFF"}, {"translation", "#FF0000"},
+      {"translation_pos", "#00FF00"}, {"translation_separator", "#0000FF"},
+      {"selected_translation", "#00FFFF"}, {"selected_translation_pos", "#FF00FF"},
+      {"selected_translation_separator", "#FF8000"}};
+  const auto render = [&](host::NativeCanvasPointer pointer = {}) {
+    auto target = image(1000, 400, 0);
+    auto *cr = cairo_create(target.get());
+    const auto layout = host::measure_native_canvas(cr, assets, content);
+    host::paint_native_canvas(cr, assets, content, layout, palette, 0, pointer);
+    std::map<std::uint32_t, int> colors;
+    for (int y = 0; y < layout.height; ++y) for (int x = 0; x < layout.width; ++x) {
+      const auto color = pixel(target.get(), x, y) & 0xffffff;
+      if (color != 0) assert(layout.items[0].contains(x, y));
+      ++colors[color];
+    }
+    cairo_destroy(cr);
+    return std::make_pair(layout, colors);
+  };
+  const auto normal = render();
+  assert(normal.second.at(0xffffff) > 100);
+  for (const auto color : {0xff0000u, 0x00ff00u, 0x0000ffu}) assert(normal.second.at(color) > 3);
+  assert(render({0, -1}).second == normal.second);
+  content.selected = 0;
+  const auto selected = render();
+  for (const auto color : {0x00ffffu, 0xff00ffu, 0xff8000u}) assert(selected.second.at(color) > 3);
+  content.selected = -1;
+  assert(render({0, 0}).second == selected.second);
+  // 错位的 UTF-8 范围、越界、负数和未知角色不能改变颜色或破坏字形。
+  const auto valid_runs = content.items[0].translation_runs;
+  for (const auto &run : Json::array({
+      Json{{"start", 7}, {"length", 1}, {"role", "pos"}},
+      Json{{"start", -1}, {"length", 1}, {"role", "pos"}},
+      Json{{"start", 0}, {"length", 999999}, {"role", "pos"}},
+      Json{{"start", 3}, {"length", 2}, {"role", "unknown"}}}))
+    content.items[0].translation_runs.push_back(run);
+  assert(render().second == normal.second);
+  content.items[0].translation_runs = valid_runs;
+  content.horizontal = true;
+  const auto horizontal = render();
+  assert(horizontal.first.items[0].height > normal.first.items[0].height);
+  assert(horizontal.first.items[0].width < normal.first.items[0].width);
+  for (const auto color : {0xff0000u, 0x00ff00u, 0x0000ffu}) assert(horizontal.second.at(color) > 3);
+  // 透明的选中分段色回到普通分段色；透明释义色回到正文色乘来源的 0.62。
+  content.selected = 0;
+  for (const auto key : {"selected_translation", "selected_translation_pos", "selected_translation_separator"})
+    palette[key] = "#00000000";
+  assert(render().second == horizontal.second);
+  content.items[0].translation_runs = Json::array();
+  palette["translation"] = "#00000000";
+  const auto inherited = render();
+  assert(inherited.second.at(0x9e9e9e) > 3);
+}
+
 int main() {
+  skin_layout();
+  skin_appearance();
+  translation_appearance();
   // 完整次数、精确帧边界、跨循环和有限末帧停止唤醒。
   host::NativeCanvasAnimation animation;
   animation.frames = {image(1, 1, 0xff0000), image(1, 1, 0x0000ff)};
@@ -65,7 +334,12 @@ int main() {
   Json package = {{"id", "fixture"}, {"canvas", true},
       {"borderImage", {{"source", "a.png"}, {"sliceDip", {2}}}},
       {"decorations", Json::array({{{"image", "a.png"}, {"widthDip", 20}, {"heightDip", 20}}})}};
+  package["fontFamily"] = "monospace";
+  package["minWidthDip"] = 320;
+  package["geometry"] = {{"padding", {{"value", 3}, {"em", false}}}};
   const auto cached = host::load_native_canvas(package, root, "fixture", true);
+  assert(cached && cached->font_family == "monospace" && cached->min_width == 320);
+  assert(cached->geometry == package["geometry"]);
   assert(cached && cached->panel_animation == cached->decorations[0].animation);
   package["decorations"][0]["image"] = "b.png";
   assert(!host::load_native_canvas(package, root, "fixture", true));
