@@ -46,7 +46,9 @@ import { CloudDictionaryKindSelect } from "./cloud-dictionary-kind-select";
 import { CloudDictionarySelectField } from "./cloud-dictionary-select-field";
 import { CloudDictionaryQueryToolbar } from "./cloud-dictionary-query-toolbar";
 import { CloudPinyinSchemeOptions, CloudShuangpinProfileOptions } from "./cloud-scheme-options";
-import { clipboardTooltip, emojiDisplayName, symbolCategoryTitle } from "./emoji-panel-helpers";
+import { emojiDisplayName, symbolCategoryTitle } from "./emoji-panel-helpers";
+import { panelField } from "./emoji-panel-style";
+import { EmojiClipboardEntries } from "./emoji-clipboard-entries";
 import { HandwritingResults } from "./handwriting-results";
 import { HandwritingInkEditor } from "./handwriting-ink-editor";
 import { HandwritingModelNotice } from "./handwriting-model-notice";
@@ -1396,9 +1398,6 @@ const emojiPages: { id: EmojiPage; label: string; icon: string }[] = [
  */
 const panelDim = "text-[#b8b8c0] group-data-[panel-theme=light]:text-[#656a73]";
 const panelDivider = "border-white/[0.09] group-data-[panel-theme=light]:border-[#d9dce3]";
-/** A raised field: the search box, a clipboard row, the delete button beside one. */
-const panelField =
-  "border border-[#3a3a44] bg-[#2b2b33] text-[#f5f5f7] group-data-[panel-theme=light]:border-[#c8ccd5] group-data-[panel-theme=light]:bg-white group-data-[panel-theme=light]:text-[#202124]";
 /** What a hoverable control settles on: a lift in the background and full-strength text. */
 const panelRaise =
   "hover:bg-[#303038] hover:text-[#f5f5f7] group-data-[panel-theme=light]:hover:bg-[#eceef3] group-data-[panel-theme=light]:hover:text-[#202124]";
@@ -1437,8 +1436,6 @@ const panelTile = (flow: boolean, compact = false) =>
         ? "h-10 min-h-10 p-1 text-xl"
         : "min-h-[66px] p-1.5 text-[29px]"
   }`;
-const clipboardRow = `w-full flex-1 min-w-0 overflow-hidden rounded-lg px-3.5 py-3 text-left font-[inherit] text-ellipsis whitespace-nowrap ${panelField} hover:border-[#5fbf84] hover:bg-[#303038] focus-visible:border-[#5fbf84] focus-visible:bg-[#303038] group-data-[panel-theme=light]:hover:border-[#2c7a4b] group-data-[panel-theme=light]:hover:bg-[#eceef3] group-data-[panel-theme=light]:focus-visible:border-[#2c7a4b] group-data-[panel-theme=light]:focus-visible:bg-[#eceef3]`;
-const clipboardSideButton = `shrink-0 grow-0 basis-auto rounded-lg p-2 font-[inherit] ${panelField} hover:border-[#5fbf84] focus-visible:border-[#5fbf84] group-data-[panel-theme=light]:hover:border-[#2c7a4b] group-data-[panel-theme=light]:focus-visible:border-[#2c7a4b]`;
 
 export function EmojiPanel({
   client,
@@ -1806,51 +1803,15 @@ export function EmojiPanel({
               )}
             </div>
           ) : visibleClipboard.length ? (
-            <div className="flex flex-col gap-[7px]">
-              {visibleClipboard.map((item) => (
-                <div className="flex items-stretch gap-1.5" data-clipboard-row="" key={item}>
-                  <button
-                    type="button"
-                    className={clipboardRow}
-                    data-clipboard-item=""
-                    data-emoji-navigation-item
-                    aria-keyshortcuts={
-                      [canCopy ? "Control+c" : "", client.clipboard?.remove ? "Delete" : ""]
-                        .filter(Boolean)
-                        .join(" ") || undefined
-                    }
-                    onKeyDown={(event) => clipboardItemKey(event, item)}
-                    disabled={clipboardBusy}
-                    title={clipboardTooltip(item)}
-                    onClick={() => void copy(item, true)}
-                  >
-                    {item.replace(/[\r\n\t]/g, " ")}
-                  </button>
-                  {client.clipboard?.paste && (
-                    <button
-                      type="button"
-                      className={clipboardSideButton}
-                      disabled={clipboardBusy}
-                      aria-label="粘贴此条记录到原应用"
-                      onClick={() => void pasteClipboard(item)}
-                    >
-                      粘贴
-                    </button>
-                  )}
-                  {client.clipboard?.remove && (
-                    <button
-                      type="button"
-                      className={clipboardSideButton}
-                      disabled={clipboardBusy}
-                      aria-label="删除此条记录"
-                      onClick={() => void removeClipboard(item)}
-                    >
-                      删除
-                    </button>
-                  )}
-                </div>
-              ))}
-            </div>
+            <EmojiClipboardEntries
+              items={visibleClipboard}
+              busy={clipboardBusy}
+              canCopy={canCopy}
+              onCopy={(text) => void copy(text, true)}
+              onItemKeyDown={clipboardItemKey}
+              onPaste={client.clipboard?.paste ? pasteClipboard : undefined}
+              onRemove={client.clipboard?.remove ? removeClipboard : undefined}
+            />
           ) : (
             <p className={panelEmpty} role="status">
               {query ? "没有匹配的剪贴板记录" : "暂无剪贴板记录"}
