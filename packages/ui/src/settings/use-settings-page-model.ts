@@ -40,6 +40,7 @@ import { useCommunityGallerySubview } from "./use-community-gallery-subview";
 import { useMacosSettings } from "./use-macos-settings";
 import { useWindowState } from "./use-window-state";
 import { useAppVersion } from "./use-app-version";
+import { useAppReleaseDate } from "./use-app-release-date";
 import { supportDiagnostics } from "./support-diagnostics";
 import { useMountedRef } from "./use-mounted-ref";
 import { useHelpcodeCatalog } from "./use-helpcode-catalog";
@@ -229,6 +230,7 @@ export function useSettingsPageModel({ client, initialPage, route }: SettingsPag
     readAppVersion: client.readAppVersion,
     fallbackVersion: fallbackAppVersion,
   });
+  const appReleaseDate = useAppReleaseDate(client.readAppReleaseDate);
   const { customHelpcodeSchemas, helpcodePacks, refreshHelpcodePacks } = useHelpcodeCatalog({
     schemaReader: client.listHelpcodeSchemas,
     catalog: client.plugins?.catalog,
@@ -776,6 +778,7 @@ export function useSettingsPageModel({ client, initialPage, route }: SettingsPag
     updateCheckSupported,
     availableUpdate,
     currentAppVersion,
+    appReleaseDate,
     copyFeedbackGroup,
     feedbackCopied,
     feedbackKind,

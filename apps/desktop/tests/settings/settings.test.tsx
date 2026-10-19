@@ -8658,6 +8658,57 @@ test("about page sends the packaged app version and reports the newest release a
   expect(screen.queryByRole("button", { name: "前往下载" })).toBeNull();
 });
 
+test("about page writes the release date after the version and still checks updates by the bare version", async () => {
+  const checkUpdate = vi.fn().mockResolvedValue({
+    status: "current",
+    update: hostRelease("linux-v1.2.0"),
+  } satisfies UpdateCheckResult);
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(initial),
+        save: vi.fn(),
+        readAppVersion: vi.fn().mockResolvedValue("1.2.0"),
+        readAppReleaseDate: vi.fn().mockResolvedValue("2026-10-19\n"),
+        checkUpdate,
+        host: testHost({ platform: "linux" }),
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^(关于|关于水杉)$/ }));
+  const currentVersion = (await screen.findByText("当前版本")).parentElement as HTMLElement;
+  expect(await within(currentVersion).findByText("v1.2.0（2026-10-19 发布）")).toBeDefined();
+  fireEvent.click(screen.getByRole("button", { name: "检查更新" }));
+  expect(await screen.findByText("已是最新版本")).toBeDefined();
+  expect(checkUpdate).toHaveBeenCalledWith(
+    expect.objectContaining({ platform: "linux", currentVersion: "1.2.0" }),
+  );
+});
+
+test.each([
+  ["an empty answer", () => Promise.resolve("")],
+  ["a date that is not YYYY-MM-DD", () => Promise.resolve("2026-13-01")],
+  ["a failed read", () => Promise.reject(new Error("synthetic"))],
+])("about page shows only the version after %s", async (_name, answer) => {
+  const readAppReleaseDate = vi.fn(answer);
+  render(
+    <SettingsPage
+      client={{
+        load: vi.fn().mockResolvedValue(initial),
+        save: vi.fn(),
+        readAppVersion: vi.fn().mockResolvedValue("1.2.0"),
+        readAppReleaseDate,
+        host: testHost({ platform: "linux" }),
+      }}
+    />,
+  );
+  fireEvent.click(screen.getByRole("button", { name: /^(关于|关于水杉)$/ }));
+  const currentVersion = (await screen.findByText("当前版本")).parentElement as HTMLElement;
+  expect(await within(currentVersion).findByText("v1.2.0")).toBeDefined();
+  await waitFor(() => expect(readAppReleaseDate).toHaveBeenCalled());
+  expect(within(currentVersion).queryByText(/发布/)).toBeNull();
+});
+
 test("installer trust uses sha256sum on Linux and keeps Get-FileHash on Windows", () => {
   const digest = "c".repeat(64);
   const version = { display: "1.2.0", parts: [1, 2, 0] };

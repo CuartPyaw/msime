@@ -1012,6 +1012,17 @@ constexpr const wchar_t *releases_url =
 // 本次构建运行时的版本号：发布构建取 `Build-Client.ps1` 打上的值（`TargetVersion`），开发构建取 `platforms/windows/version.txt`，与 Server 报告的值相同。
 constexpr std::wstring_view app_version = L"" MSIME_WINDOWS_VERSION;
 
+// 本次构建的发布日期 `YYYY-MM-DD`，由 `MSIME.Settings.vcxproj` 依次取 `MSIME_RELEASE_DATE`、`platforms/windows/release-date.txt` 和 git 当前提交的日期，都没有时为空。只加在「关于」页的版本文字上，检查更新和反馈报告仍用 `app_version`。
+constexpr std::wstring_view app_release_date = L"" MSIME_WINDOWS_RELEASE_DATE;
+
+// 「关于」页的版本文字：`v0.2.1（2026-10-19 发布）`，没有发布日期时只是 `v0.2.1`。
+std::wstring app_version_label() {
+  std::wstring label = L"v" + std::wstring(app_version);
+  if (!app_release_date.empty())
+    label += L"（" + std::wstring(app_release_date) + L" 发布）";
+  return label;
+}
+
 // 检查更新的结果，措辞与共享设置页一致。
 struct UpdateOutcome {
   std::wstring status;
@@ -19891,7 +19902,7 @@ private:
     update_button.Click([this](Inspectable const &, RoutedEventArgs const &) {
       on_update_button();
     });
-    add_row(updates, 0xE895, L"检查更新", L"当前版本 v" + std::wstring(app_version),
+    add_row(updates, 0xE895, L"检查更新", L"当前版本 " + app_version_label(),
             update_button, update_lines);
     if (!indexing_) {
       update_button_ = update_button;

@@ -5,6 +5,7 @@ import client, { DoubaoFrameResult } from 'libmsimeclient.so';
 import pasteboard from '@ohos.pasteboard';
 import Want from '@ohos.app.ability.Want';
 import bundleManager from '@ohos.bundle.bundleManager';
+import BuildProfile from 'BuildProfile';
 import { UIContext } from '@ohos.arkui.UIContext';
 import { InputMethodListDialog } from '@ohos.inputMethodList';
 import deviceInfo from '@ohos.deviceInfo';
@@ -814,7 +815,7 @@ struct Settings {
           .onControllerAttached(() => {
             try {
               this.controller.registerJavaScriptProxy(this.bridge, BRIDGE_NAME,
-                ['loadPreferences', 'savePreferences', 'hostCapabilities', 'appVersion',
+                ['loadPreferences', 'savePreferences', 'hostCapabilities', 'appVersion', 'appReleaseDate',
                   'scanSkinCatalog', 'readSkinImage', 'readSkinFont', 'readSkinToolbarCss',
                   'dictionaryManifest', 'dictionary', 'nineKeyShuangpinLayout', 'cloudDictionaryDownload',
                   'typingStatistics', 'openExternalUrl', 'copyText',
@@ -2872,6 +2873,11 @@ class SettingsBridge {
       KeyboardLog.error(`version unreadable: ${describeError(error)}`);
       return '';
     }
+  }
+
+  /** 发布日期 `YYYY-MM-DD`，构建时由 entry/hvigorfile.ts 写进 `BuildProfile`；构建时无从得知则为空串。 */
+  appReleaseDate(): string {
+    return BuildProfile.RELEASE_DATE;
   }
 
   openExternalUrl(url: string): void {
