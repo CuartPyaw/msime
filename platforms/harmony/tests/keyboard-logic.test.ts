@@ -4129,6 +4129,44 @@ group("resolves external candidate skin tokens without trusting missing fields",
     ) === 2,
     "PNG dimensions preserve the decoration aspect ratio",
   );
+  const nonCanvasV2: CandidateSkinPackage = {
+    ...sample,
+    schemaVersion: 2,
+    base: "system",
+    animation: { enter: "spring", exit: "fade", selection: "glow", durationMs: 220, staggerMs: 16 },
+  };
+  const nonCanvasMotion = CandidateSkinCatalogPolicy.animation([nonCanvasV2], "sample");
+  check(
+    nonCanvasMotion.enter === "spring" &&
+      nonCanvasMotion.selection === "glow" &&
+      nonCanvasMotion.durationMs === 220 &&
+      nonCanvasMotion.staggerMs === 16,
+    "v2 animation applies to any base, not only canvas",
+  );
+  check(
+    CandidateSkinCatalogPolicy.animation([{ ...nonCanvasV2, canvas: true }], "sample").enter ===
+      "spring",
+    "the host catalog canvas marker does not change v2 animation",
+  );
+  const motionOff = CandidateSkinCatalogPolicy.animation(
+    [
+      {
+        ...nonCanvasV2,
+        animation: {
+          enter: "none",
+          exit: "fade",
+          selection: "none",
+          durationMs: 220,
+          staggerMs: 16,
+        },
+      },
+    ],
+    "sample",
+  );
+  check(
+    motionOff.enter === "none" && motionOff.selection === "none",
+    "a non-canvas v2 package that turns motion off is honoured",
+  );
 });
 
 group("a theme with a fixed mode is offered and drawn only in that mode", () => {

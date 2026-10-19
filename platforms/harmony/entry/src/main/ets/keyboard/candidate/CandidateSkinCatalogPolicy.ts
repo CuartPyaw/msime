@@ -26,6 +26,8 @@ export interface CandidateSkinBackgroundEntry {
 export interface CandidateSkinPackage {
   readonly id: string;
   readonly schemaVersion?: number;
+  /** `base = "canvas"` 的 v2 标记；host catalog 会把 base 规范成 `system`，所以不能只看 base。只影响九宫格、自由挂件等 canvas 专属几何，不影响 `[animation]`：v2 动画对任何 base 都生效。 */
+  readonly canvas?: boolean;
   readonly base: string;
   readonly layouts: string[];
   readonly themes: string[];

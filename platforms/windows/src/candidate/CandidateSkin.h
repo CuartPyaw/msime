@@ -5,9 +5,10 @@
 #include <nlohmann/json.hpp>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace msime::windows {
-// Reads the package assets (decoration, background, geometry and toolbar palette) from the catalog msime_client_skin_catalog returns. Its candidate colours come from msime_client_resolve_theme instead, and the assets are drawn exactly when that resolution names the package in candidate_skin. The catalog serializes SkinSummary in camelCase. The shared catalog already validated the manifest; nothing here trusts it further than the bounds below.
+// Reads the package assets (decoration, background, geometry and toolbar palette) from the catalog msime_client_skin_catalog returns. Its main candidate colours come from msime_client_resolve_theme instead (apply_candidate_skin_extra_slots only adds the slots that resolution does not carry), and the assets are drawn exactly when that resolution names the package in candidate_skin. The catalog serializes SkinSummary in camelCase. The shared catalog already validated the manifest; nothing here trusts it further than the bounds below.
 // The mascot a package draws above the card, if it has one.
 //
 // The catalog parses these and the settings preview renders them, but the live
@@ -212,6 +213,94 @@ inline CandidateSkinToolbar candidate_skin_toolbar(const nlohmann::json &catalog
   toolbar.dark = colors("dark");
   toolbar.light = colors("light");
   return toolbar;
+}
+
+// 只叠加共享主题解析（msime_client_resolve_theme）不带的候选颜色槽位：表面、边框、文字、编号、强调、选中、悬停、释义和选中竖条开关已经按「底、皮肤包、取色器」的顺序解析好，这里不再覆盖。`pickers` 是自定义主题的 `custom_theme.candidate_colors`，取色器仍然优先：设了文字色时不叠皮肤的候选文字和预编辑文字，设了选中色时不叠皮肤的选中文字、选中编号和选中释义，保留解析层按亮度推出的可读颜色。画不出的值保持宿主默认。
+inline CandidatePalette apply_candidate_skin_extra_slots(
+    CandidatePalette palette, const nlohmann::json &candidate,
+    const nlohmann::json &pickers, bool dark);
+inline CandidatePalette apply_candidate_skin_extra_slots(
+    CandidatePalette palette, const nlohmann::json &catalog,
+    const std::string &id, const nlohmann::json &pickers, bool dark) {
+  const auto *package = detail::candidate_skin_package(catalog, id);
+  if (!package || !package->contains("candidate") ||
+      !package->at("candidate").is_object())
+    return palette;
+  return apply_candidate_skin_extra_slots(palette, package->at("candidate"),
+                                          pickers, dark);
+}
+
+inline CandidatePalette apply_candidate_skin_extra_slots(
+    CandidatePalette palette, const nlohmann::json &candidate,
+    const nlohmann::json &pickers, bool dark) {
+  if (!candidate.is_object())
+    return palette;
+  const auto mode = dark ? "dark" : "light";
+  if (!candidate.contains(mode) || !candidate.at(mode).is_object())
+    return palette;
+  const auto &colors = candidate.at(mode);
+  auto picked = [&pickers](const char *key) {
+    return pickers.is_object() && pickers.contains(key) &&
+           pickers.at(key).is_string();
+  };
+  // Only a value that parses is drawn; anything else leaves the host's derived colour.
+  auto apply = [&colors](const char *key, CandidateColor &target) {
+    if (colors.contains(key) && colors.at(key).is_string())
+      if (auto parsed = try_parse_css_color(colors.at(key).get<std::string>()))
+        target = *parsed;
+  };
+  auto optional = [&colors](const char *key,
+                            std::optional<CandidateColor> &target) {
+    if (colors.contains(key) && colors.at(key).is_string())
+      if (auto parsed = try_parse_css_color(colors.at(key).get<std::string>()))
+        target = *parsed;
+  };
+  if (!picked("text")) {
+    optional("candidate_text", palette.candidate_text);
+    optional("preedit_text", palette.preedit_text);
+  }
+  if (!picked("selected")) {
+    apply("selected_text", palette.selected_text);
+    apply("selected_number", palette.selected_number);
+    optional("selected_translation", palette.selected_translation);
+  }
+  optional("preedit_caret", palette.preedit_caret);
+  optional("selected_bar", palette.selected_bar);
+  optional("preedit_background", palette.preedit_background);
+  optional("preedit_divider", palette.preedit_divider);
+  optional("page_arrow_divider", palette.page_arrow_divider);
+  if (colors.contains("menu") && colors.at("menu").is_object()) {
+    const auto &menu = colors.at("menu");
+    auto menu_color = [&menu](const char *key, CandidateColor &target) {
+      if (menu.contains(key) && menu.at(key).is_string())
+        if (auto parsed = try_parse_css_color(menu.at(key).get<std::string>()))
+          target = *parsed;
+    };
+    menu_color("background", palette.menu_fill);
+    menu_color("border", palette.menu_border);
+    menu_color("text", palette.menu_text);
+    menu_color("hover", palette.menu_hover);
+  }
+  return palette;
+}
+
+// The faces the card draws with: a skin's font_family goes first and the user's configured face drops to the head of the fallback chain, as msime-windows' candidate_skin_scene does. `skin` is empty when the package names no font or names one that is not installed, and then the configured chain is used as it is.
+struct CandidateFontChain {
+  std::wstring primary;
+  std::vector<std::wstring> fallback;
+};
+inline CandidateFontChain
+candidate_skin_font_chain(const std::wstring &configured,
+                          const std::vector<std::wstring> &configured_fallback,
+                          const std::wstring &skin) {
+  if (skin.empty() || skin == configured)
+    return {configured, configured_fallback};
+  CandidateFontChain chain{skin, {configured}};
+  for (const auto &family : configured_fallback)
+    if (family != skin && std::find(chain.fallback.begin(), chain.fallback.end(),
+                                    family) == chain.fallback.end())
+      chain.fallback.push_back(family);
+  return chain;
 }
 
 inline CandidateSkinAnimationPreset candidate_skin_animation_preset(
