@@ -543,7 +543,7 @@ pub(super) fn fill_from_look(
         .get_or_insert(look.toolbar_corner_radius_dip);
 }
 
-/// `base = "canvas"` 的包按 [`CANVAS_LOOK`] 补齐没写的候选框和工具栏颜色；候选框圆角不补（见 [`CANVAS_LOOK`]）。`panel_image` 表示包有九宫格面板：它的文字、序号和高亮色是对着自己的贴图挑的，而 msime 的宿主不画贴图、只画不透明的 `canvas` 底色，所以这时候选框的颜色整套换成 `canvas` 外观（只保留包的强调色和右键菜单），免得浅色贴图上的白字落在白底上看不见。这是 msime-windows “宿主画不了就退回能画的样子”的做法按宿主能力用在这里。
+/// `base = "canvas"` 的包按 [`CANVAS_LOOK`] 补齐没写的候选框和工具栏颜色；候选框圆角不补（见 [`CANVAS_LOOK`]）。`panel_image` 表示包有九宫格面板：它的文字、序号和高亮色是对着自己的贴图挑的，不支持贴图的宿主只画不透明的 `canvas` 底色，所以这时候候选框的颜色整套换成 `canvas` 外观（只保留包的强调色和右键菜单），免得浅色贴图上的白字落在白底上看不见。支持贴图的宿主从 `SkinSummary::panel_candidate` 取得未替换的原配色。
 pub(super) fn fill_from_canvas_look(
     candidate: &mut super::CandidateColors,
     toolbar: &mut SkinToolbar,

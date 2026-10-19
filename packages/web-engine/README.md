@@ -196,7 +196,7 @@ Windows 外观高亮候选的文字和序号色按 Windows 版的样式表画：
 
 ### 自定义皮肤对象
 
-`skin` 也可以是一个对象，字段与桌面端皮肤包 `skin.toml` 解析后的 JSON（设置页的 `SkinSummary`）相同，只取候选框用得到的部分。尺寸单位 dip 在网页上就是 CSS px。`schemaVersion: 2` 还可以带 `animation`，对任何 base 都生效，没写 `animation` 时采用安全的默认动画：`enter`、`exit`、`selection` 使用 `none`、`fade`、`fade_scale`、`slide_up`、`spring` 或 `glow`，`durationMs` 为 40–600，`staggerMs` 为 0–80。动画由候选栏使用固定的安全关键帧绘制，系统的 reduced-motion 设置会关闭它；不支持这些字段的宿主仍按静态皮肤绘制。`base: "canvas"`（桌面 `SkinSummary` 报成 `base: "system"` 加 `canvas: true`）必须配 `schemaVersion: 2`，否则抛出 `TypeError`；它只额外表示九宫格边框、自由挂件、insets 这些 canvas 专属字段，其他 base 的 v2 清单忽略这些字段但照常播放动画。网页暂不绘制这些贴图原语，canvas 皮肤回退到公共候选卡片：
+`skin` 也可以是一个对象，字段与桌面端皮肤包 `skin.toml` 解析后的 JSON（设置页的 `SkinSummary`）相同，只取候选框用得到的部分。尺寸单位 dip 在网页上就是 CSS px。`schemaVersion: 2` 还可以带 `animation`，对任何 base 都生效，没写 `animation` 时采用安全的默认动画：`enter`、`exit`、`selection` 使用 `none`、`fade`、`fade_scale`、`slide_up`、`spring` 或 `glow`，`durationMs` 为 40–600，`staggerMs` 为 0–80。动画由候选栏使用固定的安全关键帧绘制，系统的 reduced-motion 设置会关闭它；不支持这些字段的宿主仍按静态皮肤绘制。`base: "canvas"`（桌面 `SkinSummary` 报成 `base: "system"` 加 `canvas: true`）必须配 `schemaVersion: 2`，否则抛出 `TypeError`；它只额外表示九宫格边框、自由挂件、insets 这些 canvas 专属字段，其他 base 的 v2 清单忽略这些字段但照常播放动画。网页绘制这些贴图原语。九宫格按源像素切片、按 CSS px 设置边宽，挂件相对候选卡片定位，外留白参与视口夹紧；面板未加载或加载失败时保留可读卡片，成功后才使用面板配色。系统的 reduced-motion 会把面板和挂件的动画图冻结为首帧：
 
 ```js
 attachInput(textarea, engine, {
@@ -225,6 +225,10 @@ attachInput(textarea, engine, {
 - `base` 是 `system`（或不写）时，皮肤没写的颜色用上面 `system` 那一行说的平台默认配色补；高亮候选的文字和序号同桌面端画普通的 `text`、`number`。
 
 ### `resolveSkin(skin?, { dark, layout }?)`
+
+Canvas 对象还支持 `borderImage: { source, lightSource?, sliceDip, stretchDip?, widthDip?, fill? }`、`contentInsetsDip`、`outerInsetsDip`、`lineGapDip` 和 `decorations`。切片和边宽接受一、二、四值，按上、右、下、左展开；`stretchDip` 提供时替代 `sliceDip`，`widthDip` 缺省采用切片数值。insets 为 `{ top, right, bottom, left }`，内容边距不会小于边宽。挂件字段是 `{ image, anchor?, offsetXDip?, offsetYDip?, widthDip, heightDip, zIndex? }`，锚点支持四角、四边中点和 `center`；`zIndex < 1` 在面板下，其余在文字上，同层保持声明顺序，不接收鼠标。图片地址必须被页面的 `img-src` 放行，网页引擎只生成有界的 `border-image` 属性，不执行包内 CSS。
+
+共享 catalog 的 `candidate` 是未绘制贴图时的回退配色，`panelCandidate` 保存贴图原配色；直接传皮肤对象时可只写 `candidate`。`resolveSkin` 返回计划绘制的 `palette` 和可读的 `fallbackPalette` / `fallbackVariables`，自己画候选栏的调用方需要等图片成功加载后再切到面板配色。
 
 自己画候选栏的页面（例如有自己设计语言的 TapTapGo）可以只取水杉的配色：`resolveSkin` 把皮肤 ID 或皮肤对象解析成桌面端 `theme::resolve` 的结果，并补齐它留空的槽位（`system` 留空的用平台默认配色，Windows 外观补上高亮候选的文字色，见上文「内置皮肤」），不画任何东西。
 

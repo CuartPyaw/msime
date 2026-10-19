@@ -932,6 +932,7 @@ fn scans_valid_and_rejects_unsafe_manifests() {
             toolbar_stylesheet: None,
             preview: None,
             candidate: CandidateColors::default(),
+            panel_candidate: None,
             animation: SkinAnimation::disabled(),
             license: None,
             notices: Vec::new(),
@@ -1129,9 +1130,9 @@ fn schema_v2_without_canvas_only_keys_has_no_notices() {
 }
 
 #[test]
-fn canvas_packages_draw_the_canvas_look_and_say_the_panel_is_not_drawn() {
+fn canvas_packages_keep_panel_colours_and_readable_host_fallback() {
     let root = tempdir().unwrap();
-    // 九宫格面板在 msime 的宿主上不画：包对着自己深色贴图挑的浅色文字不能落在不透明的白底上，整套换成 canvas 外观，只留强调色。
+    // 未绘制九宫格的宿主使用可读的 canvas 配色；有绘制能力的宿主从 panelCandidate 取得贴图原配色。
     let paneled = root.path().join("paneled");
     fs::create_dir(&paneled).unwrap();
     fs::write(paneled.join("panel.png"), encoded_png(12, 12)).unwrap();
@@ -1150,12 +1151,20 @@ fn canvas_packages_draw_the_canvas_look_and_say_the_panel_is_not_drawn() {
     assert_eq!(light.number.as_deref(), Some("#1A1A1A99"));
     assert_eq!(light.accent.as_deref(), Some("#ff00aa"));
     assert_eq!(light.translation.as_deref(), Some("#6940A5"));
+    // 可画面板的宿主仍能拿到贴图对应的原色；回退和贴图配色各自完整序列化。
+    let panel = package.panel_candidate.as_ref().unwrap();
+    assert_eq!(panel.light.text.as_deref(), Some("#f5ecff"));
+    assert_eq!(panel.light.number.as_deref(), Some("#f5ecff"));
+    assert_eq!(panel.light.surface.as_deref(), Some("#FFFFFF"));
+    let json = serde_json::to_value(&package).unwrap();
+    assert_eq!(json["candidate"]["light"]["text"], "#1A1A1A");
+    assert_eq!(json["panelCandidate"]["light"]["text"], "#f5ecff");
     assert_eq!(package.candidate.dark.surface.as_deref(), Some("#202020"));
     assert_eq!(package.candidate.dark.text.as_deref(), Some("#F2F2F2"));
     assert_eq!(package.corner_radius_dip, None);
     assert_eq!(package.toolbar.corner_radius_dip, Some(8.0));
     assert_eq!(package.toolbar.light.handle.as_deref(), Some("#6B69D6"));
-    assert_eq!(package.notices, vec![CANVAS_NOT_DRAWN_NOTICE.to_owned()]);
+    assert_eq!(package.notices, vec![CANVAS_RENDERER_NOTICE.to_owned()]);
 
     // 没有九宫格的 canvas 包只补没写的颜色，自己写的照用，也没有提示。
     let plain = root.path().join("plain");
@@ -1169,6 +1178,7 @@ fn canvas_packages_draw_the_canvas_look_and_say_the_panel_is_not_drawn() {
     assert_eq!(package.candidate.light.text.as_deref(), Some("#301020"));
     assert_eq!(package.candidate.light.surface.as_deref(), Some("#FFFFFF"));
     assert!(package.notices.is_empty());
+    assert!(package.panel_candidate.is_none());
 }
 
 #[test]

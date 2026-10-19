@@ -861,6 +861,7 @@ fn summary_packages_keep_only_declared_modes() {
         toolbar_stylesheet: None,
         preview: None,
         candidate: Default::default(),
+        panel_candidate: None,
         animation: SkinAnimation::disabled(),
         license: None,
         notices: Vec::new(),

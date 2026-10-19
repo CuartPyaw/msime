@@ -248,29 +248,32 @@ pub struct SkinSummary {
     pub toolbar: SkinToolbar,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub toolbar_icon_corner_radius_dip: Option<f64>,
-    /// `[candidate_window.border_image]` 九宫格面板。只在 `base = "canvas"` 时读取；按 msime-windows 的规则校验并保留，供 msime-windows 绘制，当前 msime 各宿主都不画它（见 [`Self::notices`]）。
+    /// `[candidate_window.border_image]` 九宫格面板。只在 `base = "canvas"` 时读取；按 msime-windows 的规则校验并保留，供支持贴图的宿主绘制；其他宿主使用可读回退（见 [`Self::panel_candidate`]）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub border_image: Option<SkinBorderImage>,
-    /// `candidate_window.content_insets_dip`，只在 `base = "canvas"` 时读取；校验并保留给 msime-windows，当前 msime 各宿主不使用。
+    /// `candidate_window.content_insets_dip`，只在 `base = "canvas"` 时读取；由支持 canvas 的宿主消费。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_insets_dip: Option<SkinInsets>,
-    /// `candidate_window.line_gap_dip`，只在 `base = "canvas"` 时读取；校验并保留给 msime-windows，当前 msime 各宿主不使用。
+    /// `candidate_window.line_gap_dip`，只在 `base = "canvas"` 时读取；由支持 canvas 的宿主消费。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub line_gap_dip: Option<f64>,
-    /// `candidate_window.outer_insets_dip`，只在 `base = "canvas"` 时读取；校验并保留给 msime-windows，当前 msime 各宿主不使用。
+    /// `candidate_window.outer_insets_dip`，只在 `base = "canvas"` 时读取；由支持 canvas 的宿主消费。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub outer_insets_dip: Option<SkinInsets>,
-    /// `[[candidate_window.decorations]]` 自由挂件，只在 `base = "canvas"` 时读取；校验并保留给 msime-windows，当前 msime 各宿主都不画它们（见 [`Self::notices`]）。
+    /// `[[candidate_window.decorations]]` 自由挂件，只在 `base = "canvas"` 时读取；由支持 canvas 的宿主绘制。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub decorations: Vec<SkinFreeDecoration>,
     pub toolbar_stylesheet: Option<String>,
     pub preview: Option<String>,
     pub candidate: CandidateColors,
+    /// 面板贴图成功绘制时使用的配色；`candidate` 始终保留未绘制贴图时的可读回退。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub panel_candidate: Option<CandidateColors>,
     /// 声明式动画预设。不支持动画的宿主保持自己的动态策略，候选语义仍然一致。
     pub animation: SkinAnimation,
     /// Licence metadata the manifest declares for its code and assets. Informational only: nothing is enforced from it.
     pub license: Option<SkinLicense>,
-    /// 不影响加载的提示，对应 msime-windows 的 `package.notices`：例如非 `canvas` 基底上写了只属于 `canvas` 的键而被忽略，或 `canvas` 皮肤的九宫格与挂件在当前宿主上不绘制。包照常列出、照常可用；这些提示不进 [`SkinCatalog::issues`]，那里只放被忽略的无效目录。
+    /// 不影响加载的提示，对应 msime-windows 的 `package.notices`：例如非 `canvas` 基底上写了只属于 `canvas` 的键而被忽略，或 `canvas` 贴图需要宿主具备对应绘制能力。包照常列出、照常可用；这些提示不进 [`SkinCatalog::issues`]，那里只放被忽略的无效目录。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notices: Vec<String>,
 }
@@ -891,7 +894,7 @@ fn load(root: &Path, folder: &str) -> Result<SkinSummary, String> {
             ));
         }
     } else if border_image.is_some() || !decorations.is_empty() {
-        notices.push(CANVAS_NOT_DRAWN_NOTICE.to_owned());
+        notices.push(CANVAS_RENDERER_NOTICE.to_owned());
     }
     check_shared_window_keys(window)?;
     // A package without a decoration may leave the whole table out.
@@ -963,6 +966,13 @@ fn load(root: &Path, folder: &str) -> Result<SkinSummary, String> {
         }
     }
     let mut candidate = read_colors(table)?;
+    let panel_candidate = if canvas && border_image.is_some() {
+        let mut colors = candidate.clone();
+        windows_looks::fill_from_canvas_look(&mut colors, &mut toolbar, false);
+        Some(colors)
+    } else {
+        None
+    };
     let animation = read_animation(table, schema_version)?;
     if let Some(look) = &windows_look {
         windows_looks::fill_from_look(look, &mut candidate, &mut corner_radius, &mut toolbar);
@@ -1017,6 +1027,7 @@ fn load(root: &Path, folder: &str) -> Result<SkinSummary, String> {
         toolbar_stylesheet,
         preview,
         candidate,
+        panel_candidate,
         animation,
         license,
         notices,
@@ -1034,8 +1045,8 @@ const CANVAS_ONLY_WINDOW_KEYS: [&str; 5] = [
     "decorations",
 ];
 
-/// `canvas` 皮肤带九宫格面板或自由挂件时的提示：它们按 msime-windows 的规则校验并保留，但当前 msime 各宿主都不画，候选框改用 `canvas` 外观的不透明底色。
-const CANVAS_NOT_DRAWN_NOTICE: &str = "candidate_window.border_image and candidate_window.decorations are kept for msime-windows but not drawn by this input method; the candidate card uses the opaque canvas look instead";
+/// `canvas` 的可用效果由宿主绘制能力决定；无贴图能力时使用不透明底色的可读配色。
+const CANVAS_RENDERER_NOTICE: &str = "canvas textures require host renderer support; when not drawn, the candidate card uses the opaque canvas look instead";
 
 /// `[candidate_window]` 里由部分原生宿主绘制的键：外框线宽、高亮圆角、阴影、字体和翻页箭头。其他宿主不绘制它们，但仍按共享规则校验，同一个包在每个平台上才会有同样的加载结果。
 fn check_shared_window_keys(window: &toml::map::Map<String, Value>) -> Result<(), String> {
