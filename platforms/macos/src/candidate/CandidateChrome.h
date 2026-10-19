@@ -391,8 +391,92 @@ static inline NSString *MSIMECandidateGlossWithScriptAnnotation(NSString *gloss,
 @property(nonatomic) CGFloat backgroundOpacity;
 // The transparent band above the card that a skin's decoration stands in. The fill, background image and stroke cover only the card below it.
 @property(nonatomic) CGFloat cardTopInset;
+// 系统主题允许原生玻璃；旧系统和降低透明度时仍画原有卡片。
+@property(nonatomic) BOOL liquidGlassEnabled;
+@property(nonatomic, readonly) BOOL liquidGlassActive;
+@property(nonatomic, strong, readonly) NSView *candidateContentView;
 @end
 @implementation MSIMECandidateChromeView
+{
+    NSView *_glassBackground;
+    NSView *_candidateContentView;
+}
+- (instancetype)initWithFrame:(NSRect)frame
+{
+    self = [super initWithFrame:frame];
+    if (self) {
+        _candidateContentView = [[NSView alloc] initWithFrame:self.bounds];
+        _candidateContentView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        [self addSubview:_candidateContentView];
+        [NSWorkspace.sharedWorkspace.notificationCenter addObserver:self
+            selector:@selector(accessibilityDisplayOptionsChanged:)
+            name:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification object:nil];
+    }
+    return self;
+}
+- (NSView *)candidateContentView { return _candidateContentView; }
+- (BOOL)liquidGlassActive { return _glassBackground != nil; }
+- (void)dealloc
+{
+    [NSWorkspace.sharedWorkspace.notificationCenter removeObserver:self];
+}
+- (void)accessibilityDisplayOptionsChanged:(NSNotification *)notification
+{
+    (void)notification;
+    [self updateGlassBackground];
+}
+- (NSRect)cardBounds
+{
+    return NSMakeRect(NSMinX(self.bounds), NSMinY(self.bounds), NSWidth(self.bounds),
+                     MAX(0.0, NSHeight(self.bounds) - MAX(0.0, self.cardTopInset)));
+}
+- (void)setLiquidGlassEnabled:(BOOL)enabled
+{
+    _liquidGlassEnabled = enabled;
+    [self updateGlassBackground];
+}
+- (void)updateGlassBackground
+{
+    if (@available(macOS 26.0, *)) {
+        if (self.liquidGlassEnabled && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency) {
+            NSGlassEffectView *glass = (NSGlassEffectView *)_glassBackground;
+            if (!glass) {
+                glass = [[NSGlassEffectView alloc] initWithFrame:self.cardBounds];
+                glass.style = NSGlassEffectViewStyleRegular;
+                glass.identifier = @"candidate-liquid-glass";
+                // 真实候选进入材质的内容容器，系统才能处理文字与背景的可读性。
+                _glassBackground = glass;
+                glass.contentView = _candidateContentView;
+                [self addSubview:glass positioned:NSWindowBelow relativeTo:nil];
+                _glassBackground = glass;
+            }
+            glass.frame = self.cardBounds;
+            glass.cornerRadius = self.cornerRadius;
+            _candidateContentView.frame = glass.bounds;
+            [glass layoutSubtreeIfNeeded];
+            // 透明度由系统材质管理，不能淡化承载候选文字的整棵视图。
+            glass.alphaValue = 1.0;
+            self.needsDisplay = YES;
+            return;
+        }
+    }
+    if (@available(macOS 26.0, *)) {
+        if (_glassBackground) ((NSGlassEffectView *)_glassBackground).contentView = nil;
+    }
+    [_glassBackground removeFromSuperview];
+    _glassBackground = nil;
+    if (_candidateContentView.superview != self)
+        [self addSubview:_candidateContentView positioned:NSWindowBelow relativeTo:nil];
+    _candidateContentView.translatesAutoresizingMaskIntoConstraints = YES;
+    _candidateContentView.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+    _candidateContentView.frame = self.cardBounds;
+    self.needsDisplay = YES;
+}
+- (void)layout
+{
+    [super layout];
+    [self updateGlassBackground];
+}
 - (BOOL)isOpaque { return NO; }
 - (void)viewDidMoveToWindow
 {
@@ -414,9 +498,10 @@ static inline NSString *MSIMECandidateGlossWithScriptAnnotation(NSString *gloss,
 - (void)drawRect:(NSRect)dirtyRect
 {
     (void)dirtyRect;
-    // Not flipped: the band is the top of the bounds, the card everything under it.
-    const NSRect bounds = NSMakeRect(NSMinX(self.bounds), NSMinY(self.bounds), NSWidth(self.bounds),
-                                     MAX(0.0, NSHeight(self.bounds) - MAX(0.0, self.cardTopInset)));
+    // 原生玻璃提供底色和边缘高光，不再叠一层不透明填色把材质盖住。
+    if (_glassBackground) return;
+    // 坐标未翻转：装饰带在顶部，卡片只占下面的部分。
+    const NSRect bounds = self.cardBounds;
     NSBezierPath *path = [NSBezierPath bezierPathWithRoundedRect:bounds
                                                          xRadius:self.cornerRadius
                                                          yRadius:self.cornerRadius];
@@ -447,3 +532,9 @@ static inline NSString *MSIMECandidateGlossWithScriptAnnotation(NSString *gloss,
     }
 }
 @end
+
+// 所有候选身份校验与遍历都通过当前内容容器，普通测试面板仍可直接放控件。
+static inline NSView *MSIMECandidateControlsView(NSView *view) {
+    return [view isKindOfClass:MSIMECandidateChromeView.class]
+        ? ((MSIMECandidateChromeView *)view).candidateContentView : view;
+}
