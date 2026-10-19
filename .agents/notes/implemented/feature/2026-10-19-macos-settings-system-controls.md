@@ -12,6 +12,8 @@ macOS 26 起的设置宿主独立确认系统控件能力；减少透明度只�
 
 设置页通过 `data-settings-appearance` 发送原始 `system/light/dark` 意图，表面独立覆盖优先于全局偏好。原生主框架观察该属性，并按 [AppKit 的外观继承规则](https://developer.apple.com/documentation/appkit/choosing-a-specific-appearance-for-your-macos-app)设置窗口外观；`system` 清除窗口覆盖。不能只同步解析后的明暗，否则切回系统会把上次明暗固化，系统变化不能继续传播。材质和系统表单控件共享窗口外观；辅助功能回退也保持同步。主题卡片的系统候选与工具栏样例按独立预览明暗叠加薄色层，次要文字采用玻璃模式的高对比颜色。
 
+原生外观消息会重新读取“减少透明度”，因此测试里消息之前的显式启用不能保证消息之后玻璃仍然存在。`settings-glass` 在本测试进程内替换系统读取，分别覆盖开、关两种策略，先检查消息刷新后的玻璃存在性，再显式启用并检查深色继承；不修改测试机器的辅助功能设置，也不绕过产品回退。
+
 ## Historical audit
 
 - [玻璃内容归属](../../implemented/bug-fix/2026-10-19-macos-glass-content-containment.md)：部分重叠，原生内容容器已正确，本篇补充内部控件；保持原有输入与层级边界。
@@ -28,6 +30,7 @@ macOS 26 起的设置宿主独立确认系统控件能力；减少透明度只�
 
 - 5 个前端测试文件 58 项通过，涵盖系统开关能力变化、值与回调、关闭玻璃保留控件、原始外观意图和系统媒体查询后续变化。类型检查与生产构建通过。
 - 6 组原生测试通过：`settings-glass`、`shortcut`、`candidate-hover`、`candidate-row-layout`、`input-mode-hud-panel`、`floating-toolbar-panel`。真实 `WKWebView` 验证控件能力与 WebKit 的 `switch` 支持，强制明暗到达原生窗口与玻璃，切回系统和重载均清除覆盖，禁用玻璃仍可同步外观。
+- [PR #8768 的 macOS CI](https://github.com/metasequoiaime/msime/actions/runs/39200835396/job/117893341243) 中唯一失败是玻璃深色断言。本机在“减少透明度”开启时复现相同断言，修正前置条件后以 `clang++ -Wall -Wextra -Werror -UNDEBUG` 构建并运行真实 `WKWebView` 测试，两种透明度策略均通过。
 - HUD 回归从 `handleEvent:client:` 发送左右 Shift 按下与松开，验证英／中、材质内容归属和关闭 HUD 后不弹窗；这是合成客户端经过生产事件处理器，两种模式均已截图检查标签与玻璃。未覆盖物理键盘进入完整 IMK 会话。
 - 本机设置应用完成构建、打包、签名和安装；实际开关、复选框和滑块均操作并确认持久化，随后恢复原值。实际窗口检查明暗玻璃、系统候选／工具栏样例、平铺导航；颜色模式恢复 `system`，自定义皮肤槽位保留。
 

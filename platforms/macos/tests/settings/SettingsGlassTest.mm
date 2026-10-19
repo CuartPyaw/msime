@@ -14,7 +14,7 @@ static void CheckAppearance(WKWebView *webview, NSWindow *window, NSString *mode
     assert(false && "设置窗口未同步文档外观偏好");
 }
 
-int main() {
+static void TestSettingsGlass() {
     @autoreleasepool {
         [NSApplication sharedApplication];
         NSWindow *window = [[NSWindow alloc] initWithContentRect:NSMakeRect(0, 0, 1000, 780)
@@ -85,6 +85,11 @@ int main() {
             [controller updateEnabled:YES];
             CheckAppearance(webview, window, @"light", NSAppearanceNameAqua);
             CheckAppearance(webview, window, @"dark", NSAppearanceNameDarkAqua);
+            // 外观消息会刷新辅助功能策略；减少透明度时玻璃应当已被移除。
+            assert((controller.glass == nil) == NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency);
+            // 单独验证存在的玻璃继承窗口深色，不能假定消息刷新后仍然启用玻璃。
+            [controller updateEnabled:YES];
+            assert(controller.glass.superview == window.contentView);
             assert([controller.glass.effectiveAppearance.name isEqual:NSAppearanceNameDarkAqua]);
             [webview loadHTMLString:@"<!doctype html><html><body>synthetic reload</body></html>" baseURL:nil];
             deadline = [NSDate dateWithTimeIntervalSinceNow:8];
@@ -93,6 +98,26 @@ int main() {
             }
             assert(window.appearance == nil);
         }
+    }
+}
+
+// 只覆盖当前测试进程的系统读取，不修改机器的辅助功能偏好。
+static BOOL ReducedTransparency = NO;
+static BOOL TestReducedTransparency(id workspace, SEL selector) {
+    (void)workspace;
+    (void)selector;
+    return ReducedTransparency;
+}
+
+int main() {
+    @autoreleasepool {
+        Method method = class_getInstanceMethod(NSWorkspace.class, @selector(accessibilityDisplayShouldReduceTransparency));
+        IMP original = method_setImplementation(method, (IMP)TestReducedTransparency);
+        for (NSNumber *reduced in @[@NO, @YES]) {
+            ReducedTransparency = reduced.boolValue;
+            TestSettingsGlass();
+        }
+        method_setImplementation(method, original);
     }
     return 0;
 }
