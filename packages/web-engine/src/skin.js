@@ -1,7 +1,7 @@
 // 候选框皮肤的模型：把内置皮肤 ID 或皮肤对象解析成候选条要画的颜色、几何和 CSS 自定义属性。这是 `crates/client-services/src/skin/theme.rs` 的 `resolve()` 在网页上的移植，逐条照着设置页的镜像 `packages/ui/src/theme/global-theme.ts`（`normalizedColor`、`customCandidatePalette`、`candidatePaletteStyle`）和 `packages/ui/src/skin/external-skins.tsx`（`dimension`、`decorationImage`、`skinGeometryStyle`、`drawnPackagePalette`）写成；`apps/desktop/tests/candidate/custom-theme-parity.json` 由 Rust 测试写出，test/skin.test.mjs 用它核对这里的结果与 `resolve()` 一致。
 //
 // 内置配色表 `./theme-catalog.js` 不是手写的副本：它由 `packages/web-engine/tools/theme-catalog.mjs` 从 `packages/ui/src/theme/theme-catalog.json`（Rust 主题表的网页副本）和 `crates/client-services/src/skin/catalog/windows_looks.rs`（msime-windows 内置外观，没有网页副本）生成。scripts/build-web-engine.sh 构建 npm 包时生成一份放在本文件旁边；在仓库里直接对 src/ 运行时，先跑 `node packages/web-engine/tools/theme-catalog.mjs` 生成 `src/theme-catalog.js`（被 git 忽略），test/skin.test.mjs 每次运行前会自动重新生成。
-import { plainWindowsLooks, themes, windowsLooks } from "./theme-catalog.js";
+import { canvasLook, plainWindowsLooks, themes, windowsLooks } from "./theme-catalog.js";
 
 const LAYOUTS = ["horizontal", "vertical"];
 const MODES = ["dark", "light"];
@@ -181,6 +181,7 @@ function packageAnimation(skin) {
   });
 }
 
+const DETAIL_SLOTS = ["candidate_text", "preedit_text", "preedit_caret", "selected_text", "selected_number", "selected_translation", "selected_bar"];
 const PACKAGE_SLOTS = ["surface", "border", "text", "number", "accent", "selected", "hover", "translation"];
 const LOOK_SLOTS = ["surface", "border", "text", "number", "accent", "selected", "hover"];
 
@@ -188,13 +189,13 @@ const LOOK_SLOTS = ["surface", "border", "text", "number", "accent", "selected",
 function packagePalette(raw, look) {
   const source = raw !== null && typeof raw === "object" ? raw : {};
   const palette = {};
-  for (const key of PACKAGE_SLOTS) {
+  for (const key of [...PACKAGE_SLOTS, ...DETAIL_SLOTS]) {
     if (typeof source[key] === "string") palette[key] = source[key];
   }
   if (typeof source.showSelectedBar === "boolean") palette.showSelectedBar = source.showSelectedBar;
   if (look) {
-    for (const key of LOOK_SLOTS) {
-      if (normalizedColor(palette[key]) === null) palette[key] = look[key];
+    for (const key of [...LOOK_SLOTS, "translation"]) {
+      if (normalizedColor(palette[key]) === null && typeof look[key] === "string") palette[key] = look[key];
     }
     if (typeof palette.showSelectedBar !== "boolean") palette.showSelectedBar = look.showSelectedBar;
   }
@@ -230,6 +231,8 @@ function readPackage(skin) {
     layouts: declared(skin.layouts ?? supports.layouts, LAYOUTS),
     themes: declared(skin.themes ?? supports.themes, MODES),
     candidate: { dark: packagePalette(candidate.dark, look?.dark), light: packagePalette(candidate.light, look?.light) },
+    panelCandidate: skin.panelCandidate,
+    v2: Number(skin.schemaVersion ?? skin.schema_version) === 2,
     selectedText: { dark: lookSelectedText(candidate.dark, look?.dark), light: lookSelectedText(candidate.light, look?.light) },
     animation: packageAnimation(skin),
     canvas,
@@ -238,8 +241,46 @@ function readPackage(skin) {
   };
 }
 
+/** 一、二、四值的 CSS 四边缩写；不合法的整组丢弃。 */
+function box(value) {
+  if (!Array.isArray(value) || ![1, 2, 4].includes(value.length) || value.some((n) => typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > 500)) return null;
+  const [top, right = top, bottom = top, left = right] = value;
+  return { top, right, bottom, left };
+}
+
+function insets(value, maximum, topBottomMaximum = maximum) {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return null;
+  return Object.fromEntries(["top", "right", "bottom", "left"].map((side) => [side, dimension(value[side] ?? 0, side === "top" || side === "bottom" ? topBottomMaximum : maximum)]));
+}
+
+/** Canvas 字段只接受共享 catalog 的有界数据；图片地址继续走与旧装饰图相同的校验。 */
+function canvasGeometry(skin, mode) {
+  const raw = skin.borderImage;
+  const source = skinImageUrl(raw?.source);
+  const slice = box(raw?.stretchDip) ?? box(raw?.sliceDip);
+  const borderImage = source && slice ? {
+    url: mode === "light" ? skinImageUrl(raw.lightSource) ?? source : source,
+    slice,
+    width: box(raw.widthDip) ?? slice,
+    fill: raw.fill !== false,
+  } : null;
+  const anchors = ["top-left", "top-right", "bottom-left", "bottom-right", "left", "right", "top", "bottom", "center"];
+  const decorations = Array.isArray(skin.decorations) ? skin.decorations.slice(0, 32).flatMap((deco) => {
+    const url = skinImageUrl(deco?.image);
+    const width = dimension(deco?.widthDip, 2000);
+    const height = dimension(deco?.heightDip, 2000);
+    if (!url || !width || !height) return [];
+    const signed = (value, max, fallback) => typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= max ? value : fallback;
+    const z = signed(deco.zIndex, 1000, 2);
+    return [{ url, width, height, anchor: anchors.includes(deco.anchor) ? deco.anchor : "right",
+      offsetX: signed(deco.offsetXDip, 2000, 0), offsetY: signed(deco.offsetYDip, 2000, 0), zIndex: Number.isInteger(z) ? z : 2 }];
+  }).sort((a, b) => a.zIndex - b.zIndex) : [];
+  return { borderImage, decorations, contentInsets: insets(skin.contentInsetsDip, 500, 200),
+    outerInsets: insets(skin.outerInsetsDip, 500), lineGap: skin.lineGapDip == null ? null : dimension(skin.lineGapDip, 100) };
+}
+
 /** 画出来的皮肤包的几何：最小宽度、圆角、装饰带和背景图，取值规则同 `skinGeometryStyle` 和 `usePreviewBackground`。装饰带没有可用的图片时不画（网页上空着的装饰带只会在候选条上方留一块透明区域）。 */
-function packageGeometry(pkg) {
+function packageGeometry(pkg, mode) {
   const { skin } = pkg;
   const top = dimension(skin.decorationTopDip, 500);
   const width = dimension(skin.decorationWidthDip, 1000);
@@ -249,6 +290,7 @@ function packageGeometry(pkg) {
   const backgroundUrl = rawBackground ? skinImageUrl(rawBackground.image) : null;
   const opacity = rawBackground?.opacity;
   return {
+    canvas: pkg.canvas && pkg.v2 ? canvasGeometry(skin, mode) : null,
     cornerRadius: pkg.cornerRadius,
     minWidth: skin.minWidthDip === undefined || skin.minWidthDip === null ? null : dimension(skin.minWidthDip, 1000),
     decoration: decorationUrl
@@ -265,15 +307,16 @@ function packageGeometry(pkg) {
   };
 }
 
-const NO_GEOMETRY = { cornerRadius: null, minWidth: null, decoration: null, background: null };
+const NO_GEOMETRY = { canvas: null, cornerRadius: null, minWidth: null, decoration: null, background: null };
 
 /**
  * `resolve()` 的结果补成每个槽位都有颜色。`resolve()` 留给平台的槽位（base 为 `system` 时）用 `PLATFORM_PALETTE` 的同明暗配色补。选中项的文字和序号没有值时，`lookSelectedText` 是画出来的 Windows 外观只用文字色标出高亮候选时的那个颜色（见 `readPackage`），文字和序号都画成它；否则同桌面候选框的样式表画成普通的文字和序号色。次要文字没有值时用序号色。
  */
-function completePalette(raw, mode, lookSelectedText) {
+function completePalette(raw, mode, lookSelectedText, detail) {
+  const color = (key) => normalizedColor(detail?.[key]);
   const platform = PLATFORM_PALETTE[mode];
   const pick = (key) => raw?.[key] ?? platform[key];
-  const text = pick("text");
+  const text = color("candidate_text") ?? pick("text");
   const number = pick("number");
   return {
     surface: pick("surface"),
@@ -283,10 +326,14 @@ function completePalette(raw, mode, lookSelectedText) {
     secondary: raw?.secondary ?? number,
     accent: pick("accent"),
     selected: pick("selected"),
-    selectedText: raw?.selected_text ?? lookSelectedText ?? text,
-    selectedNumber: raw?.selected_number ?? lookSelectedText ?? number,
+    selectedText: color("selected_text") ?? raw?.selected_text ?? lookSelectedText ?? text,
+    selectedNumber: color("selected_number") ?? raw?.selected_number ?? lookSelectedText ?? number,
     hover: pick("hover"),
     showSelectedBar: raw?.show_selected_bar ?? true,
+    preeditText: color("preedit_text") ?? pick("text"),
+    caret: color("preedit_caret") ?? pick("accent"),
+    selectedBar: color("selected_bar") ?? pick("accent"),
+    selectedSecondary: color("selected_translation") ?? color("selected_number") ?? raw?.selected_number ?? lookSelectedText ?? number,
   };
 }
 
@@ -295,6 +342,10 @@ function completePalette(raw, mode, lookSelectedText) {
  */
 function cssVariables(palette, geometry) {
   const variables = {
+    "--cand-preedit-text": palette.preeditText,
+    "--cand-caret": palette.caret,
+    "--cand-selected-bar-color": palette.selectedBar,
+    "--cand-selected-secondary": palette.selectedSecondary,
     "--cand-bg": palette.surface,
     "--cand-border": palette.border,
     "--cand-text": palette.text,
@@ -349,6 +400,9 @@ export function resolveSkin(skin, { dark = false, layout = "horizontal" } = {}) 
   let geometry = NO_GEOMETRY;
   let selectedText = null;
   let animation = DEFAULT_ANIMATION;
+  let detail = null;
+  let fallbackRaw = null;
+  let fallbackDetail = null;
   if (typeof target === "string") {
     if (!SKINS.includes(target)) throw new TypeError(`unknown skin: ${target}`);
     id = target;
@@ -364,7 +418,7 @@ export function resolveSkin(skin, { dark = false, layout = "horizontal" } = {}) 
       const pkg = readPackage({ base: target });
       mode = requested;
       raw = customCandidatePalette(pkg.base, undefined, pkg.candidate[mode]);
-      geometry = packageGeometry(pkg);
+      geometry = packageGeometry(pkg, mode);
       selectedText = pkg.selectedText[mode];
       animation = pkg.animation;
     }
@@ -375,19 +429,32 @@ export function resolveSkin(skin, { dark = false, layout = "horizontal" } = {}) 
     drawn = pkg.layouts.includes(layout) && pkg.themes.includes(mode);
     raw = customCandidatePalette(pkg.base, undefined, drawn ? pkg.candidate[mode] : null);
     if (drawn) {
-      geometry = packageGeometry(pkg);
+      geometry = packageGeometry(pkg, mode);
       selectedText = pkg.selectedText[mode];
       animation = pkg.animation;
+      detail = pkg.candidate[mode];
+      if (geometry.canvas && pkg.skin.borderImage) {
+        // Summary 的 candidate 已经是回退配色；直接传入对象时按同一 canvas 出厂外观构造回退。
+        const fallback = packagePalette({ accent: detail.accent }, canvasLook[mode]);
+        const panel = packagePalette(pkg.panelCandidate?.[mode] ?? detail, canvasLook[mode]);
+        fallbackRaw = customCandidatePalette(pkg.base, undefined, fallback);
+        fallbackDetail = fallback;
+        raw = geometry.canvas.borderImage ? customCandidatePalette(pkg.base, undefined, panel) : fallbackRaw;
+        detail = geometry.canvas.borderImage ? panel : fallback;
+      }
     }
   } else {
     throw new TypeError("skin must be a built-in skin id or a skin object");
   }
-  const palette = completePalette(raw, mode, selectedText);
+  const palette = completePalette(raw, mode, selectedText, detail);
+  const fallbackPalette = fallbackRaw ? completePalette(fallbackRaw, mode, null, fallbackDetail) : palette;
   return deepFreeze({
     id,
     dark: mode === "dark",
     layout,
     palette,
+    fallbackPalette,
+    fallbackVariables: cssVariables(fallbackPalette, geometry),
     geometry: { ...geometry },
     variables: {
       ...cssVariables(palette, geometry),

@@ -36,9 +36,9 @@ pub struct SkinView {
     pub layouts: Vec<String>,
     /// The colour modes the skin supports: dark, light.
     pub themes: Vec<String>,
-    /// Whether the manifest's base is `canvas`, msime-windows' full-image base: only then are `[candidate_window.border_image]`, `[[candidate_window.decorations]]` and the canvas insets read, and no msime host draws them yet, so the skin shows the opaque canvas look.
+    /// 清单基底是否为 `canvas`：仅此时读取九宫格、自由挂件和边距。Web engine 绘制贴图，其他尚无对应绘制能力的宿主使用不透明的可读回退。
     pub canvas: bool,
-    /// Notes that do not stop the skin from loading, such as canvas-only keys ignored under another base, or a canvas skin's nine-slice panel and widgets that this input method does not draw. Omitted when there are none.
+    /// 不阻止加载的提示，例如非 canvas 基底上忽略的专用字段，或需要宿主绘制能力的 canvas 贴图；没有提示时省略。
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub notices: Vec<String>,
     /// 有限的 schema v2 动效契约。版本 1 皮肤报告为 `none` 预设。

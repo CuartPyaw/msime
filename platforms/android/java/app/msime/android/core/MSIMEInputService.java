@@ -783,8 +783,9 @@ public final class MSIMEInputService extends InputMethodService {
         1, 1, 0, TimeUnit.MILLISECONDS, new ArrayBlockingQueue<>(1),
         new ThreadPoolExecutor.DiscardOldestPolicy());
     final AiPolishClient aiPolishClient = new AiPolishClient(new AiPolishHttpTransport());
+    private final CandidateSkinResolver candidateSkinResolver = new CandidateSkinResolver();
     private final PreferencesReloader preferencesReloader = new PreferencesReloader(
-        (task, delay) -> main.postDelayed(task, delay), preferencesWorker, NativeClient::loadPreferences);
+        (task, delay) -> main.postDelayed(task, delay), preferencesWorker, candidateSkinResolver::read);
 
     /** 候选区标题行（品牌标记、预编辑、状态、页码、展开）的固定高度。 */
     static final int CANDIDATE_HEADER_HEIGHT_DP = 34;
@@ -934,7 +935,7 @@ public final class MSIMEInputService extends InputMethodService {
             preferencesWorker.execute(() -> {
                 final String response;
                 try {
-                    response = NativeClient.loadPreferences(directory);
+                    response = candidateSkinResolver.read(directory);
                 } catch (RuntimeException | LinkageError error) {
                     return;
                 }
@@ -942,6 +943,7 @@ public final class MSIMEInputService extends InputMethodService {
                     if (generation != appearanceLoadGeneration || session != 0) return;
                     try {
                         boolean previousClipboard = clipboardHistoryEnabled;
+                        preferencesDirectory = directory;
                         applyEditorPreferences(value(response).optJSONObject("preferences"));
                         offerRecentClipOnHistoryEnabled(previousClipboard);
                         render();
@@ -2038,13 +2040,13 @@ public final class MSIMEInputService extends InputMethodService {
     /**
      * runtime-options.json 里的偏好是首次安装时写下的出厂默认（见 Bootstrap.prepare），拿它建会话，引擎先按默认方案（全拼 26 键）起来，过一两秒实时偏好重载后才换成用户的方案，九键用户每次都看到键盘从 26 键跳成九键。建会话前在工作线程上读一次实时偏好换进去；读不到时照旧用原来那份。不允许学习的输入框照样把 learning 关掉。
      */
-    private static EngineStartOptions withLivePreferences(String optionsText, boolean suppressLearning) {
+    private EngineStartOptions withLivePreferences(String optionsText, boolean suppressLearning) {
         try {
             JSONObject options = new JSONObject(optionsText);
             String directory = InputViewValuePolicy.textOr(options, "preferences_directory", "");
             if (directory.isEmpty() || !new File(directory).isAbsolute())
                 return new EngineStartOptions(optionsText, null);
-            String response = NativeClient.loadPreferences(directory);
+            String response = candidateSkinResolver.read(directory);
             JSONObject envelope = new JSONObject(response);
             JSONObject live = JsonPolicy.strictTrue(envelope.opt("ok"))
                 ? envelope.getJSONObject("value").optJSONObject("preferences") : null;
@@ -5277,7 +5279,12 @@ public final class MSIMEInputService extends InputMethodService {
 
     private CandidateAppearance.Palette candidateAppearanceFor(JSONObject preferences, boolean systemDark) {
         KeyboardSkin strip = surfaceSkin(preferences, "candidate_theme", systemDark);
-        return CandidateAppearance.from(preferences, imeStyler == null ? strip : imeStyler.themed(strip));
+        CandidateAppearance.Palette fallback = CandidateAppearance.from(preferences,
+            imeStyler == null ? strip : imeStyler.themed(strip));
+        String surfaceMode = preferences == null ? "follow" : preferences.optString("candidate_theme", "follow");
+        String appMode = preferences == null ? "system" : preferences.optString("theme", "system");
+        return candidateSkinResolver.paletteFor(preferencesDirectory, preferences,
+            KeyboardSkin.resolveDark(surfaceMode, appMode, systemDark), fallback);
     }
 
     /**
@@ -7462,7 +7469,7 @@ public final class MSIMEInputService extends InputMethodService {
         String primary = prefix + text;
         SpannableString label = new SpannableString(annotation.isEmpty() ? primary : primary + "\n" + annotation);
         if (!prefix.isEmpty()) {
-            label.setSpan(new ForegroundColorSpan(candidateAppearance.number()), 0, prefix.length(),
+            label.setSpan(new ForegroundColorSpan(candidateAppearance.numberFor(highlighted)), 0, prefix.length(),
                 Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         }
         if (annotation.isEmpty()) return CandidateSymbolLabel.apply(label, prefix.length(), primary.length());
@@ -7471,7 +7478,8 @@ public final class MSIMEInputService extends InputMethodService {
         label.setSpan(new RelativeSizeSpan(0.62f), annotationStart, label.length(),
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         int foreground = candidateAppearance.textFor(highlighted);
-        int secondary = ColorPolicy.withAlpha(foreground, 0.58f);
+        int secondary = candidateAppearance.externalSkin()
+            ? candidateAppearance.secondaryFor(highlighted) : ColorPolicy.withAlpha(foreground, 0.58f);
         label.setSpan(new ForegroundColorSpan(secondary), annotationStart, label.length(),
             Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         return CandidateSymbolLabel.apply(label, prefix.length(), primary.length());
