@@ -3,8 +3,8 @@ import inputMethodEngine from '@ohos.inputMethodEngine';
 import fs from '@ohos.file.fs';
 import util from '@ohos.util';
 import client from 'libmsimeclient.so';
-import { FileSessionStore } from '../account/HarmonyAccountTransport';
-import { storedSessionUserId } from '../account/AccountCloudBridge';
+import { statusUserId } from '../account/HarmonyAccountRequests';
+import { AccountSessionAdoption } from '../account/AccountSessionAdoption';
 import { utf8Length, utf8WriteComplete } from './Utf8';
 import { TextPolicy } from './TextPolicy';
 import { KeyboardLog, describeError } from './KeyboardLog';
@@ -116,7 +116,7 @@ import {
 } from './input/AiPolishPolicy';
 import { VoiceRecognitionPolicy, VoiceTarget } from './input/VoiceRecognitionPolicy';
 import { HarmonyVoicePolisher } from './input/HarmonyVoicePolisher';
-import { AiEndpointPolicy } from './settings/AiEndpointPolicy';
+import { AiEndpoint } from './settings/AiEndpoint';
 import { SmartPunctuationSpacePolicy, SmartPunctuationSpaceSnapshot, SpaceConvertDecision }
   from './input/SmartPunctuationSpacePolicy';
 import { SmartPunctuationContext } from './input/SmartPunctuationContext';
@@ -770,6 +770,19 @@ export interface PrepareRequest {
   resources: string;
   state_root: string;
   edition?: string;
+}
+
+/** 词库更新状态与后台下载（`dictionary` 的 `updates`）交给 `client.dictionary` 的引擎选项，字段名与 Rust 的选项相同；ArkTS 不允许无类型的对象字面量，所以单独声明。没有语言词库目录时不带 `language_dictionaries`。 */
+interface DictionaryUpdateOptions {
+  api_version: number;
+  resources: string;
+  preferences_directory: string;
+  user_data: string;
+  cache: string;
+  dictionaries: string;
+  preferences: Record<string, Object>;
+  edition: string;
+  language_dictionaries?: string;
 }
 
 interface SnapshotQueueProcessAction {
@@ -3142,7 +3155,12 @@ export class KeyboardSession implements HardwareKeyTarget {
     if (this.sharedMirror === null || this.stateDirectory.length === 0) {
       return;
     }
-    const imported: string[] = SharedStateSync.keyboardSync(this.sharedMirror, this.stateDirectory, this.sharedFullMode());
+    const fullMode: boolean = this.sharedFullMode();
+    const imported: string[] = SharedStateSync.keyboardSync(this.sharedMirror, this.stateDirectory, fullMode);
+    // 设置应用发布的会话由 Rust 在锁里决定要不要采用；这里排一次让本地状态尽早跟上，云剪贴板这类认证请求自己经 `beforeRequest` 再排一次。基础访问模式下键盘不交换会话。
+    if (fullMode) {
+      AccountSessionAdoption.adopt(this.sharedMirror, this.stateDirectory, 'settings');
+    }
     if (imported.includes('dictionary-selection') && this.handle !== 0) {
       const resources: string = this.resourceDirectory;
       const state: string = this.stateDirectory;
@@ -3417,8 +3435,8 @@ export class KeyboardSession implements HardwareKeyTarget {
     const staging: string = `${stateRoot}/dictionary-snapshot-staging`;
     try {
       if (!fs.accessSync(staging)) fs.mkdirSync(staging, true);
-      // 每次空闲处理都重新读共享的会话文件：键盘进程可能比设置里的一次账号切换活得更久。
-      const accountId: string | null = storedSessionUserId(new FileSessionStore(stateRoot).load());
+      // 每次空闲处理都重新读本沙箱的会话文件（目录模式的 status，只读本地文件）：键盘进程可能比设置里的一次账号切换活得更久。
+      const accountId: string | null = statusUserId(client.accountStatus(stateRoot));
       const action: SnapshotQueueProcessAction = {
         operation: 'process', directory: `${stateRoot}/dictionary-snapshots`,
         staging_root: staging, options: options, account_id: accountId
@@ -4593,8 +4611,8 @@ export class KeyboardSession implements HardwareKeyTarget {
       KeyboardLog.error(`AI query unavailable: ${describeError(error)}`);
       return false;
     }
-    // 描述符由 client-providers 按同一规则生成，这里在发出前再拦一次：http 只能发往本机或局域网，Token 不明文经过互联网。
-    if (typeof descriptor.url !== 'string' || !AiEndpointPolicy.allowed(descriptor.url)) return false;
+    // 描述符由 client-providers 按同一规则生成，这里在发出前再经 Rust 拦一次：http 只能发往本机或局域网，Token 不明文经过互联网。
+    if (typeof descriptor.url !== 'string' || !AiEndpoint.allowed(descriptor.url)) return false;
     const request = http.createHttp();
     installNoRedirectGuard(request);
     this.onlineRequests.add(request);

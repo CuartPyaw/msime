@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="app.msime.android.test" android:versionCode="1" android:versionName="1">
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <instrumentation android:name="app.msime.android.test.VoicePolishReplyDeviceSmoke" android:targetPackage="app.msime.android.test" />
+    <instrumentation android:name="app.msime.android.test.VoicePolishReplyDeviceSmoke" android:targetPackage="app.msime.android" />
     <instrumentation android:name="app.msime.android.test.VoiceRecognitionLifecycleDeviceSmoke" android:targetPackage="app.msime.android" />
     <instrumentation android:name="app.msime.android.test.SyntheticSpeechSetup" android:targetPackage="app.msime.android.test" />
     <instrumentation android:name="app.msime.android.test.QuanpinSeparatorDeviceSmoke" android:targetPackage="app.msime.android" />
@@ -65,8 +65,7 @@
     <instrumentation android:name="app.msime.android.test.CloudClipboardKeystoreDeviceSmoke" android:targetPackage="app.msime.android.test" />
     <instrumentation android:name="app.msime.android.test.CloudClipboardDriverDeviceSmoke" android:targetPackage="app.msime.android" />
     <instrumentation android:name="app.msime.android.test.CloudClipboardRelayDeviceSmoke" android:targetPackage="app.msime.android" />
-    <instrumentation android:name="app.msime.android.BackendAccountRefreshDeviceSmoke" android:targetPackage="app.msime.android.test" />
-    <instrumentation android:name="app.msime.android.test.DeviceDataSummaryDeviceSmoke" android:targetPackage="app.msime.android.test" />
+    <instrumentation android:name="app.msime.android.BackendAccountSessionDeviceSmoke" android:targetPackage="app.msime.android" />
     <instrumentation android:name="app.msime.android.test.ClipboardImageDeviceSmoke" android:targetPackage="app.msime.android" />
     <instrumentation android:name="app.msime.android.test.TextEditRecentClipboardDeviceSmoke" android:targetPackage="app.msime.android" />
     <instrumentation android:name="app.msime.android.test.OptionSheetDeviceSmoke" android:targetPackage="app.msime.android" />
@@ -118,6 +117,8 @@
     <instrumentation android:name="app.msime.android.test.EmojiCombinationLayoutDeviceSmoke" android:targetPackage="app.msime.android" />
     <instrumentation android:name="app.msime.android.test.EmojiCombinationDeviceSmoke" android:targetPackage="app.msime.android.test" />
     <instrumentation android:name="app.msime.android.test.LocalSpeechHandleDeviceSmoke" android:targetPackage="app.msime.android" />
+    <instrumentation android:name="app.msime.android.test.AiEndpointCheckDeviceSmoke" android:targetPackage="app.msime.android" />
+    <instrumentation android:name="app.msime.android.test.SessionStoreDeviceSmoke" android:targetPackage="app.msime.android" />
     <instrumentation android:name="app.msime.android.test.ClipboardExportDeviceSmoke" android:targetPackage="app.msime.android" />
     <instrumentation android:name="app.msime.android.test.NumberLayerEntryDeviceSmoke" android:targetPackage="app.msime.android" />
     <instrumentation android:name="app.msime.android.test.NumberLayerRestartDeviceSmoke" android:targetPackage="app.msime.android.test" />
