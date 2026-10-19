@@ -135,6 +135,10 @@ printf '%s\n' "$result"
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.CandidateExpansionDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Candidate expansion acceptance failed" >&2; exit 1; }
+# 候选包读应用私有目录，最低 API 的核心验收同样覆盖配色接入与资源失效。
+result=$(run_instrumentation app.msime.android.test/app.msime.android.test.CandidateSkinDeviceSmoke)
+printf '%s\n' "$result"
+[[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Candidate skin package acceptance failed" >&2; exit 1; }
 if [[ "$feedback" == true ]]; then
   # 使用真实反馈页连续输入合成文字，不点击提交；API 28 的 --core 也能单独带上此回归。
   result=$(run_instrumentation app.msime.android.test/app.msime.android.test.FeedbackInputStabilityDeviceSmoke)
