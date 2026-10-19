@@ -6817,8 +6817,8 @@ test("macOS and iOS help pages use their native host instructions", async () => 
   expect(await screen.findByText(/iPhone 与 iPad 触屏输入体验/)).toBeDefined();
 });
 
-// 侧栏按功能分组显示页面；宿主不提供的页不留空位，子页从父页里进入。
-test("侧栏显示功能分组，宿主不提供的页不留空位", async () => {
+// 侧栏连续平铺页面；宿主不提供的页不留空位，子页从父页里进入。
+test("侧栏连续平铺页面，宿主不提供的页不留空位", async () => {
   render(
     <SettingsPage
       client={{
@@ -6834,28 +6834,23 @@ test("侧栏显示功能分组，宿主不提供的页不留空位", async () =>
     .getAllByRole("button")
     .map((item) => item.textContent ?? "");
   expect(titles).toEqual([
-    "打字",
     "输入设置",
     "词库管理",
     "按键设置",
     "标点翻译",
-    "输入方式",
     "语音输入",
     "键盘手写",
-    "外观",
     "主题外观",
     "候选窗口",
     "快捷工具",
-    "工具",
     "剪贴管理",
     "智能辅助",
-    "支持",
     "维护诊断",
     "关于水杉",
   ]);
-  expect(within(sidebar).getAllByRole("region")).toHaveLength(5);
+  expect(within(sidebar).queryAllByRole("region")).toHaveLength(0);
   for (const title of ["打字", "输入方式", "外观", "工具", "支持"]) {
-    expect(within(sidebar).queryByRole("button", { name: title })).toBeTruthy();
+    expect(within(sidebar).queryByRole("button", { name: title })).toBeNull();
   }
   for (const title of ["AI 对话", "背单词", "帮助", "辅助码", "其他平台下载", "社区"]) {
     expect(titles).not.toContain(title);
@@ -8325,6 +8320,7 @@ test.each(["macos", "windows"] as const)(
     expect(screen.queryByRole("checkbox", { name: "PageUp / PageDown" })).toBeNull();
     // 速查列出实际生效的翻页键，不看文档里存的关。
     fireEvent.click(screen.getByRole("button", { name: /^(快捷键|按键设置)$/ }));
+    selectSettingsTab("按键速查");
     const reference = screen.getByRole("region", { name: "按键速查" });
     expect(within(reference).getByText("Shift+Tab / Tab")).toBeTruthy();
     expect(within(reference).getByText("Page Up / Page Down")).toBeTruthy();
@@ -8374,7 +8370,7 @@ test.each(["macos", "windows", "linux"] as const)(
   },
 );
 
-test("macOS 侧栏按功能分组排列所有可用页面", async () => {
+test("macOS 侧栏连续平铺所有可用页面", async () => {
   render(
     <SettingsPage
       client={{
@@ -8391,26 +8387,21 @@ test("macOS 侧栏按功能分组排列所有可用页面", async () => {
       .getAllByRole("button")
       .map((item) => item.textContent ?? ""),
   ).toEqual([
-    "打字",
     "输入设置",
     "词库管理",
     "按键设置",
     "标点翻译",
-    "输入方式",
     "语音输入",
     "键盘手写",
-    "外观",
     "主题外观",
     "候选窗口",
     "快捷工具",
-    "工具",
     "剪贴管理",
     "智能辅助",
-    "支持",
     "维护诊断",
     "关于水杉",
   ]);
-  expect(within(sidebar).getAllByRole("region")).toHaveLength(5);
+  expect(within(sidebar).queryAllByRole("region")).toHaveLength(0);
 });
 
 // 宿主提供哪个发布、哪个安装包由 Rust 决定（`crates/client-services/src/update_check.rs`）；这里覆盖的是关于页向宿主问什么、拿到答复后怎么做。

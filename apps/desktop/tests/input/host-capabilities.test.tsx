@@ -154,34 +154,36 @@ test("Windows and Linux hosts expose the shared fuzzy-pinyin settings on the 输
 });
 
 test("shortcut groups follow declared capabilities, not the platform name", async () => {
-  // A Windows host that declares the capabilities gets the controls, proving the
-  // gate is the capability and not a platform-name or user-agent match.
+  // Windows 宿主声明能力后显示对应控件，门槛是能力而非平台名或用户代理。
   const capable = mount({
     host: capabilities({ platform: "windows", mode_switch_shortcuts: true, panel_shortcuts: true }),
   });
   await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: /^(快捷键|按键设置)$/ }));
-  // 面板快捷键是一行只读参考，收在「按键速查」里。
+  expect(screen.getByRole("group", { name: "输入模式切换快捷键" })).toBeTruthy();
+  // 面板快捷键是一行只读参考，桌面需先进入「按键速查」标签。
+  selectSettingsTab("按键速查");
   expect(
     within(screen.getByRole("region", { name: "按键速查" })).getByText("打开屏幕键盘"),
   ).toBeTruthy();
   expect(screen.getByText("Ctrl+Shift+Super+K", { selector: "kbd" })).toBeTruthy();
-  expect(screen.getByRole("group", { name: "输入模式切换快捷键" })).toBeTruthy();
   capable.unmount();
 
   const macos = mount({ host: capabilities({ platform: "macos", panel_shortcuts: true }) });
   await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: /^(快捷键|按键设置)$/ }));
+  selectSettingsTab("按键速查");
   expect(screen.getByText("Ctrl+Shift+Command+K", { selector: "kbd" })).toBeTruthy();
   expect(screen.queryByText("Ctrl+Shift+Super+K", { selector: "kbd" })).toBeNull();
   macos.unmount();
 
-  // A Linux host that does not declare them keeps them hidden.
+  // Linux 宿主未声明这些能力时，设置与速查标签都不显示对应内容。
   mount({ host: capabilities({ platform: "linux" }) });
   await settingsFormReady();
   fireEvent.click(screen.getByRole("button", { name: /^(快捷键|按键设置)$/ }));
-  expect(screen.queryByText("打开屏幕键盘")).toBeNull();
   expect(screen.queryByRole("group", { name: "输入模式切换快捷键" })).toBeNull();
+  selectSettingsTab("按键速查");
+  expect(screen.queryByText("打开屏幕键盘")).toBeNull();
 });
 
 test("Linux number-row selection follows its capability and saves through shared preferences", async () => {
