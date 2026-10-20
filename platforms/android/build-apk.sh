@@ -174,6 +174,22 @@ if [ "${MSIME_REQUIRE_LANGUAGE_DICTIONARIES:-0}" = 1 ]; then
   done
 fi
 
+# 背单词的八本内置词书（scripts/fetch_wordbooks.py 从 ECDICT 生成）只和许可声明一起打进 assets/wordbooks，Bootstrap 解到 files/bootstrap/wordbooks，与 bootstrap/resources 同级，原生背单词页把 files/bootstrap 作为资源根交给共享层。词书不分产品版本，也不是按需资源包，所以每个版本、包括 MSIME_ANDROID_OMIT_ON_DEMAND=1 的瘦包都带；没有时背单词只列用户导入的词表。MSIME_WORDBOOKS 可指向别的目录。MSIME_REQUIRE_WORDBOOKS=1 时缺了 resources/wordbook.lock.json 列出的任何一本就失败，发版设它。
+wordbooks_source=${MSIME_WORDBOOKS:-$repo_root/target/wordbooks}
+rm -rf "$assets/wordbooks"
+if compgen -G "$wordbooks_source/*.json" >/dev/null && [ -f "$wordbooks_source/wordbooks-NOTICE.txt" ]; then
+  mkdir -p "$assets/wordbooks"
+  cp "$wordbooks_source"/*.json "$wordbooks_source/wordbooks-NOTICE.txt" "$assets/wordbooks/"
+  echo "wordbooks packaged from $wordbooks_source"
+else
+  echo "no wordbooks at $wordbooks_source; 背单词 offers only imported books"
+fi
+if [ "${MSIME_REQUIRE_WORDBOOKS:-0}" = 1 ]; then
+  for id in $(python3 -c 'import json, sys; print(" ".join(book["id"] for book in json.load(open(sys.argv[1], encoding="utf-8"))["books"]))' "$repo_root/resources/wordbook.lock.json"); do
+    [ -f "$assets/wordbooks/$id.json" ] || { echo "MSIME_REQUIRE_WORDBOOKS=1 but $id.json, listed by resources/wordbook.lock.json, was not packaged from $wordbooks_source; run python3 scripts/fetch_wordbooks.py first" >&2; exit 1; }
+  done
+fi
+
 gradle_dir="$repo_root/platforms/android/gradle-app"
 tauri_gradlew="$repo_root/apps/desktop/src-tauri/gen/android/gradlew"
 [[ -x "$tauri_gradlew" ]] || { echo "Gradle wrapper required; run the Tauri Android init once" >&2; exit 1; }
@@ -210,6 +226,11 @@ for pair in $language_pairs; do
     grep -qxF "assets/language-dictionaries/$entry" <<< "$apk_entries" || { echo "$output has no assets/language-dictionaries/$entry although it was staged" >&2; exit 1; }
   done
 done
+# 暂存的每本词书和许可声明都必须进最终包：少一本，背单词的词书列表里就少一本，而打包本身不会报错。
+for staged in "$assets"/wordbooks/*; do
+  [ -f "$staged" ] || continue
+  grep -qxF "assets/wordbooks/$(basename "$staged")" <<< "$apk_entries" || { echo "$output has no assets/wordbooks/$(basename "$staged") although it was staged" >&2; exit 1; }
+done
 # APK 带的原生库必须恰好是上面构建的这些 ABI：少一个的话能装上，但第一次 JNI 调用就崩溃；多一个（某个依赖的 x86 或 armeabi-v7a 副本漏过了 abiFilters）则是白占体积，还会让包装到它根本跑不了的设备上。
 packaged_abis=$(sed -n 's|^lib/\([^/]*\)/.*|\1|p' <<< "$apk_entries" | sort -u)
 expected_abis=$(printf '%s\n' "${abis[@]}" | sort -u)
@@ -230,8 +251,8 @@ if [ "$omit_on_demand" = 1 ]; then
       exit 1
     fi
   done
-  # 体积上限挡的是整组资源或运行库悄悄回到包里（日文词典约 20 MB、语音运行库约 27 MB）。瘦包只有 arm64-v8a 单 ABI（见上面的 ABI 检查），默认上限按它定，MSIME_ANDROID_MAX_APK_BYTES 可改。
-  max_apk_bytes=${MSIME_ANDROID_MAX_APK_BYTES:-130000000}
+  # 体积上限挡的是整组资源或运行库悄悄回到包里（日文词典约 20 MB、语音运行库约 27 MB）。瘦包只有 arm64-v8a 单 ABI（见上面的 ABI 检查），默认上限按它定，MSIME_ANDROID_MAX_APK_BYTES 可改。背单词内置词书进包时瘦包约 130.5 MB（词书压缩后约 1 MB），上限随之从 130,000,000 提到 135,000,000，仍比任何一组按需资源回到包里时小得多。
+  max_apk_bytes=${MSIME_ANDROID_MAX_APK_BYTES:-135000000}
   [[ "$max_apk_bytes" =~ ^[0-9]+$ ]] || { echo "MSIME_ANDROID_MAX_APK_BYTES must be a byte count" >&2; exit 1; }
   apk_bytes=$(wc -c < "$output" | tr -d '[:space:]')
   if [ "$apk_bytes" -gt "$max_apk_bytes" ]; then
