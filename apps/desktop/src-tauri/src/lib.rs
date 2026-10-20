@@ -281,6 +281,23 @@ pub(crate) fn host_edition(
     }
 }
 
+/// 背单词内置词书的资源根，`wordbooks/` 在它下面（`builtin::directory`）：放着 Engine 资源目录的那一层，不是资源目录本身。
+///
+/// Linux 的 Engine 资源装在 `share/<client>/resources`，不在 `resource_dir()`（`<prefix>/lib/<productName>`，安装时从不创建）下，所以按 HostOptions 求随包资源的目录（`msime_host_api::bundled_resource_root`：`resources` 的上一级，词库在线更新后是原安装包目录的上一级），词书装在那里的 `share/<client>/wordbooks`（platforms/linux/CMakeLists.txt）。每次命令时现读：首次运行时这份文档还没写好。读不到时退回 `fallback`，那里没有词书，页面只列导入的词表。其余平台用 `fallback`，即 `VocabularyState` 里的 `resource_dir()`。
+fn vocabulary_resources(app: &tauri::AppHandle, fallback: &std::path::Path) -> PathBuf {
+    #[cfg(target_os = "linux")]
+    if let Some(root) = app
+        .try_state::<DictionaryHostOptions>()
+        .and_then(|options| options.snapshot().ok())
+        .and_then(|document| msime_host_api::bundled_resource_root(&document))
+    {
+        return root;
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = app;
+    fallback.to_path_buf()
+}
+
 /// Cantonese, Zhuyin and Stroke each read a dictionary the package installs beside the Engine resources, which the HostOptions document names in `language_dictionaries` only when one is there. Without its dictionary host-api falls back from the scheme, so the page shows it unavailable instead of offering a choice that never takes effect. Every other scheme needs nothing beyond the resources.
 ///
 /// `beside_resources` is for Windows, whose `runtime-options.json` is written once at first run and never refreshed: the Server and the TIP each find the dictionaries beside the resources in memory, so a document without the key still means the `language-dictionaries` directory next to its absolute `resources`.
@@ -5198,16 +5215,7 @@ pub fn run() {
             app.manage(TypingStatisticsState(TypingStatisticsStore::new(&directory)));
             app.manage(DiagnosticLogState(directory.clone()));
             app.manage(notices::NoticesState(directory.clone()));
-            // The staging root, not the Engine resource directory inside it: `wordbooks/` is a
-            // sibling of `EngineResources/` because `ResourceStore::verify` requires that
-            // directory to hold exactly the pinned dictionary artifacts, and one extra entry
-            // would break the check whose job is to prove a shipped dictionary is intact. A host
-            // that stages no books simply offers the imported ones.
-            // The staging root, not the Engine resource directory inside it: `wordbooks/` is a
-            // sibling of `EngineResources/` because `ResourceStore::verify` requires that
-            // directory to hold exactly the pinned dictionary artifacts, and one extra entry
-            // would break the check whose job is to prove a shipped dictionary is intact. A host
-            // that stages no books simply offers the imported ones.
+            // The staging root, not the Engine resource directory inside it: `wordbooks/` is a sibling of `EngineResources/` because `ResourceStore::verify` requires that directory to hold exactly the pinned dictionary artifacts, and one extra entry would break the check whose job is to prove a shipped dictionary is intact. A host that stages no books simply offers the imported ones. Linux 的资源不在这里，见 `vocabulary_resources`。
             app.manage(VocabularyState(
                 directory.clone(),
                 app.path()
