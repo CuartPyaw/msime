@@ -7935,13 +7935,13 @@ public final class MSIMEInputService extends InputMethodService {
     private void updateCandidateButton(Button button, JSONObject candidate, int slot, int visibleSlot) {
         int source = InputViewValuePolicy.integer(candidate, "source", -1);
         String text = chineseOutput(InputViewValuePolicy.textOr(candidate, "text", ""), view);
-        String displayedText = ContactCandidatePolicy.displayText(source, text);
+        ((ContactCandidateButton) button).setContactSource(source);
         boolean highlighted = InputViewValuePolicy.booleanValue(candidate, "highlighted", false);
         CandidateCanvasAssets canvas = candidateAppearance.canvas();
         if (canvas != null && canvas.banner != null && canvas.banner.candidate() != null) {
             // 来源标注独立于原文，不包含固定图钉，也不猜测原文中的括号后缀。
             String badge = source == 2 ? "☁️" : source == 3 ? "🤖" : "";
-            candidateDecorationWords.add(new CandidateCanvasAssets.Word(displayedText, badge, highlighted));
+            candidateDecorationWords.add(new CandidateCanvasAssets.Word(text, badge, highlighted));
         }
         String typed = InputViewValuePolicy.textOr(view, "preedit", "");
         String annotation = candidateAnnotation(candidate, typed);
@@ -7953,7 +7953,7 @@ public final class MSIMEInputService extends InputMethodService {
         // 实体键盘打字（候选条模式）时例外：候选前面标上数字行选词用的 1–9，每页十个时第十个标 0（#5584、#6679）。
         String number = HardwareKeyboardModePolicy.candidatePrefix(hardwareKeyboardMode, numberRowSelection,
             dedicatedEnglish, visibleSlot);
-        button.setText(candidateLabel(number, displayedText, annotation, highlighted));
+        button.setText(candidateLabel(number, text, annotation, highlighted));
         int labelLines = candidateLabelLines(annotation);
         ViewPolicy.setFixedLines(button, labelLines);
         configureCandidateTextLayout(button, labelLines);
