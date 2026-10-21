@@ -816,6 +816,18 @@ char *msime_client_command(uint64_t session, uint32_t command);
  * window alone without serializing a view it will discard. Inert, and immediately false, when no
  * settled model is installed. */
 char *msime_client_rerank_settled(uint64_t session);
+/* 宿主等待输入停顿后，在后台启动模型评分。
+ * 无需改动或只做呈现整理时返回 {"status":"done","moved":false,"current":true}；
+ * 呈现整理改变顺序时返回 {"status":"done","moved":true,"current":true,"view":...}。
+ * 后台评分返回 {"status":"pending","token":N}，经 msime_client_poll_settled_rerank 轮询。
+ * 每会话只运行一个任务，重复启动返回相同令牌；评分期间可以继续处理按键。 */
+char *msime_client_start_settled_rerank(uint64_t session);
+/* token 来自启动接口；评分未完成时返回 {"status":"pending","token":N}，
+ * 完成后返回 {"status":"done","moved":...,"current":...}。
+ * current 为真表示当前组字及配置已评分；按键、开关或模型改变，或 accept=false 时为假。
+ * 未知令牌返回 {"status":"done","moved":false,"current":false}。
+ * 宿主已离开原组字时传 accept=false，只归还仍适用的模型。必须在会话线程调用。 */
+char *msime_client_poll_settled_rerank(uint64_t session, uint64_t token, bool accept);
 /* Pass the generation and global index from the displayed candidate's id. */
 char *msime_client_select(uint64_t session, uint64_t generation, size_t index);
 /* Select any entry copied by msime_client_all_candidates for this exact

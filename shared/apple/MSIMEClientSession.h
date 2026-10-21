@@ -64,6 +64,11 @@ FOUNDATION_EXPORT NSNotificationName const MSIMEClientSessionDidReplaceSnapshotN
 /// candidate window alone rather than repaint it identically. Inert, and immediately NO, when no
 /// settled model is installed. No network I/O.
 - (nullable NSDictionary *)rerankSettledWithError:(NSError **)error;
+/// 后台启动重排；`status` 为 `done` 或 `pending`，后者携带用于轮询的 `token`。不联网。
+- (nullable NSDictionary *)startSettledRerankWithError:(NSError **)error;
+/// 已离开原组字时传 `accept: NO`，只归还仍适用的模型；完成前返回 `pending`，
+/// 完成后与启动接口的 `done` 结构一致。不联网。
+- (nullable NSDictionary *)pollSettledRerank:(uint64_t)token accept:(BOOL)accept error:(NSError **)error;
 /// Copied Engine query, or nil when ineligible. Does not perform network I/O.
 - (nullable NSDictionary *)onlineQueryWithError:(NSError **)error;
 /// Build a descriptor for the copied query using this session's current AI

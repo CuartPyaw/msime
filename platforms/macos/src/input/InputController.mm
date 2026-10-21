@@ -1357,6 +1357,12 @@ static NSImage *MSIMECandidateLogoImage() {
     MSIMEDictionaryWindowController *_dictionaryWindow;
     NSTimer *_cloudTimer;
     NSTimer *_settledTimer;
+    // 单独轮询后台评分；取消停顿计时不得丢失评分中的模型。
+    NSTimer *_settledPollTimer;
+    uint64_t _settledToken;
+    uint64_t _settledPollEpoch;
+    MSIMEClientSession *_settledPollSession;
+    id _settledPollClient;
     MSIMECloudCandidateRequest *_cloudRequest;
     NSDictionary *_cloudQuery;
     uint64_t _cloudEpoch;
@@ -3328,20 +3334,75 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
 /// it fire, which is what keeps the 24M model off the keystroke path where it measures p95 153ms
 /// against a 16ms frame.
 static const NSTimeInterval kSettledRerankDelay = 0.15;
+/// 主线程只轮询后台结果，不运行模型前向计算，避免后续按键排队。
+static const NSTimeInterval kSettledRerankPoll = 1.0 / 60.0;
 
 - (void)cancelSettledRerank {
     [_settledTimer invalidate];
     _settledTimer = nil;
 }
 
-/// Re-rank once typing stops. Every refresh reschedules, so it only runs on a real pause.
-///
-/// Inert unless a settled model was installed: the shared host answers `moved: NO` immediately
-/// when none is attached, which is every installation that ships one model. The window is redrawn
-/// only when the order actually moved — repainting an identical candidate list on every pause is
-/// a flicker with no explanation behind it.
+/// 停止停顿计时和轮询；会话销毁时一并放弃在途模型。
+- (void)stopSettledScoring {
+    [self cancelSettledRerank];
+    [_settledPollTimer invalidate];
+    _settledPollTimer = nil;
+    _settledToken = 0;
+    _settledPollSession = nil;
+    _settledPollClient = nil;
+}
+
+- (void)armSettledPoll {
+    [_settledPollTimer invalidate];
+    _settledPollTimer = nil;
+    const uint64_t token = _settledToken;
+    if (token == 0 || !_settledPollSession) return;
+    MSIMEClientSession *session = _settledPollSession;
+    id client = _settledPollClient;
+    const uint64_t epoch = _settledPollEpoch;
+    __weak MSIMEInputController *weakSelf = self;
+    _settledPollTimer = [NSTimer timerWithTimeInterval:kSettledRerankPoll repeats:NO block:^(NSTimer *fired) {
+        (void)fired;
+        MSIMEInputController *controller = weakSelf;
+        if (!controller || controller->_settledToken != token) {
+            // 控制器消失或已切换任务，只向原会话归还模型；已销毁会话的评分已被放弃。
+            [session pollSettledRerank:token accept:NO error:nil];
+            return;
+        }
+        controller->_settledPollTimer = nil;
+        const BOOL same = controller->_cloudEpoch == epoch && controller->_session == session &&
+            controller->_activeClient == client && !controller->_focusPending &&
+            !controller->_appearance.englishMode;
+        NSDictionary *polled = [session pollSettledRerank:token accept:same error:nil];
+        if ([polled[@"status"] isEqual:@"pending"]) {
+            [controller armSettledPoll];
+            return;
+        }
+        [controller finishSettledScore:polled same:same session:session client:client];
+    }];
+    [NSRunLoop.mainRunLoop addTimer:_settledPollTimer forMode:NSRunLoopCommonModes];
+}
+
+/// `current` 表示当前组字及配置已评分；过期结果仅在同一客户端仍组字时重试。
+- (void)finishSettledScore:(NSDictionary *)polled same:(BOOL)same session:(MSIMEClientSession *)session client:(id)client {
+    _settledToken = 0;
+    _settledPollSession = nil;
+    _settledPollClient = nil;
+    if (!polled) return;
+    if (same && MSIMEStrictBoolean(polled[@"moved"])) {
+        [self apply:polled];
+        return;
+    }
+    if (same && MSIMEStrictBoolean(polled[@"current"])) return;
+    if (_session != session || _activeClient != client || _focusPending || _appearance.englishMode) return;
+    [self scheduleSettledRerank];
+}
+
+/// 每次刷新都重新等待真实输入停顿，再在后台评分；新按键继续立即处理。
+/// 结果仅发布到仍匹配的组字；未安装模型时立即结束，仅顺序变化才重绘候选窗口。
 - (void)scheduleSettledRerank {
     [self cancelSettledRerank];
+    if (_settledToken != 0) return;
     if (!_activeClient || !_session || _focusPending || _appearance.englishMode) return;
     const uint64_t epoch = _cloudEpoch;
     MSIMEClientSession *session = _session;
@@ -3350,14 +3411,25 @@ static const NSTimeInterval kSettledRerankDelay = 0.15;
     _settledTimer = [NSTimer timerWithTimeInterval:kSettledRerankDelay repeats:NO block:^(NSTimer *timer) {
         (void)timer;
         MSIMEInputController *controller = weakSelf;
-        if (!controller || controller->_cloudEpoch != epoch || controller->_session != session ||
+        if (!controller) return;
+        controller->_settledTimer = nil;
+        if (controller->_settledToken != 0 || controller->_cloudEpoch != epoch || controller->_session != session ||
             controller->_activeClient != client || controller->_focusPending ||
             controller->_appearance.englishMode) return;
-        controller->_settledTimer = nil;
-        NSDictionary *applied = [session rerankSettledWithError:nil];
+        NSDictionary *started = [session startSettledRerankWithError:nil];
+        if ([started[@"status"] isEqual:@"pending"]) {
+            uint64_t token = 0;
+            if (!MSIMEStrictUnsignedInteger(started[@"token"], &token) || token == 0) return;
+            controller->_settledToken = token;
+            controller->_settledPollEpoch = epoch;
+            controller->_settledPollSession = session;
+            controller->_settledPollClient = client;
+            [controller armSettledPoll];
+            return;
+        }
         // Same shape the cloud path applies — a transition carrying the refreshed view — so it
         // goes through the same method rather than a second way of updating the window.
-        if (MSIMEStrictBoolean(applied[@"moved"])) [controller apply:applied];
+        if (MSIMEStrictBoolean(started[@"moved"])) [controller apply:started];
     }];
     [NSRunLoop.mainRunLoop addTimer:_settledTimer forMode:NSRunLoopCommonModes];
 }
@@ -4348,6 +4420,7 @@ static __weak MSIMEInputController *MSIMEFocusedController;
     return (!MSIMEVoiceProviderSocket() && [provider.lowercaseString isEqual:@"doubao"]) || [self usesLocalModelVoice];
 }
 - (void)dealloc {
+    [self stopSettledScoring];
     [_capsLockTapTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
     [NSDistributedNotificationCenter.defaultCenter removeObserver:self];
@@ -4960,6 +5033,7 @@ static __weak MSIMEInputController *MSIMEFocusedController;
         if (!finished) return;
         [self apply:finished];
         [_session setFocused:NO error:nil];
+        [self stopSettledScoring];
         [_session closeWithError:nil];
         _session = nil;
         [_preferencesTimer invalidate];
@@ -5031,6 +5105,7 @@ static __weak MSIMEInputController *MSIMEFocusedController;
     [self discardExpandedCandidates];
     _resumeDedicatedEnglish = MSIMEStrictBoolean(_view[@"dedicated_english"]);
     [_session setFocused:NO error:nil];
+    [self stopSettledScoring];
     [_session closeWithError:nil];
     _session = nil;
     _focusPending = YES;
