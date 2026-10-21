@@ -6132,6 +6132,33 @@ fn finished_scope_releases_inherited_lock() {
     );
 }
 
+#[test]
+fn english_online_is_an_explicit_local_opt_in() {
+    let defaults = Preferences::default();
+    assert!(!defaults.english_online_candidates);
+    let mut legacy = serde_json::to_value(&defaults).unwrap();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("english_online_candidates");
+    assert!(
+        !serde_json::from_value::<Preferences>(legacy)
+            .unwrap()
+            .english_online_candidates
+    );
+    let enabled = Preferences {
+        english_online_candidates: true,
+        ..defaults
+    };
+    assert!(
+        serde_json::from_value::<Preferences>(serde_json::to_value(&enabled).unwrap())
+            .unwrap()
+            .english_online_candidates
+    );
+    let exported = crate::settings_document::export_document(&enabled).unwrap();
+    assert!(!exported.contains("english_online_candidates"));
+}
+
 /// 网络代理设置：出厂值与 Windows 正式版相同，等于默认值时不写进文档，旧文档缺这一节时也能读。
 #[test]
 fn network_proxy_defaults_match_the_windows_release_and_stay_out_of_the_document() {
