@@ -246,7 +246,7 @@ public final class VoicePage extends ReloadingDetailPage {
             .setEnabled(state.catalog().available());
         if (!VoiceProviderPolicy.network(provider)) return;
 
-        String box = TextPolicy.stripSpaceChars(InputViewValuePolicy.textOr(voice, "asr_token", ""));
+        String box = TextPolicy.trimUnicodeWhitespace(InputViewValuePolicy.textOr(voice, "asr_token", ""));
         JSONObject slots = voice.optJSONObject("asr_tokens");
         boolean hasToken = hasToken(box, slots, provider);
         String endpoint = InputViewValuePolicy.textOr(voice, "asr_endpoint", "").trim();
@@ -254,7 +254,7 @@ public final class VoicePage extends ReloadingDetailPage {
             boolean legacy = VoiceProviderPolicy.legacyAuth(InputViewValuePolicy.textOr(voice, "doubao_auth_mode", ""));
             service.nav("鉴权方式", null, legacy ? "App ID + Access Token" : "API Key", () -> pickAuthMode(legacy));
             if (legacy) {
-                String appId = TextPolicy.stripSpaceChars(InputViewValuePolicy.textOr(voice, "asr_app_key", ""));
+                String appId = TextPolicy.trimUnicodeWhitespace(InputViewValuePolicy.textOr(voice, "asr_app_key", ""));
                 service.nav("App ID", null, appId.isEmpty() ? "未设置" : "已设置",
                     () -> editAppId(provider, appId));
             }
@@ -525,7 +525,7 @@ public final class VoicePage extends ReloadingDetailPage {
             JSONObject voice = KeyboardSheets.child(preferences, "voice_input");
             if (!provider.equals(InputViewValuePolicy.textOr(voice, prefix + "_provider", "")))
                 throw new JSONException("provider changed");
-            voice.put(prefix + "_token", TextPolicy.stripSpaceChars(values.get(0)));
+            voice.put(prefix + "_token", TextPolicy.trimUnicodeWhitespace(values.get(0)));
             KeyboardSheets.child(voice, prefix + "_tokens").remove(provider);
         }));
         dialog.show();
@@ -539,7 +539,7 @@ public final class VoicePage extends ReloadingDetailPage {
             field.setError(valid ? null : "含有不能用的字符");
             return valid;
         });
-        dialog.setPrimary("保存", values -> saveVoice("asr_app_key", TextPolicy.stripSpaceChars(values.get(0))));
+        dialog.setPrimary("保存", values -> saveVoice("asr_app_key", TextPolicy.trimUnicodeWhitespace(values.get(0))));
         dialog.show();
     }
 
@@ -573,7 +573,7 @@ public final class VoicePage extends ReloadingDetailPage {
 
     private static boolean hasToken(String direct, @Nullable JSONObject slots, String provider) {
         return !direct.isEmpty() || (slots != null
-            && !TextPolicy.stripSpaceChars(slots.optString(provider, "")).isEmpty());
+            && !TextPolicy.trimUnicodeWhitespace(slots.optString(provider, "")).isEmpty());
     }
 
     /** 「润色」组：开关，打开后是服务、密钥、模型、接口、方案和「测试」。键盘读的同样是这些 `polish_*` 字段。 */
@@ -582,7 +582,7 @@ public final class VoicePage extends ReloadingDetailPage {
         boolean enabled = VoicePolishPolicy.requested(voice.optBoolean("polish_enabled", false),
             voice.optBoolean("polish_text", false));
         String provider = InputViewValuePolicy.textOr(voice, "polish_provider", "");
-        String box = TextPolicy.stripSpaceChars(InputViewValuePolicy.textOr(voice, "polish_token", ""));
+        String box = TextPolicy.trimUnicodeWhitespace(InputViewValuePolicy.textOr(voice, "polish_token", ""));
         JSONObject slots = voice.optJSONObject("polish_tokens");
         boolean hasToken = hasToken(box, slots, provider);
         String status = VoicePolishSettingsPolicy.status(enabled, state.polishConfigured(), hasToken);
