@@ -16084,7 +16084,10 @@ fn wubi_reads_the_bundled_table_then_the_downloaded_pack_and_falls_back_without_
         .any(|group| group.contains(&"msime-wubi.db"));
     assert_eq!(on_demand, cfg!(target_os = "macos"));
 
-    assert_eq!(super::wubi_dictionary(Some(&state), &resources), None);
+    assert_eq!(
+        super::wubi_dictionary(Some(&DownloadedDictionaries::new(&state)), &resources),
+        None
+    );
     assert_eq!(super::wubi_dictionary_missing(&resources, ""), on_demand);
     let preferences = Preferences {
         scheme: InputScheme::Wubi,
@@ -16112,7 +16115,8 @@ fn wubi_reads_the_bundled_table_then_the_downloaded_pack_and_falls_back_without_
 
     // 下载的资源包。
     let pack = publish_resource_pack(&state, ResourcePack::Wubi, &["msime-wubi.db"]);
-    let downloaded = super::wubi_dictionary(Some(&state), &resources).unwrap();
+    let downloaded =
+        super::wubi_dictionary(Some(&DownloadedDictionaries::new(&state)), &resources).unwrap();
     assert_eq!(downloaded, pack.join("msime-wubi.db"));
     assert!(!super::wubi_dictionary_missing(
         &resources,
@@ -16123,7 +16127,10 @@ fn wubi_reads_the_bundled_table_then_the_downloaded_pack_and_falls_back_without_
 
     // 随包的优先：Engine 读资源目录，不另给路径。
     std::fs::write(resources.join("msime-wubi.db"), b"bundled").unwrap();
-    assert_eq!(super::wubi_dictionary(Some(&state), &resources), None);
+    assert_eq!(
+        super::wubi_dictionary(Some(&DownloadedDictionaries::new(&state)), &resources),
+        None
+    );
     assert!(!super::wubi_dictionary_missing(&resources, ""));
 }
 
@@ -16161,7 +16168,7 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
         wubi_missing: false,
     };
     assert_eq!(
-        LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
+        LanguageDictionaries::resolve(Some(&DownloadedDictionaries::new(&state)), Some(&recorded)),
         bundled
     );
     assert_eq!(
@@ -16169,7 +16176,7 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
         bundled
     );
     assert_eq!(
-        LanguageDictionaries::resolve(Some(&state), None),
+        LanguageDictionaries::resolve(Some(&DownloadedDictionaries::new(&state)), None),
         LanguageDictionaries::default()
     );
 
@@ -16181,7 +16188,7 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
     std::fs::write(staging.join("msime-cantonese.db"), b"partial").unwrap();
     std::fs::write(staging.join("msime-model.json"), b"{}").unwrap();
     assert_eq!(
-        LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
+        LanguageDictionaries::resolve(Some(&DownloadedDictionaries::new(&state)), Some(&recorded)),
         bundled
     );
 
@@ -16192,7 +16199,7 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
         &["msime-cantonese.db"],
     );
     assert_eq!(
-        LanguageDictionaries::resolve(Some(&state), Some(&recorded)),
+        LanguageDictionaries::resolve(Some(&DownloadedDictionaries::new(&state)), Some(&recorded)),
         LanguageDictionaries {
             cantonese: Some(pack.join("msime-cantonese.db")),
             zhuyin: Some(recorded.join("msime-zhuyin.db")),
@@ -16201,7 +16208,7 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
         }
     );
     assert_eq!(
-        LanguageDictionaries::resolve(Some(&state), None),
+        LanguageDictionaries::resolve(Some(&DownloadedDictionaries::new(&state)), None),
         LanguageDictionaries {
             cantonese: Some(pack.join("msime-cantonese.db")),
             zhuyin: None,
@@ -16232,6 +16239,179 @@ fn downloaded_language_dictionaries_win_over_the_recorded_directory() {
         recorded.join("msime-stroke.db").to_str().unwrap()
     );
     assert_eq!(options.scheme, 5);
+}
+
+/// 在 `state` 下装一份已选中的词库更新：桌面词库代次只有空目录（校验不过），语言词库代次带齐合成文件、摘要和长度都对。返回语言词库代次目录（规范化路径，与查找结果一致）。
+fn install_language_update(state: &Path, bundled_resources: &Path) -> PathBuf {
+    const DOWNLOAD: &str = "https://github.com/metasequoiaime/msime-dictionary/releases/download/";
+    let baseline = Edition::full().resource_set().unwrap();
+    let version = msime_client_providers::dictionary_updates::baseline_version(&baseline);
+    let mut desktop = baseline.clone();
+    let mut languages: ResourceSet = serde_json::from_str(include_str!(
+        "../../../resources/language-dictionaries.lock.json"
+    ))
+    .unwrap();
+    for file in desktop
+        .artifacts
+        .iter_mut()
+        .chain(languages.artifacts.iter_mut())
+    {
+        if file.url.starts_with(DOWNLOAD) {
+            file.url = format!("{DOWNLOAD}{version}/{}", file.name);
+        }
+    }
+    let generations = std::fs::canonicalize(state)
+        .unwrap()
+        .join("dictionary-updates/generations");
+    for file in &mut languages.artifacts {
+        let bytes = format!("synthetic {}", file.name).into_bytes();
+        file.sha256 = hex::encode(Sha256::digest(&bytes));
+        file.size = bytes.len() as u64;
+    }
+    // 代次由清单内容算出，摘要和长度定下来之后才知道目录名。
+    let directory = generations.join(languages.generation().unwrap());
+    std::fs::create_dir_all(&directory).unwrap();
+    for file in &languages.artifacts {
+        std::fs::write(
+            directory.join(&file.name),
+            format!("synthetic {}", file.name),
+        )
+        .unwrap();
+    }
+    std::fs::create_dir_all(generations.join(desktop.generation().unwrap())).unwrap();
+    let selection = msime_client_providers::dictionary_updates::Selection {
+        baseline_generation: baseline.generation().unwrap(),
+        version,
+        desktop,
+        languages: Some(languages),
+        bundled_resources: bundled_resources.to_path_buf(),
+    };
+    std::fs::write(
+        state.join("dictionary-updates/installed.json"),
+        serde_json::to_vec(&json!({"active": selection, "previous": null})).unwrap(),
+    )
+    .unwrap();
+    directory
+}
+
+/// 已选中的词库更新里的语言词库优先于随包的那份；选择记录坏了、代次校验不过、路径上有符号链接时，每个词库都退回随包的。
+#[test]
+fn a_selected_dictionary_update_wins_until_it_stops_verifying() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let resources = root.path().join("bundle/resources");
+    let recorded = root.path().join("bundle/language-dictionaries");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::create_dir_all(&resources).unwrap();
+    std::fs::create_dir_all(&recorded).unwrap();
+    for name in ["msime-cantonese.db", "msime-zhuyin.db", "msime-stroke.db"] {
+        std::fs::write(recorded.join(name), b"bundled").unwrap();
+    }
+    let in_directory = |directory: &Path| LanguageDictionaries {
+        cantonese: Some(directory.join("msime-cantonese.db")),
+        zhuyin: Some(directory.join("msime-zhuyin.db")),
+        stroke: Some(directory.join("msime-stroke.db")),
+        wubi_missing: false,
+    };
+    let bundled = in_directory(&recorded);
+    let resolve = |recorded: &Path| {
+        LanguageDictionaries::resolve(Some(&DownloadedDictionaries::new(&state)), Some(recorded))
+    };
+    assert_eq!(resolve(&recorded), bundled);
+
+    let generation = install_language_update(&state, &resources);
+    let updated = in_directory(&generation);
+    assert_eq!(resolve(&recorded), updated);
+    // 桌面词库代次校验不过，日文和五笔都不从它取。
+    let downloaded = DownloadedDictionaries::new(&state);
+    assert_eq!(super::japanese_dictionary(Some(&downloaded)), None);
+    assert_eq!(super::wubi_dictionary(Some(&downloaded), &resources), None);
+    // 建会话走同一条查找路径。
+    let document = json!({ "api_version": 1, "resources": resources, "user_data": "/u", "cache": "/c", "dictionaries": "/d", "preferences": Preferences::default(), "preferences_directory": state, "language_dictionaries": recorded });
+    let options = serde_json::from_value::<HostOptions>(document)
+        .unwrap()
+        .into_engine_options();
+    assert_eq!(
+        [
+            options.cantonese_dictionary,
+            options.zhuyin_dictionary,
+            options.stroke_dictionary
+        ],
+        [
+            path_text(updated.cantonese.clone()),
+            path_text(updated.zhuyin.clone()),
+            path_text(updated.stroke.clone())
+        ]
+    );
+
+    // 选择记录坏了。
+    let installed = state.join("dictionary-updates/installed.json");
+    let selection = std::fs::read(&installed).unwrap();
+    std::fs::write(&installed, b"{").unwrap();
+    assert_eq!(resolve(&recorded), bundled);
+    std::fs::write(&installed, &selection).unwrap();
+    assert_eq!(resolve(&recorded), updated);
+
+    // 代次里的一个文件被改了（长度不变）：整个代次校验不过，三个词库都不用它。
+    let stroke = generation.join("msime-stroke.db");
+    let original = std::fs::read(&stroke).unwrap();
+    let tampered = vec![b'x'; original.len()];
+    std::fs::write(&stroke, &tampered).unwrap();
+    std::fs::File::options()
+        .write(true)
+        .open(&stroke)
+        .unwrap()
+        .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(1))
+        .unwrap();
+    assert_eq!(resolve(&recorded), bundled);
+    // 校验不过的更新目录不能再被当作随包目录采用。
+    assert_eq!(resolve(&generation), LanguageDictionaries::default());
+    std::fs::write(&stroke, &original).unwrap();
+    assert_eq!(resolve(&recorded), updated);
+
+    // 代次目录的上级被换成符号链接：选择记录本身就不被采用。
+    #[cfg(unix)]
+    {
+        let updates = state.join("dictionary-updates");
+        let moved = root.path().join("moved-generations");
+        std::fs::rename(updates.join("generations"), &moved).unwrap();
+        msime_path_trust::untrusted_symlink(&moved, updates.join("generations")).unwrap();
+        assert_eq!(resolve(&recorded), bundled);
+    }
+}
+
+/// 一次解析里选择记录只读一次、每个代次只校验一次，这次要找的所有文件共用；下一次解析从头重读、重做全部检查，所以不留跨调用的缓存。
+#[test]
+fn one_resolution_reads_the_dictionary_update_selection_once() {
+    let root = tempfile::tempdir().unwrap();
+    let state = root.path().join("state");
+    let resources = root.path().join("bundle/resources");
+    std::fs::create_dir_all(&state).unwrap();
+    std::fs::create_dir_all(&resources).unwrap();
+    let generation = install_language_update(&state, &resources);
+
+    let downloaded = DownloadedDictionaries::new(&state);
+    assert_eq!(
+        downloaded.updated_file("msime-cantonese.db"),
+        Some(generation.join("msime-cantonese.db"))
+    );
+    // 读过一个文件之后，选择记录坏了，另一个文件的内容也被换了（长度不变）。
+    std::fs::write(state.join("dictionary-updates/installed.json"), b"{").unwrap();
+    let stroke = generation.join("msime-stroke.db");
+    let length = std::fs::metadata(&stroke).unwrap().len() as usize;
+    std::fs::write(&stroke, vec![b'x'; length]).unwrap();
+    // 同一次解析沿用已读的选择记录和已做的校验，文件本身的路径和长度检查仍逐个做。
+    assert_eq!(
+        downloaded.updated_file("msime-stroke.db"),
+        Some(stroke.clone())
+    );
+    std::fs::write(&stroke, b"longer than before").unwrap();
+    assert_eq!(downloaded.updated_file("msime-stroke.db"), None);
+    // 下一次解析看见坏掉的选择记录。
+    assert_eq!(
+        DownloadedDictionaries::new(&state).updated_file("msime-zhuyin.db"),
+        None
+    );
 }
 
 #[test]
