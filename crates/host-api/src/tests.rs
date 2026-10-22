@@ -78,23 +78,44 @@ fn currency_punctuation_follows_character_width_on_all_key_routes() {
         };
         let handle = test_host_with_pinyin_fixture(directory.path(), preferences);
         assert_eq!(read(msime_client_focus(handle, true))["ok"], true);
+        let confirm_literal = |result: &Value, expected: &str| {
+            assert_eq!(result["value"]["handled"], true, "{result}");
+            assert!(result["value"]["commit"].is_null(), "{result}");
+            let view = &result["value"]["view"];
+            assert_eq!(view["editing_text"], "nihao$", "{result}");
+            assert_eq!(view["candidates"].as_array().unwrap().len(), 1, "{result}");
+            assert_eq!(view["candidates"][0]["text"], "nihao$", "{result}");
+            let confirmed = read(msime_client_command(handle, 1));
+            assert_eq!(confirmed["value"]["commit"], expected, "{confirmed}");
+            assert_eq!(
+                confirmed["value"]["view"]["editing_text"], "",
+                "{confirmed}"
+            );
+        };
         for fullwidth in [false, true, false] {
             read(msime_client_set_character_width(handle, fullwidth));
             let currency = if fullwidth { "￥" } else { "¥" };
             for composing in [false, true] {
-                let prefix = if composing {
-                    let view = type_letters(handle, b"nihao");
-                    view["candidates"][0]["text"].as_str().unwrap().to_owned()
-                } else {
-                    String::new()
-                };
+                if composing {
+                    type_letters(handle, b"nihao");
+                }
                 let result = read(match route {
                     0 => msime_client_character(handle, b'$', true),
                     1 => msime_client_punctuation(handle, b'$'),
                     _ => msime_client_punctuation_with_context(handle, b'$', 0),
                 });
                 assert_eq!(result["value"]["handled"], true);
-                assert_eq!(result["value"]["commit"], format!("{prefix}{currency}"));
+                if composing {
+                    // 组字中的 `$` 保留原文；只有确认上屏时才转换字宽。
+                    let literal = if fullwidth {
+                        "ｎｉｈａｏ＄"
+                    } else {
+                        "nihao$"
+                    };
+                    confirm_literal(&result, literal);
+                } else {
+                    assert_eq!(result["value"]["commit"], currency);
+                }
             }
             assert_eq!(
                 read(msime_client_punctuation(handle, b','))["value"]["commit"],
@@ -102,20 +123,15 @@ fn currency_punctuation_follows_character_width_on_all_key_routes() {
             );
         }
         read(msime_client_set_chinese_punctuation(handle, false));
-        let view = type_letters(handle, b"nihao");
-        let prefix = view["candidates"][0]["text"].as_str().unwrap();
-        assert_eq!(
-            read(msime_client_punctuation(handle, b'$'))["value"]["commit"],
-            format!("{prefix}$")
-        );
+        type_letters(handle, b"nihao");
+        confirm_literal(&read(msime_client_punctuation(handle, b'$')), "nihao$");
         read(msime_client_set_chinese_punctuation(handle, true));
-        let view = type_letters(handle, b"nihao");
-        let prefix = view["candidates"][0]["text"].as_str().unwrap();
+        type_letters(handle, b"nihao");
         read(msime_client_set_caps_lock(handle, true));
-        // 大写锁定只在空闲时直出 ASCII，已有组字仍用中文标点。
-        assert_eq!(
-            read(msime_client_punctuation_with_context(handle, b'$', 0))["value"]["commit"],
-            format!("{prefix}¥")
+        // 大写锁定只在空闲时直出 ASCII，已有组字仍保留原文。
+        confirm_literal(
+            &read(msime_client_punctuation_with_context(handle, b'$', 0)),
+            "nihao$",
         );
         let idle = read(msime_client_punctuation_with_context(handle, b'$', 0));
         assert_eq!(idle["value"]["handled"], false);
@@ -5976,7 +5992,7 @@ fn efficiency_is_not_counted_while_statistics_are_off() {
     read(msime_client_destroy(handle));
 }
 
-/// A result of the expression mode is picked, not typed: the preference opens the mode through the host, and the pick is kept out of the selection statistics as it is kept out of learning.
+/// 算式结果是生成的候选：通过宿主偏好开启模式后，选择结果既不学习，也不计入选择统计。
 #[test]
 fn generated_mode_selections_stay_out_of_selection_statistics() {
     let dir = tempfile::tempdir().unwrap();
@@ -5990,7 +6006,7 @@ fn generated_mode_selections_stay_out_of_selection_statistics() {
     assert_eq!(entered["value"]["view"]["local_mode"], "expression");
     assert_eq!(
         entered["value"]["view"]["spelling_symbols"],
-        "0123456789+-*/.()%^"
+        "0123456789+-*/.()%^#$&"
     );
     let mut view = Value::Null;
     for byte in b"1+2" {
