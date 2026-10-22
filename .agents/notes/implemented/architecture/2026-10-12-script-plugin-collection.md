@@ -77,7 +77,7 @@ rare-chars-last、hide-rare-chars、traditional-glyph 和 unicode-codepoint 都�
 
 ## Verification
 
-- CI 的 `cargo test --locked -p msime-pack-tool --test sdk` 实际执行两项测试；临时删掉 SDK 的 `MSIME_LOCAL_MODE_SYMBOL` 做缺项负对照时，常量对照失败并退出 101，恢复后通过。插件构建与夹具校验继续由原脚本承担。
+- CI 新增的 `cargo test --locked -p msime-pack-tool --test sdk` 在本机实际执行两项测试；临时删掉 SDK 的 `MSIME_LOCAL_MODE_SYMBOL` 做缺项负对照时，常量对照失败并退出 101，恢复后通过。插件构建与夹具校验继续由原脚本承担。
 
 - `scripts/test-script-plugins.sh`：pangu-spacing 的 22 个事件和 `expected.jsonl` 一致，最大 fuel 37 171；不授权时每个事件只有 `skip: denied` 日志，没有动作；文件夹和压缩包都通过 `msime-pack validate`。连续两次构建的压缩包 sha1 相同。把 `expected.jsonl` 改错一行时脚本以 1 退出并打印两边的差异。
 - `python3 scripts/test-script-plugin-data.py`：有缓存时 `common-chars.bin` 与生成结果一致；挪走缓存时打印 skip、以 0 退出。
