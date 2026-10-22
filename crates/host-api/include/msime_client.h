@@ -622,6 +622,7 @@ char *msime_client_voice_model_setting_check(const uint8_t *request, size_t leng
  * progress 可为空，在调用线程收到 (context, phase "download"|"import"|"verify"|"done", done, total)，阶段字符串仅在回调期间有效。
  * 首次进度在任务登记后、任何文件或网络 I/O 前发送（done=0，total=资源包大小），回调可重入 resource_pack_cancel；取消后返回 "local_model_cancelled"。
  * resource_pack_cancel: pack 是原始 UTF-8 id（不是 JSON）；NULL/0 取消本进程全部资源包安装。可在任何线程调用，立即返回，不触发进度回调。
+ * resource_pack_remove: {state_root, pack} -> {removed: bool}。阻塞卸载已发布的资源包，先摘除引擎侧共享映射缓存；未安装、未发布目录和符号链接返回 false，活跃会话仍持有映射导致的删除失败如实返回错误。只能放在工作线程。
  * resource_pack_adopt: {state_root, pack, source: absolute dir} -> {path}。在同一文件系统内把包文件从 source 重命名移入（不复制），按编译锁校验后发布；失败则全部移回，不发布任何内容。已有相同字节的安装时直接返回，不改动 source。 */
 typedef void (*msime_client_resource_pack_progress_callback)(void *context, const char *phase,
                                                              uint64_t done, uint64_t total);
@@ -630,6 +631,7 @@ char *msime_client_resource_pack_install(const uint8_t *request, size_t length,
                                          msime_client_resource_pack_progress_callback progress,
                                          void *context);
 void msime_client_resource_pack_cancel(const uint8_t *pack, size_t length);
+char *msime_client_resource_pack_remove(const uint8_t *request, size_t length);
 char *msime_client_resource_pack_adopt(const uint8_t *request, size_t length);
 /* 自定义翻译请求描述器（不做网络 I/O）：api.deepl.com / api-free.deepl.com 用 DeepL v2 格式（DeepL-Auth-Key 鉴权、text 数组，没有密钥时报错），其他地址用 DeepLX 兼容格式。Request <=16 KiB:
  * {config:{enabled,endpoint,api_key},text,source_language,target_language}.
