@@ -1871,6 +1871,17 @@ fn a_nine_key_shuangpin_layout_starts_the_grid_with_the_chosen_table() {
         ..chinese_preferences()
     };
     let handle = test_host_with_pinyin_fixture(dir.path(), preferences.clone());
+    // 换表用例需要单字频度稳定切分排序，避免无频度的路径按字典序挤出查询预算。
+    let priors = "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+                  INSERT INTO tbl_1_n VALUES('ni','n','甲',100);
+                  CREATE TABLE tbl_1_h(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+                  INSERT INTO tbl_1_h VALUES('hao','h','乙',100);";
+    for directory in ["resources", "dictionaries"] {
+        rusqlite::Connection::open(dir.path().join(directory).join("msime-pinyin.db"))
+            .unwrap()
+            .execute_batch(priors)
+            .unwrap();
+    }
     read(msime_client_focus(handle, true));
     let view = read(msime_client_view(handle));
     assert_eq!(view["value"]["key_grid"], "nine_key_shuangpin");
@@ -1891,16 +1902,20 @@ fn a_nine_key_shuangpin_layout_starts_the_grid_with_the_chosen_table() {
 
     // 米旮旯 2 的 ao 在 2：同一个词是 64 42。
     preferences.nine_key_shuangpin_profile = NineKeyShuangpinProfile::Migala2;
-    assert_eq!(
-        update(handle, 1, &preferences)["value"]["view"]["key_grid"],
-        "nine_key_shuangpin"
-    );
+    let updated = update(handle, 1, &preferences);
+    assert_eq!(updated["ok"], true, "{updated}");
+    assert_eq!(updated["value"]["deferred"], false, "{updated}");
+    assert_eq!(updated["value"]["view"]["key_grid"], "nine_key_shuangpin");
     for &digit in b"644" {
         read(msime_client_character(handle, digit, false));
     }
     typed = read(msime_client_character(handle, b'2', false));
     assert_eq!(
         typed["value"]["view"]["candidates"][0]["text"], "本地",
+        "{typed}"
+    );
+    assert_eq!(
+        typed["value"]["view"]["nine_key_reading"], "ni'hao",
         "{typed}"
     );
     // 米旮旯 2 不用 0 键：0 不进九宫格，组字照旧。
