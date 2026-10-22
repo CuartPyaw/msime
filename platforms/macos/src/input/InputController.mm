@@ -1340,8 +1340,6 @@ static NSImage *MSIMECandidateLogoImage() {
     BOOL _refreshingCandidateSkin;
     BOOL _candidateSkinRefreshPending;
     CGFloat _tallestVerticalCandidateHeight;
-    // 横排候选窗这次显示以来最宽的卡片宽度（不含 canvas 外留白），见 MSIMEWidestCandidateWidth。
-    CGFloat _widestHorizontalCandidateWidth;
     NSInteger _armedGlossColumn;
     // Ctrl+Enter turns the highlighted candidate's gloss into a page of its senses. The composition
     // is untouched while that page is up - nothing was typed - so leaving it only needs the view
@@ -3715,8 +3713,6 @@ static const NSTimeInterval kSettledRerankPoll = 1.0 / 60.0;
 }
 - (void)appearanceChanged:(NSNotification *)notification {
     _preferenceLoadState.reset(); // Local edits invalidate older disk reads.
-    // 记住的横排宽度是按旧的字号、缩放、皮肤和内边距排出来的，换了设置就不再作数：不清掉的话，调小整体大小后卡片还停在原来的宽度。
-    _widestHorizontalCandidateWidth = 0;
     if (!_appearance.cloudCandidatesEnabled) [self cancelCloudCandidates];
     if (_appearance) _glossEnabled = @(_appearance.candidateTranslations);
     if (_appearance && !_appearance.candidateTranslations) {
@@ -8507,17 +8503,13 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         skin.canvas ? skin.canvas->outer : msime::mac::SkinInsets{}, decorationImage ? skin.decorationTopDip : 0);
     rowVisible.size.width = MAX(0.0, rowVisible.size.width - canvasExtra - 2 * (shadowInsets.left + shadowInsets.right));
     if (compactExpand) rowVisible.size.width = MAX(0.0, rowVisible.size.width - arrowWidth);
-    // 普通横排同次组字只变宽不变窄；fitContent 则允许缩回实际内容宽度。历史宽度含首行右端的展开键，当前页带它时先扣掉。
-    const CGFloat steadyWidth = vertical || skin.fitContent || !_panel.isVisible ? 0.0 : MAX(0.0, _widestHorizontalCandidateWidth - (compactExpand ? arrowWidth : 0));
     const MSIMECandidatePageGeometry pageGeometry =
         [self candidatePageGeometry:candidates font:font glossFont:glossFont showSelectedBar:geometry.showSelectedBar inset:inset
                              paging:pageControls visible:rowVisible preeditWidth:headerWidth
-                       minimumWidth:MAX(MAX(0.0, MAX(skin.minWidthDip, skin.decorationWidthDip) - canvasExtra), steadyWidth)
+                       minimumWidth:MAX(0.0, MAX(skin.minWidthDip, skin.decorationWidthDip) - canvasExtra)
                        reservesGloss:YES pagerWidth:listPager.column + toggle.column()];
     // 共享窄列可含半点 DIP，先取整总宽，避免 AppKit 调整内容宽度后按钮离右边多出半点。
     const CGFloat width = skinExpand ? ceil(pageGeometry.width) : pageGeometry.width + (compactExpand ? arrowWidth : 0);
-    _widestHorizontalCandidateWidth = skin.fitContent ? width
-        : MSIMEWidestCandidateWidth(_widestHorizontalCandidateWidth, width, vertical, _panel.isVisible);
     MSIMECandidatePanel *candidatePanel = [self candidatePanelWithAppearance:candidateAppearance];
     candidatePanel.scrollHandler = nil;
     if (!candidatePanel.wheelPaging) [candidatePanel resetWheelAccumulator];
@@ -8794,8 +8786,6 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     if ((skin.candidateSkin != _renderedCandidateSkin || shadowGeometryChanged) &&
         _panel.isVisible && !_rerenderingForCandidateSkin) {
         _rerenderingForCandidateSkin = YES;
-        // 换了一个皮肤包，最小宽度和内边距都可能不同，记住的宽度从这次重排重新算。
-        _widestHorizontalCandidateWidth = 0;
         [self renderCandidates];
         _rerenderingForCandidateSkin = NO;
         return;

@@ -673,7 +673,13 @@ static void TestFactoryFitAndJustify(RowLayoutClient *client)
         const CGFloat initialWidth = NSWidth(((MSIMECandidateChromeView *)panel.contentView).cardBounds);
         if (!compact) assert(initialWidth >= 159);
         else assert(initialWidth < 140);
-        [controller setValue:@400 forKey:@"widestHorizontalCandidateWidth"];
+        NSDictionary *initialView = [controller valueForKey:@"view"];
+        [controller setValue:@{@"focused": @YES, @"editing_text": @"ce", @"page": @0, @"page_count": @1,
+            @"candidates": @[@{@"text": @"合成候选窗口宽度回归测试合成候选窗口宽度回归测试", @"highlighted": @YES}]} forKey:@"view"];
+        [controller renderCandidates];
+        assert(NSWidth(((MSIMECandidateChromeView *)panel.contentView).cardBounds) > initialWidth + 20);
+        // 通过真实长短候选切换验证收窄，不能再注入已删除的历史最大宽度字段。
+        [controller setValue:initialView forKey:@"view"];
         [controller renderCandidates];
         MSIMECandidateButton *first = CandidateButton(panel.contentView, 0);
         assert(first && first.hasSkinLayout);
@@ -687,7 +693,7 @@ static void TestFactoryFitAndJustify(RowLayoutClient *client)
             assert(NSWidth(first.frame) > 100 && NSWidth(last.frame) > 100);
         } else {
             regularWidth = width;
-            assert(width >= 399);
+            assert(width >= 159 && fabs(width - initialWidth) < 1);
         }
         if (!justified) {
             [controller setValue:@{@"focused": @YES, @"editing_text": @"ce", @"page": @0, @"page_count": @1,
