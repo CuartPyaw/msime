@@ -611,7 +611,10 @@ public final class MSIMEInputService extends InputMethodService {
                         }
                         clipboard.setPrimaryClip(ClipData.newPlainText("设备信息",
                             DeviceInfoCollector.text(this, entries)));
-                        notice("已复制设备信息");
+                        // 剪贴板监听会把刚复制的内容放进键盘顶部预览；预览可用时不要再用诊断行盖住它。
+                        offerRecentClip(true);
+                        if (recentClipRow == null || !recentClipRow.isShown())
+                            notice("已复制设备信息");
                     } catch (RuntimeException unavailable) {
                         notice("无法复制设备信息");
                     }
