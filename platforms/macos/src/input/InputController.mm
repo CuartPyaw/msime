@@ -2166,11 +2166,39 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
     _expandedPendingScrollDelta = 0;
 }
 
-// 收起网格，组字和普通候选窗原样留着。
+// 收起网格时把高亮交回普通候选窗；只导航，不选词或提交组字。
 - (void)closeExpandedCandidates {
     if (!_expandedCandidates) return;
+    NSDictionary *identifier = _expandedCursor < _expandedCandidates.count ? _expandedCandidates[_expandedCursor][@"id"] : nil;
+    NSUInteger target = 0, current = NSNotFound;
+    const BOOL valid = MSIMECurrentCandidateIdentity(identifier, _view) &&
+        [identifier[@"generation"] isEqual:_expandedGeneration] &&
+        MSIMEStrictUnsignedIntegerValue(identifier[@"index"], &target);
+    for (NSDictionary *candidate in _view[@"candidates"])
+        if (MSIMEStrictBoolean(candidate[@"highlighted"])) {
+            MSIMEStrictUnsignedIntegerValue(candidate[@"id"][@"index"], &current);
+            break;
+        }
     [self discardExpandedCandidates];
-    [self renderCandidates];
+    const NSUInteger columns = MAX((NSUInteger)1, (NSUInteger)_appearance.pageSize);
+    NSDictionary *transition = nil;
+    while (valid && current != NSNotFound && current != target) {
+        const uint32_t command = current / columns < target / columns ? MSIME_NEXT_PAGE
+                               : current / columns > target / columns ? MSIME_PREVIOUS_PAGE
+                               : current < target ? MSIME_NEXT_CANDIDATE : MSIME_PREVIOUS_CANDIDATE;
+        NSDictionary *next = [_session command:command error:nil];
+        if (!next) {
+            msime_macos_diagnostic_write("expanded_candidates_close_navigation_failed");
+            break;
+        }
+        transition = next;
+        if (command == MSIME_NEXT_PAGE) current = (current / columns + 1) * columns;
+        else if (command == MSIME_PREVIOUS_PAGE) current = (current / columns - 1) * columns;
+        else if (command == MSIME_NEXT_CANDIDATE) ++current;
+        else --current;
+    }
+    if (transition) [self apply:transition];
+    else [self renderCandidates];
 }
 
 // 打开网格，高亮停在普通候选窗正高亮的那一个上。没有更多候选、或者网格画不出来（光标位置无效）时返回 NO，调用方照旧处理这个键。
