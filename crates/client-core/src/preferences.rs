@@ -2951,6 +2951,9 @@ impl<'de> Deserialize<'de> for HelpcodeSchema {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct HelpcodePreferences {
+    /// Linux 的辅助码前导键；空串保留 Shift 加字母。
+    #[serde(default)]
+    pub trigger_key: String,
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
     pub schema: HelpcodeSchema,
@@ -2963,6 +2966,7 @@ impl Default for HelpcodePreferences {
         Self {
             enabled: true,
             schema: HelpcodeSchema::default(),
+            trigger_key: String::new(),
             show_in_candidate_window: true,
         }
     }
@@ -2972,6 +2976,7 @@ fn default_quanpin_helpcode() -> HelpcodePreferences {
     HelpcodePreferences {
         enabled: true,
         schema: HelpcodeSchema::Ziranma,
+        trigger_key: String::new(),
         show_in_candidate_window: false,
     }
 }
@@ -3023,6 +3028,7 @@ fn default_shuangpin_helpcode() -> HelpcodePreferences {
     HelpcodePreferences {
         enabled: true,
         schema: HelpcodeSchema::Lantian,
+        trigger_key: String::new(),
         show_in_candidate_window: true,
     }
 }
@@ -3246,6 +3252,14 @@ impl Preferences {
     }
 
     pub fn validate(&self) -> Result<(), PreferencesError> {
+        for helpcode in [&self.quanpin_helpcode, &self.shuangpin_helpcode] {
+            if !matches!(
+                helpcode.trigger_key.as_str(),
+                "" | ";" | "/" | "\\" | "`" | "="
+            ) {
+                return Err(PreferencesError::InvalidHelpcodeTriggerKey);
+            }
+        }
         if !self.cloud_candidate_provider.validate() {
             return Err(PreferencesError::InvalidCloudCandidateProvider);
         }
@@ -3499,6 +3513,8 @@ impl PreferencesSnapshot {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PreferencesError {
+    #[error("辅助码触发键必须为空或 ; / \\ ` = 中的一个标点")]
+    InvalidHelpcodeTriggerKey,
     #[error("五笔二三候选键必须是两个不同的单个 ASCII 标点")]
     InvalidWubiCandidateSelection,
     #[error("floating toolbar settings are invalid")]
