@@ -36,6 +36,22 @@ public final class VoiceProviderSettingsDeviceSmoke extends Instrumentation {
                 && !(Boolean) credential.invoke(null, "doubao", "密钥")
                 && !(Boolean) credential.invoke(null, "openai", "x".repeat(16 * 1024 + 1)),
             "共享 JNI 拒绝控制字符、豆包非 ASCII 和超长凭据");
+        Method trim = loader.loadClass("app.msime.android.TextPolicy")
+            .getMethod("trimUnicodeWhitespace", String.class);
+        Method hasToken = loader.loadClass("app.msime.android.home.VoicePage")
+            .getDeclaredMethod("hasToken", String.class, JSONObject.class, String.class);
+        hasToken.setAccessible(true);
+        for (String whitespace : new String[] {"\u0085", "\u00a0", "\u202f", "\u3000"}) {
+            check((Boolean) credential.invoke(null, "doubao", whitespace), "共享预检允许空白删除");
+            String normalized = (String) trim.invoke(null, whitespace);
+            check(normalized.isEmpty(), "保存时使用与 Rust 相同的空白裁剪");
+            check(!(Boolean) hasToken.invoke(null, normalized, null, "openai"), "空白当前凭据显示为未设置");
+            check(!(Boolean) hasToken.invoke(null, "", new JSONObject().put("openai", whitespace), "openai"),
+                "旧空白槽位显示为未设置");
+            String wrapped = whitespace + "synthetic-key" + whitespace;
+            check((Boolean) credential.invoke(null, "doubao", wrapped)
+                    && "synthetic-key".equals(trim.invoke(null, wrapped)), "豆包预检与保存裁剪一致");
+        }
         Method credentialParse = policy.getDeclaredMethod("credentialAccepted", String.class);
         credentialParse.setAccessible(true);
         check((Boolean) credentialParse.invoke(null, "{\"ok\":true,\"value\":{\"accepted\":true}}"),
