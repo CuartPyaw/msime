@@ -12,6 +12,8 @@ iPhone XR 上九键每个数字仍要约 30 ms（打开词库映射之后，见 
 
 `QuanpinDictionary` 增加 `sentence_decode_cache`（`SENTENCE_DECODE_CACHE_CAPACITY` 条，FIFO），键由 `sentence_decode_key` 组成：音节串、这次查询的纠错类型、是否规划纠错整句。值是 `DecodedSentences`（未截断的整句路径与纠错整句）以及解码时的个人模型版本。
 
+命中后由[输出投影](../testing/2026-10-23-sentence-decode-cache-projection.md)借用解码路径，只复制最终入选的候选；冷解码仍保留本篇的一份缓存副本和原拥有路径输出。
+
 `lattice::merge` 把原来的建图、解码、合并拆成两步：`decode_lattice` / `decode_lattice_borrowed` 只依赖音节、词典行和解码参数，`merge_decoded` 负责 `emit` 截断、神经重排、去重与插入位置。`merge_lattice_candidates` 的签名不变，双拼等其他调用方照旧；原来只供全拼使用的 `merge_lattice_candidates_borrowed` 由这两步替代。
 
 缓存失效规则（must）：
