@@ -1736,6 +1736,9 @@ public final class MSIMEInputService extends InputMethodService {
 
     @Override public void onStartInputView(EditorInfo info, boolean restarting) {
         super.onStartInputView(info, restarting);
+        // 反馈必须在第一下按键前生效，不能被延迟刷新的组字保护跳过。
+        loadFeedbackPreferences();
+        refreshLocalSettings();
         if (info != null) automaticNumberRow.enterEditor(info.inputType, info.packageName);
         if (inlineAutofill != null) inlineAutofill.showInput();
         Telemetry.inputViewShown(this);
@@ -1766,7 +1769,6 @@ public final class MSIMEInputService extends InputMethodService {
                     effectiveInfo.inputType, effectiveInfo.imeOptions);
             }
             markPrivateSession();
-            loadFeedbackPreferences();
             refreshLocalSettings();
             refreshPreferencesOnInputView();
             updateAutomaticCapitalization();
@@ -5450,6 +5452,10 @@ public final class MSIMEInputService extends InputMethodService {
         button.setText(label);
         button.setContentDescription("按键 " + description);
         imeStyler.styleButton(button, false);
+        button.setOnTouchListener((view, event) -> {
+            imeLetterRows.updateKeyPreview(button, event);
+            return false;
+        });
         return bindCountedAction(button, action);
     }
 
