@@ -60,6 +60,8 @@ SHA-256 一致。许可声明在 `resources/licenses/rime-baguwen-LGPL-3.0.txt` 
 
 资源包卸载复用语音安装器的跨进程锁、目录描述符与先整体改名的流程，只处理已发布的真实目录，安装期间拒绝卸载；符号链接和未发布目录保持原样。活跃会话持有的映射不会被强制释放，Windows 的占用错误仍通过原有错误入口报告。
 
+`msime_client_resource_pack_remove` 在公共 `msime_client.h` 声明与 Rust 导出相同的字节缓冲区签名，原生宿主可直接包含头文件调用，响应使用标准 JSON 封装的 `{removed: bool}`。只补充导出而遗漏头文件会使 C/C++ 调用方编译失败；宿主接口一致性回归与 C、C++ 编译检查覆盖这一边界。
+
 ## 2026-10-22 补充：octagram 调参系数进偏好（对应 Windows `sentence_collocation_*`）
 
 Windows v0.11.1 出厂模板的 `[association]` 有七个不进设置页的高级调参键：`sentence_collocation_weight`（1.0）、`sentence_collocation_max_length`（6）、`sentence_collocation_min_length`（2）、`sentence_collocation_penalty`（-14.0）、`sentence_collocation_non_penalty`（-6.0）、`sentence_collocation_weak_penalty`（-100.0）、`sentence_collocation_rear_penalty`（-18.0）。新架构的 `GramConfig` 早已是这些参数的结构体，但值是定值，偏好层不可调。本轮把同名七键加进 `SentenceAssociationPreferences`（键名逐字与 Windows 一致），host-api 的 `engine_sentence_association` 逐字段透传进 `collocation_weight` 与 `collocation_grammar`。
