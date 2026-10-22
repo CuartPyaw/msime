@@ -695,8 +695,9 @@ char *msime_client_ai_endpoint_check(const uint8_t *endpoint, size_t length);
 char *msime_client_ai_models(const uint8_t *request, size_t length);
 /* AI 公开预设数组；含 id/title/endpoint/model/models/documentation/desktop_only/uses_token，不做 I/O。 */
 char *msime_client_ai_provider_catalog(void);
-/* 纯计算切换补丁。请求 <=16 KiB：{provider,current:{enabled,provider,endpoint,model}}。
- * 返回 {enabled,provider,endpoint,model}；不传凭据，错误码 ai_invalid。不保留请求缓冲区。 */
+/* 纯计算切换补丁。请求 <=16 KiB：`{provider,current:{enabled,provider,endpoint,model,endpoints?,models?}}`。
+ * `endpoints`/`models` 是按服务商 `id` 记忆自定义地址/模型的字符串映射，缺省为空映射；切换前保存当前自定义值，再按目标槽位回填，缺键或空字符串使用目录默认值。
+ * 返回 `{enabled,provider,endpoint,model,endpoints,models}`；宿主须将两个映射随补丁保存。不传凭据，错误码 `ai_invalid`。不保留请求缓冲区。 */
 char *msime_client_ai_provider_update(const uint8_t *request, size_t length);
 /* The AI settings page's 「测试」, the Tauri settings shell's ai_test. Request <=256 KiB:
  * {endpoint,model,prompt,token,text}: model non-empty <=256 bytes; prompt (may be empty) and

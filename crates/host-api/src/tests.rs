@@ -18728,14 +18728,77 @@ fn ai_provider_catalog_export_is_public_and_matches_the_shared_presets() {
 }
 
 #[test]
-fn ai_provider_update_export_returns_only_the_four_configuration_fields() {
+fn ai_provider_update_export_accepts_legacy_requests_without_slots() {
     let request = br#"{"provider":"openai","current":{"enabled":true,"provider":"deepseek","endpoint":"","model":""}}"#;
     let result = read(unsafe { msime_client_ai_provider_update(request.as_ptr(), request.len()) });
     assert_eq!(result["ok"], true);
     assert_eq!(
         result["value"],
-        json!({"enabled":true,"provider":"openai","endpoint":"https://api.openai.com/v1/chat/completions","model":"gpt-4.1-mini"})
+        json!({"enabled":true,"provider":"openai","endpoint":"https://api.openai.com/v1/chat/completions","model":"gpt-4.1-mini","endpoints":{},"models":{}})
     );
+}
+
+#[test]
+fn ai_provider_update_export_round_trips_provider_slots() {
+    let switch = |provider: &str, current: &Value| {
+        let request = json!({"provider": provider, "current": current}).to_string();
+        let result =
+            read(unsafe { msime_client_ai_provider_update(request.as_ptr(), request.len()) });
+        assert_eq!(result["ok"], true, "{result}");
+        result["value"].clone()
+    };
+    let current = json!({
+        "enabled": true,
+        "provider": "deepseek",
+        "endpoint": "https://alpha.example/v1/chat/completions",
+        "model": "synthetic-alpha",
+        "endpoints": {"openai": "https://beta.example/v1/chat/completions"},
+        "models": {"openai": "synthetic-beta"}
+    });
+    let openai = switch("openai", &current);
+    let endpoints = json!({
+        "deepseek": "https://alpha.example/v1/chat/completions",
+        "openai": "https://beta.example/v1/chat/completions"
+    });
+    let models = json!({"deepseek": "synthetic-alpha", "openai": "synthetic-beta"});
+    assert_eq!(
+        openai,
+        json!({
+            "enabled": true,
+            "provider": "openai",
+            "endpoint": "https://beta.example/v1/chat/completions",
+            "model": "synthetic-beta",
+            "endpoints": endpoints,
+            "models": models
+        })
+    );
+    let deepseek = switch("deepseek", &openai);
+    assert_eq!(
+        deepseek,
+        json!({
+            "enabled": true,
+            "provider": "deepseek",
+            "endpoint": "https://alpha.example/v1/chat/completions",
+            "model": "synthetic-alpha",
+            "endpoints": endpoints,
+            "models": models
+        })
+    );
+    assert_eq!(switch("openai", &deepseek), openai);
+}
+
+#[test]
+fn ai_provider_update_export_uses_defaults_for_empty_slots() {
+    let request = br#"{"provider":"openai","current":{"enabled":true,"provider":"deepseek","endpoint":"","model":"","endpoints":{"openai":""},"models":{"openai":""}}}"#;
+    let result = read(unsafe { msime_client_ai_provider_update(request.as_ptr(), request.len()) });
+    assert_eq!(result["ok"], true);
+    assert_eq!(
+        result["value"]["endpoint"],
+        "https://api.openai.com/v1/chat/completions"
+    );
+    assert_eq!(result["value"]["model"], "gpt-4.1-mini");
+    assert_eq!(result["value"]["endpoints"], json!({"openai": ""}));
+    assert_eq!(result["value"]["models"], json!({"openai": ""}));
 }
 
 #[test]
@@ -18743,6 +18806,9 @@ fn ai_provider_update_export_rejects_invalid_buffers_and_credential_fields() {
     for request in [
         r#"{"provider":"unknown","current":{"enabled":false,"provider":"deepseek","endpoint":"","model":""}}"#,
         r#"{"provider":"openai","current":{"enabled":false,"provider":"deepseek","endpoint":"","model":"","token":"synthetic-token"}}"#,
+        r#"{"provider":"openai","current":{"enabled":false,"provider":"deepseek","endpoint":"","model":"","tokens":{"synthetic-origin":"synthetic-token"}}}"#,
+        r#"{"provider":"openai","current":{"enabled":false,"provider":"deepseek","endpoint":"","model":"","endpoints":{"openai":42}}}"#,
+        r#"{"provider":"openai","current":{"enabled":false,"provider":"deepseek","endpoint":"","model":"","models":null}}"#,
         r#"{"provider":"openai","current":{"enabled":"true","provider":"deepseek","endpoint":"","model":""}}"#,
     ] {
         let result =
