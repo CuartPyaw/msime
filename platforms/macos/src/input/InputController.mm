@@ -1278,6 +1278,7 @@ static NSImage *MSIMECandidateLogoImage() {
     uint64_t _voiceGeneration;
     id _activeClient;
     NSAppearance *_candidateHostAppearance;
+    __weak id _candidateChromeClient;
     MSIMEToolTextReturn _emojiReturn;
     MSIMEDesktopInputSession *_desktopInputSession;
     MSIMEPanelTextCompletion _desktopEmojiCompletion;
@@ -1336,6 +1337,8 @@ static NSImage *MSIMECandidateLogoImage() {
     NSImage *_decorationFramesSource;
     MSIMEDecorationFrames *_decorationFrames;
     BOOL _rerenderingForCandidateSkin;
+    BOOL _refreshingCandidateSkin;
+    BOOL _candidateSkinRefreshPending;
     CGFloat _tallestVerticalCandidateHeight;
     // 横排候选窗这次显示以来最宽的卡片宽度（不含 canvas 外留白），见 MSIMEWidestCandidateWidth。
     CGFloat _widestHorizontalCandidateWidth;
@@ -7861,19 +7864,42 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
                                       accent:_renderedCandidateAccent animation:_renderedCandidateAnimation];
 }
 
-// 显式明暗及皮肤仍由用户决定；仅系统主题的自动模式采用输入区配色。
+- (BOOL)usesAutomaticCandidateAppearance {
+    if (@available(macOS 26.0, *)) {
+        return ![_appearance candidateAppearanceOverride] && [_appearance.globalTheme isEqual:@"system"] &&
+            [_appearance.themeMode isEqual:@"system"] && [_appearance.candidateTheme isEqual:@"follow"];
+    }
+    return NO;
+}
+
+// 窗口只采用显式主题或客户端颜色，不能把玻璃的自适应结果写回它的父窗口。
 - (NSAppearance *)candidateAppearanceForClientAttributes:(NSDictionary *)attributes {
     NSAppearance *override = [_appearance candidateAppearanceOverride];
-    NSAppearance *host = nil;
-    if (@available(macOS 26.0, *)) {
-        if (!override && [_appearance.globalTheme isEqual:@"system"] &&
-            [_appearance.themeMode isEqual:@"system"] && [_appearance.candidateTheme isEqual:@"follow"])
-            host = MSIMECandidateHostAppearance(attributes);
-    }
+    NSAppearance *host = [self usesAutomaticCandidateAppearance] ? MSIMECandidateHostAppearance(attributes) : nil;
     const BOOL update = _appearance.candidateAppearanceOverrideConfigured || _candidateHostAppearance != nil || host != nil;
     _candidateHostAppearance = host;
-    if (update) _panel.appearance = override ?: host;
-    return override ?: host;
+    NSAppearance *resolved = override ?: host;
+    if (update && _panel.appearance != resolved && ![_panel.appearance isEqual:resolved])
+        _panel.appearance = resolved;
+    return resolved;
+}
+
+- (MSIMECandidateChromeView *)candidateChromeWithFrame:(NSRect)frame skin:(const msime::mac::ResolvedSkin &)skin {
+    if ([self usesAutomaticCandidateAppearance] && skin.id == "system" && skin.candidateSkin.empty() &&
+        !skin.canvas && _candidateChromeClient == _activeClient &&
+        [_panel.contentView isKindOfClass:MSIMECandidateChromeView.class]) {
+        MSIMECandidateChromeView *content = (id)_panel.contentView;
+        if (content.liquidGlassActive && !NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceTransparency) {
+            // 保留玻璃及其自适应外观，只重建候选控件；旧按钮仍必须脱离当前内容容器。
+            content.appearanceTarget = nil;
+            [_candidateMotion endSelection];
+            for (NSView *child in content.candidateContentView.subviews) [child removeFromSuperview];
+            content.frame = frame;
+            return content;
+        }
+    }
+    _candidateChromeClient = _activeClient;
+    return [[MSIMECandidateChromeView alloc] initWithFrame:frame];
 }
 
 // The candidate window, created on first use. Its wheel pages the Engine's candidates, or scrolls the expanded grid while that is open.
@@ -8118,7 +8144,6 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         controller->_expandedPendingScrollDelta += event.scrollingDeltaY;
         [controller renderCandidates];
     };
-    if (_appearance.candidateAppearanceOverrideConfigured) _panel.appearance = candidateAppearance;
     NSAppearance *currentAppearance = candidateAppearance ?: _panel.effectiveAppearance ?: NSApp.effectiveAppearance;
     NSString *currentTheme = [currentAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
     const BOOL skinDark = [currentTheme isEqual:NSAppearanceNameDarkAqua];
@@ -8250,7 +8275,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     const CGFloat height = rowsHeight + 2 * verticalInset + decorationHeight + headerHeight + bodyRowGap;
     const CGFloat headerBottom = height - verticalInset - decorationHeight - headerHeight;
     [_panel setContentSize:NSMakeSize(width, height)];
-    MSIMECandidateChromeView *content = [[MSIMECandidateChromeView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
+    MSIMECandidateChromeView *content = [self candidateChromeWithFrame:NSMakeRect(0, 0, width, height) skin:skin];
     content.candidateContentView.clipsToBounds = YES;
     content.candidateRowsRect = NSMakeRect(inset, verticalInset, MAX(0.0, width - 2 * inset - toggle.column()), rowsHeight);
     content.candidateRowsTouchTop = headerHeight == 0 && bodyRowGap == 0;
@@ -8320,7 +8345,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         [content addSubview:decoration];
     }
     [self configureCanvasForContent:content skin:skin dark:skinDark inset:inset preeditVisible:preedit.length > 0];
-    _panel.contentView = content;
+    if (_panel.contentView != content) _panel.contentView = content;
     // 网格不是 Engine 的一页：清掉记下的那一页，收起后第一次重画走完整的重建，而不是在网格的按钮上原地改释义。
     _renderedCandidateView = nil;
     content.appearanceTarget = self;
@@ -8381,7 +8406,6 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     // 只在候选窗从隐藏到出现时查，同一次输入里的后续按键不再 stat；显示期间的替换由每秒的偏好轮询发现。
     if (!_panel.isVisible) [self applyReplacedSkinPackages];
     NSAppearance *candidateAppearance = [self candidateAppearanceForClientAttributes:clientAttributes];
-    if (_appearance.candidateAppearanceOverrideConfigured) _panel.appearance = candidateAppearance;
     const BOOL vertical = _appearance.vertical;
     NSAppearance *currentAppearance = candidateAppearance ?: _panel.effectiveAppearance ?: NSApp.effectiveAppearance;
     NSString *currentTheme = [currentAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
@@ -8555,7 +8579,8 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         }
     }
     [_panel setContentSize:NSMakeSize(width, height)];
-    MSIMECandidateChromeView *content = [[MSIMECandidateChromeView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
+    MSIMECandidateChromeView *content = [self candidateChromeWithFrame:NSMakeRect(0, 0, width, height) skin:skin];
+    content.candidateContentView.clipsToBounds = NO;
     content.candidateRowsRect = NSMakeRect(inset, verticalInset + listPager.row, pageGeometry.lineWidth, pageGeometry.rowsHeight);
     content.candidateRowsTouchTop = headerHeight == 0 && bodyRowGap == 0;
     NSUInteger slot = 0;
@@ -8665,7 +8690,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         [content addSubview:decoration];
     }
     [self configureCanvasForContent:content skin:skin dark:skinDark inset:inset preeditVisible:preedit.length > 0];
-    _panel.contentView = content;
+    if (_panel.contentView != content) _panel.contentView = content;
     _renderedCandidateView = [_view copy];
     content.appearanceTarget = self;
     content.appearanceAction = @selector(refreshCandidateSkin);
@@ -8706,9 +8731,27 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
 }
 
 - (void)refreshCandidateSkin {
+    if (_refreshingCandidateSkin) {
+        _candidateSkinRefreshPending = YES;
+        return;
+    }
+    _refreshingCandidateSkin = YES;
+    @try {
+        do {
+            _candidateSkinRefreshPending = NO;
+            [self refreshCandidateSkinOnce];
+        } while (_candidateSkinRefreshPending);
+    } @finally {
+        _refreshingCandidateSkin = NO;
+    }
+}
+
+- (void)refreshCandidateSkinOnce {
+    // 玻璃布局会同步重入外观回调；本轮结束后重读内容区外观，避免旧颜色盖回新颜色。
     if (![_panel.contentView isKindOfClass:MSIMECandidateChromeView.class]) return;
     MSIMECandidateChromeView *content = (id)_panel.contentView;
-    NSString *match = [content.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
+    // 玻璃会按背后的应用单独调整内容外观，文字必须跟随内容区域，而不是仍跟随系统的外层卡片。
+    NSString *match = [content.candidateContentView.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua, NSAppearanceNameDarkAqua]];
     const BOOL dark = [match isEqual:NSAppearanceNameDarkAqua];
     const auto skin = [_appearance candidateWindowSkinForDark:dark];
     auto tokens = skin.tokens;
