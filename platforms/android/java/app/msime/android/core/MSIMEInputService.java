@@ -3237,8 +3237,17 @@ public final class MSIMEInputService extends InputMethodService {
         try {
             englishSuggestionWorker.execute(() -> {
                 try {
-                    EnglishSuggestionModel.Result result = EnglishSuggestionModel.decode(
+                    EnglishSuggestionModel.Result suggestions = EnglishSuggestionModel.decode(
                         NativeClient.englishCorrections(prefix, resources));
+                    if (prefix.chars().allMatch(TextPolicy::isAsciiLetter)) {
+                        try {
+                            suggestions = EnglishSuggestionModel.withCompletions(suggestions,
+                                EnglishSuggestionModel.decode(NativeClient.englishCompletions(prefix, resources)));
+                        } catch (Exception | LinkageError ignored) {
+                            // 补全不可用时保留原文与纠错，空格提交仍只查询唯一纠错。
+                        }
+                    }
+                    EnglishSuggestionModel.Result result = suggestions;
                     main.post(() -> applyEnglishSuggestions(epoch, prefix, result));
                 } catch (Exception | LinkageError ignored) {
                     // Completion failures are optional display state and never block input.
