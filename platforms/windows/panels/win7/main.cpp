@@ -2,6 +2,7 @@
 #include "ClipboardWindow.h"
 #include "CloudClipboardWindow.h"
 #include "VocabularyWindow.h"
+#include "CloudDictionaryWindow.h"
 #include "../../compat/WindowsDpi.h"
 #include "../../common/SurfaceRouteArgument.h"
 
@@ -9,8 +10,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   const auto requested = msime::windows::requested_surface_route("handwriting");
   if (!requested) return 2;
   const auto& route = *requested;
-  if (route != "handwriting" && route != "clipboard" && route != "cloud-clipboard" && route != "vocabulary") return 2;
+  if (route != "handwriting" && route != "clipboard" && route != "cloud-clipboard" && route != "vocabulary" && route != "cloud-dictionary") return 2;
   msime::windows::compat::process_context(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
+  if (route == "cloud-dictionary") {
+    msime::windows::win7::CloudDictionaryWindow window;
+    if (!window.create(instance)) return 1;
+    return window.run(show);
+  }
   if (route == "vocabulary") {
     msime::windows::win7::VocabularyWindow window;
     if (!window.create(instance)) return 1;
