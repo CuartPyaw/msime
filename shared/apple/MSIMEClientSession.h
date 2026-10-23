@@ -152,6 +152,8 @@ FOUNDATION_EXPORT NSNotificationName const MSIMEClientSessionDidReplaceSnapshotN
 - (uint32_t)setFieldTraits:(uint32_t)traits;
 /// 输入法在这个会话里激活或停用；FEEDBACK 下由核心仲裁背景音乐的所有者。会话已选择加入时返回 YES。
 - (BOOL)setLifecycleActive:(BOOL)active;
+/// 根据最新偏好、应用排除名单和真实字符判断跨次边界，不保存文档上下文。
+- (BOOL)crossCommitSpacingAfter:(uint32_t)preceding before:(uint32_t)following application:(NSString *)application;
 /// The session's resolved typing effect (msime_client_typing_effect_settings): {pack, issue, style, intensity, colors, duration_ms, particles, combo_counter}. It may read the selected effect pack's manifest, so call it after a preference update and after a focus-in, never per key.
 - (nullable NSDictionary<NSString *, id> *)typingEffectSettingsWithError:(NSError **)error;
 - (nullable NSDictionary<NSString *, id> *)setCandidatePageSize:(uint8_t)size error:(NSError **)error;

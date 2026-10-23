@@ -7283,3 +7283,37 @@ fn sentence_collocation_tuning_rejects_non_finite_values() {
         );
     }
 }
+
+#[test]
+fn cross_commit_spacing_is_independent_and_validates_excluded_apps() {
+    let mut preferences = Preferences::default();
+    let defaults = serde_json::to_value(&preferences).unwrap();
+    assert!(!preferences.cross_commit_spacing);
+    assert!(defaults.get("cross_commit_spacing").is_none());
+    assert!(defaults.get("cross_commit_spacing_excluded_apps").is_none());
+    preferences.cross_commit_spacing = true;
+    preferences.cross_commit_spacing_excluded_apps = vec!["app.example.Editor".into()];
+    assert!(preferences.validate().is_ok());
+    assert!(!preferences.chinese_english_spacing);
+    let written = serde_json::to_value(&preferences).unwrap();
+    assert_eq!(
+        serde_json::from_value::<Preferences>(written).unwrap(),
+        preferences
+    );
+    for invalid in [
+        vec!["".into()],
+        vec![" app.example.Editor".into()],
+        vec!["app/example/Editor".into()],
+        vec!["app.example.Editor".into(), "APP.EXAMPLE.EDITOR".into()],
+        vec!["x".repeat(65)],
+        (0..33)
+            .map(|index| format!("app.example.Editor{index}"))
+            .collect(),
+    ] {
+        preferences.cross_commit_spacing_excluded_apps = invalid;
+        assert!(matches!(
+            preferences.validate(),
+            Err(PreferencesError::InvalidCrossCommitSpacingApps)
+        ));
+    }
+}

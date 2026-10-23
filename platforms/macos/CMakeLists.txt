@@ -1063,6 +1063,17 @@ target_link_libraries(smart-punctuation-shadow-test PRIVATE ${MSIME_CONTROLLER_T
 target_compile_options(smart-punctuation-shadow-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG "-F${MSIME_SPARKLE_ROOT}")
 add_test(NAME smart-punctuation-shadow COMMAND smart-punctuation-shadow-test)
 set_tests_properties(smart-punctuation-shadow PROPERTIES TIMEOUT 30)
+add_executable(cross-commit-spacing-test tests/input/CrossCommitSpacingTest.mm ${MSIME_CONTROLLER_TEST_SOURCES}
+  src/cloud/TranslationCache.mm src/cloud/TranslationSettingsWindow.mm src/core/AISettingsWindow.mm
+  src/input/InputModeHUDPanel.mm src/input/InputModeStatusItem.mm)
+target_link_libraries(cross-commit-spacing-test PRIVATE ${MSIME_CONTROLLER_TEST_LIBS})
+target_compile_options(cross-commit-spacing-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG "-F${MSIME_SPARKLE_ROOT}")
+add_test(NAME cross-commit-spacing COMMAND cross-commit-spacing-test)
+set_tests_properties(cross-commit-spacing PROPERTIES TIMEOUT 30)
+add_executable(cross-commit-spacing-context-test tests/input/CrossCommitSpacingContextTest.mm)
+target_compile_options(cross-commit-spacing-context-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(cross-commit-spacing-context-test PRIVATE apple-client)
+add_test(NAME cross-commit-spacing-context COMMAND cross-commit-spacing-context-test)
 # Dictionary maintenance from the settings window: real sessions let go of the dictionary lock under a live quiesce lease and come back, mode intact, once it is gone.
 add_executable(dictionary-quiesce-controller-test tests/input/DictionaryQuiesceTest.mm ${MSIME_CONTROLLER_TEST_SOURCES}
   src/cloud/TranslationCache.mm src/cloud/TranslationSettingsWindow.mm src/core/AISettingsWindow.mm

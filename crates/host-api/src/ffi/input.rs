@@ -4,6 +4,58 @@
 
 use crate::*;
 
+/// 根据最新偏好和应用排除名单判断跨次边界。宿主只传光标前的真实字符和待上屏首字符，不保存前文；未知上下文传 0。
+///
+/// # Safety
+/// `application` 必须指向可读的 `length` 字节。无效会话、UTF-8、Unicode 标量及重入一律返回 false。
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_cross_commit_spacing(
+    handle: u64,
+    preceding: u32,
+    following: u32,
+    application: *const u8,
+    length: usize,
+) -> bool {
+    let (Some(preceding), Some(following)) = (char::from_u32(preceding), char::from_u32(following))
+    else {
+        return false;
+    };
+    if !chinese_english_spacing::boundary(preceding, following) {
+        return false;
+    }
+    catch_unwind(AssertUnwindSafe(|| {
+        let Ok(application) = (unsafe {
+            with_bounded_bytes(application, length, 256, "invalid application", |bytes| {
+                std::str::from_utf8(bytes)
+                    .map(str::to_owned)
+                    .map_err(|_| "invalid application".into())
+            })
+        }) else {
+            return false;
+        };
+        SESSIONS.with(|sessions| {
+            let Ok(sessions) = sessions.try_borrow() else {
+                return false;
+            };
+            let Some(session) = sessions.get(&handle) else {
+                return false;
+            };
+            let preferences = session
+                .requested
+                .as_ref()
+                .map_or(&session.applied, |snapshot| &snapshot.preferences);
+            preferences.cross_commit_spacing
+                && SchemeType::from_u8(session.runtime.scheme()).is_some_and(SchemeType::is_chinese)
+                && !application.is_empty()
+                && !preferences
+                    .cross_commit_spacing_excluded_apps
+                    .iter()
+                    .any(|excluded| excluded.eq_ignore_ascii_case(&application))
+        })
+    }))
+    .unwrap_or(false)
+}
+
 /// Native presentation override; changes wait for the current composition to end.
 #[no_mangle]
 pub extern "C" fn msime_client_set_candidate_page_size(handle: u64, size: u8) -> *mut c_char {

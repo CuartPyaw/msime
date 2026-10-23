@@ -19225,3 +19225,53 @@ fn sentence_collocation_tuning_reaches_engine_options() {
         }
     );
 }
+
+#[test]
+fn cross_commit_spacing_uses_live_preferences_and_real_scalar_boundaries() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut preferences = chinese_preferences();
+    let handle = test_host_with_pinyin_fixture(directory.path(), preferences.clone());
+    let boundary = |left: u32, right: u32, application: &str| unsafe {
+        msime_client_cross_commit_spacing(
+            handle,
+            left,
+            right,
+            application.as_ptr(),
+            application.len(),
+        )
+    };
+    assert!(!boundary('甲' as u32, 'A' as u32, "app.example.Editor"));
+    type_letters(handle, b"ni");
+    preferences.cross_commit_spacing = true;
+    let changed = update(handle, 1, &preferences);
+    assert_eq!(changed["value"]["deferred"], true, "{changed}");
+    for (left, right) in [('甲', 'A'), ('9', '乙'), ('𠀀', 'B')] {
+        assert!(boundary(left as u32, right as u32, "app.example.Editor"));
+    }
+    for (left, right) in [
+        (' ', 'A'),
+        ('甲', ' '),
+        ('甲', 'Ｒ'),
+        ('甲', '.'),
+        ('A', 'B'),
+        ('あ', 'A'),
+    ] {
+        assert!(!boundary(left as u32, right as u32, "app.example.Editor"));
+    }
+    assert!(!boundary(0, 'A' as u32, "app.example.Editor"));
+    assert!(!boundary(0xd800, 'A' as u32, "app.example.Editor"));
+    assert!(!boundary('甲' as u32, 0x110000, "app.example.Editor"));
+    assert!(!boundary('甲' as u32, 'A' as u32, ""));
+    assert!(!unsafe {
+        msime_client_cross_commit_spacing(handle, '甲' as u32, 'A' as u32, std::ptr::null(), 1)
+    });
+    preferences.cross_commit_spacing_excluded_apps = vec!["app.example.Editor".into()];
+    assert_eq!(update(handle, 2, &preferences)["ok"], true);
+    assert!(!boundary('甲' as u32, 'A' as u32, "APP.EXAMPLE.EDITOR"));
+    assert!(boundary('甲' as u32, 'A' as u32, "app.example.Writer"));
+    preferences.cross_commit_spacing = false;
+    assert_eq!(update(handle, 3, &preferences)["ok"], true);
+    assert!(!boundary('甲' as u32, 'A' as u32, "app.example.Writer"));
+    assert_eq!(read(msime_client_destroy(handle))["ok"], true);
+    assert!(!boundary('甲' as u32, 'A' as u32, "app.example.Writer"));
+}

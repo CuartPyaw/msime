@@ -1047,6 +1047,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSDictionary<NSString *, NSString *> *_sharedAppInputModeRules;
     // 共享文档里的 Vim 模式名单；文档没有这个键时为 nil，查找退回本地键（本机从没写过，等同空名单）。
     NSArray<NSString *> *_sharedVimModeApps;
+    BOOL _sharedCrossCommitSpacing;
     // 文档收不下的旧规则：标识不合法（超过 64 字节、带 / 或 \ 等），或文档已满 32 条。它们留在 NSUserDefaults 里，只在本机查找时生效，不发布。
     NSDictionary<NSString *, NSString *> *_localOnlyAppInputModeRules;
     // 有文档还没有、但收得下的规则，需要保存一次才能发布；见 applicationInputModeRulesAwaitPublication。
@@ -1918,6 +1919,9 @@ static NSString *SkinFilesIdentity(const std::vector<std::string> &paths) {
     if (_sharedCandidateLearning) return _sharedCandidateLearning.boolValue;
     return [_defaults objectForKey:CandidateLearningKey] == nil ? YES : [_defaults boolForKey:CandidateLearningKey];
 }
+- (BOOL)crossCommitSpacingEnabled {
+    return _sharedCrossCommitSpacing;
+}
 - (void)setCandidateLearningEnabled:(BOOL)value {
     _sharedCandidateLearning = nil;
     [_defaults setBool:value forKey:CandidateLearningKey];
@@ -2230,6 +2234,8 @@ static NSString *SkinFilesIdentity(const std::vector<std::string> &paths) {
     // vim_mode_apps 是字符串数组，标识认法与应用例外相同；文档缺这个键就是空名单，没有要迁移的旧键。
     id vimApps = preferences[@"vim_mode_apps"];
     _sharedVimModeApps = [vimApps isKindOfClass:NSArray.class] ? ValidVimModeApps(vimApps) : nil;
+    _sharedCrossCommitSpacing = [preferences[@"cross_commit_spacing"] isKindOfClass:NSNumber.class] &&
+        [preferences[@"cross_commit_spacing"] boolValue];
     id keys = preferences[@"keybindings"];
     if ([keys isKindOfClass:NSDictionary.class]) {
         // 中日英循环切换：缺键读作关，和共享偏好的默认值（对齐旧版 Windows 出厂值）一致。

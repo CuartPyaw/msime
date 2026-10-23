@@ -7,6 +7,7 @@
 // NSTextInputClient-compatible context queries. Hosts that cannot expose
 // document context may omit these; callers must treat the result as unknown.
 - (NSRange)selectedRange;
+- (NSRange)markedRange;
 - (NSAttributedString *)attributedSubstringFromRange:(NSRange)range;
 @end
 
@@ -45,3 +46,5 @@ NSString * MSIMETextClientFollowingCharacter(id<MSIMETextClient> client);
 /// Returns the Unicode scalar immediately preceding the selection, or zero when
 /// the host cannot safely expose document context.
 uint32_t MSIMETextClientPrecedingUnicodeScalar(id<MSIMETextClient> client);
+/// 读取文档指定 UTF-16 位置之前的一个标量，供宿主避开当前标记文本读取真实边界。
+uint32_t MSIMETextClientUnicodeScalarBeforeIndex(id<MSIMETextClient> client, NSUInteger index);

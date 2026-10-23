@@ -26,6 +26,7 @@
 #import "../voice/VoiceProviderOptions.h"
 #import "../voice/VoiceTextCommit.h"
 #include "SmartPunctuationRewrite.h"
+#include "CrossCommitSpacing.h"
 #import "../voice/VoiceDeactivation.h"
 #import "../voice/HTTPVoiceRequest.h"
 #import "../voice/VoiceHoldShortcut.h"
@@ -6700,7 +6701,19 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [panel presentEffect:packed commit:commit caretRect:caret candidateView:card cardRect:cardRect cornerRadius:card.cornerRadius];
 }
 
-// Every key down leaves through here, so the smart punctuation shadow sees each one exactly once, after it has been handled and with what became of it. Events this host posted itself (the voice sendinput route and the smart punctuation rewrite) are skipped: whoever posted them has already recorded what they carry.
+// 只在独立开关开启时读取当前客户端的真实边界，规则和应用排除名单由共享层判断。
+- (NSString *)crossCommitSpacedText:(NSString *)text client:(id)sender {
+    if (!_appearance.crossCommitSpacingEnabled || !text.length || !sender ||
+        [self secureEventInputActive] || ![sender respondsToSelector:@selector(bundleIdentifier)]) return text;
+    const uint32_t first = MSIMECrossCommitSpacingFirstScalar(text);
+    const uint32_t preceding = MSIMECrossCommitSpacingPreceding((id<MSIMETextClient>)sender, _clientHasMarkedText);
+    if (!first || !preceding) return text;
+    if (!_session) [self prepareSession];
+    return [_session crossCommitSpacingAfter:preceding before:first application:[sender bundleIdentifier]]
+        ? [@" " stringByAppendingString:text] : text;
+}
+
+// 每个按下事件在处理后更新一次智能标点缓存；宿主自己回送的事件由发送者记录，不重复计算。
 - (BOOL)handleEvent:(NSEvent *)event client:(id)sender {
     const bool timed = msime_macos_diagnostic_enabled();
     const uint64_t started = timed ? clock_gettime_nsec_np(CLOCK_UPTIME_RAW) : 0;
@@ -6720,7 +6733,24 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
             [[MSIMEFloatingToolbarPanel sharedPanel] wakeForInputDelegate:self];
     }
     if (event.type == NSEventTypeKeyDown && sender && !selfPosted && !event.isARepeat) [self reportKeyToLifecycle:event];
-    const BOOL handled = [self handleKeyEvent:event client:sender];
+    BOOL handled = [self handleKeyEvent:event client:sender];
+    // 英文直通的首字母也经过同一边界判断；组合键、系统回送及已有组字不接管。
+    if (!handled && !selfPosted && sender == _activeClient && event.type == NSEventTypeKeyDown &&
+        !(event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand)) &&
+        ![_view[@"editing_text"] length] && !_clientHasMarkedText && event.characters.length == 1) {
+        const unichar character = [event.characters characterAtIndex:0];
+        if ((character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') ||
+            (character >= '0' && character <= '9')) {
+            NSString *spaced = [self crossCommitSpacedText:event.characters client:sender];
+            if (![spaced isEqualToString:event.characters]) {
+                [(id<MSIMETextClient>)sender insertText:spaced replacementRange:NSMakeRange(NSNotFound, NSNotFound)];
+                [self noteSmartPunctuationShadow:character];
+                MSIMERecordTypingStatistics(_preferencesDirectory ?: MSIMEStatisticsHostOptions(_session)[@"preferences_directory"],
+                    spaced, msime::mac::TypingSource::English);
+                handled = YES;
+            }
+        }
+    }
     if (event.type == NSEventTypeKeyDown && sender && !selfPosted) {
         // A key event is the wake-up edge: restore the toolbar before the next event arrives, even if
         // a preceding focus or preference callback left its requested visibility stale.
@@ -7659,6 +7689,20 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
             converted[@"commit"] = [MSIMEChineseOutputString(prefix, YES) stringByAppendingString:edge];
             converted[@"word_character_converted"] = @YES;
             transition = converted;
+        }
+    }
+    commit = transition[@"commit"];
+    NSDictionary *spacingContext = transition[@"commit_context"];
+    if (sourceOverride == msime::mac::TypingSource::Unknown &&
+        [commit isKindOfClass:NSString.class] && [spacingContext isKindOfClass:NSDictionary.class] &&
+        !MSIMEStrictBoolean(spacingContext[@"plugin_row"]) &&
+        [@[@"none", @"quick_phrase", @"super_jianpin", @"temporary_english"] containsObject:spacingContext[@"local_mode"] ?: @""]) {
+        NSString *spaced = [self crossCommitSpacedText:commit client:_activeClient];
+        if (![spaced isEqualToString:commit]) {
+            NSMutableDictionary *converted = [transition mutableCopy];
+            converted[@"commit"] = spaced;
+            transition = converted;
+            commit = spaced;
         }
     }
     NSString *commitForTracking = transition[@"commit"];

@@ -774,6 +774,13 @@ static NSDictionary *decode(char *response, NSError **error) {
 - (BOOL)setLifecycleActive:(BOOL)active {
     return _handle && msime_client_set_active(_handle, active);
 }
+- (BOOL)crossCommitSpacingAfter:(uint32_t)preceding before:(uint32_t)following application:(NSString *)application {
+    if (![self checkThreadAndHandle:nil]) return NO;
+    NSData *identifier = [application dataUsingEncoding:NSUTF8StringEncoding];
+    if (!identifier.length) return NO;
+    return msime_client_cross_commit_spacing(_handle, preceding, following,
+        static_cast<const uint8_t *>(identifier.bytes), identifier.length);
+}
 - (nullable NSDictionary *)typingEffectSettingsWithError:(NSError **)error {
     if (![self checkThreadAndHandle:error]) return nil;
     return decode(msime_client_typing_effect_settings(_handle), error);

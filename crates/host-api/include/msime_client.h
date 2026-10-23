@@ -834,6 +834,12 @@ enum MsimeCommand {
     MSIME_FIRST_CANDIDATE_OR_HOME = 106
 };
 char *msime_client_command(uint64_t session, uint32_t command);
+/* 跨次上屏的汉字与 ASCII 字母、数字边界是否补一个半角空格。读取最新偏好及应用排除名单；仅判断，不插入、不记忆前文。
+ * preceding 是待替换的组字范围之前、或普通插入点之前的真实 Unicode 标量；following 是待上屏文本的首标量。
+ * application 是 UTF-8 应用标识（macOS Bundle ID）；未知标量、空应用、关闭开关、无效会话返回 false。
+ * 宿主负责排除密码字段、快捷键、特殊输入模式和非中文方案；读取不到前文时不要用旧缓存猜测。 */
+bool msime_client_cross_commit_spacing(uint64_t session, uint32_t preceding, uint32_t following,
+                                      const uint8_t *application, size_t length);
 /* Re-rank the visible candidates with the settled model, once the host's typing pause elapses.
  * The host owns the clock: it is the only side that knows whether a keystroke arrived while the
  * pass was being decided. Answers {"moved": false} when the order did not change, or

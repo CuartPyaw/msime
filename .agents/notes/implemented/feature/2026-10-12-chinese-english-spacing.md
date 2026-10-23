@@ -10,6 +10,8 @@ Status: implemented
 
 维护者的决定：只处理单次上屏文本内部（`cn_en_spacer` 的语义），数字算英文一侧；快捷短语、云候选、AI 候选这类现成上屏内容也处理；默认关；只改上屏文本，不改候选窗显示；排在全角转换之后；做成共享偏好和共享 host-api 后处理，六个平台的设置面都有开关；跨上屏的空格不做。
 
+跨次边界的独立能力见[macOS 跨次上屏的中英文空格](2026-10-24-cross-commit-spacing.md)。本篇继续持有单次文本内部的规则及原开关，两者独立。
+
 ## Decision
 
 **共享偏好 `Preferences::chinese_english_spacing`**（`crates/client-core/src/preferences.rs`），默认 `false`，`skip_serializing_if = "is_false"`：关着时不写进文档。

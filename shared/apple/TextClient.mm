@@ -85,7 +85,13 @@ uint32_t MSIMETextClientPrecedingUnicodeScalar(id<MSIMETextClient> client) {
         ![client respondsToSelector:@selector(attributedSubstringFromRange:)]) return 0;
     NSRange selected = [client selectedRange];
     if (selected.location == NSNotFound || selected.length != 0 || selected.location == 0) return 0;
-    NSUInteger start = selected.location - 1;
+    return MSIMETextClientUnicodeScalarBeforeIndex(client, selected.location);
+}
+
+uint32_t MSIMETextClientUnicodeScalarBeforeIndex(id<MSIMETextClient> client, NSUInteger index) {
+    if (!client || ![client respondsToSelector:@selector(attributedSubstringFromRange:)] ||
+        index == NSNotFound || index == 0) return 0;
+    NSUInteger start = index - 1;
     NSAttributedString *one = [client attributedSubstringFromRange:NSMakeRange(start, 1)];
     NSString *text = one.string;
     if (!text.length) return 0;

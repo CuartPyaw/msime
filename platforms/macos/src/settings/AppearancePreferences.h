@@ -165,6 +165,8 @@ extern BOOL (*MSIMEInputModeEnabledProbe)(NSString *identifier);
 /// 符号混输（共享偏好 `mixed_input.symbols`），默认开；共享文档只在关掉时才有这个键。
 @property(nonatomic) BOOL mixedSymbolInput;
 @property(nonatomic) BOOL candidateLearningEnabled;
+/// 共享设置页的跨次空格开关，仅作按键路径的快速门控；边界和应用排除规则仍由共享层决定。
+@property(nonatomic, readonly) BOOL crossCommitSpacingEnabled;
 @property(nonatomic, copy) NSString *frequencyAdjustmentMode;
 @property(nonatomic) NSInteger frequencyTriggerCount;
 @property(nonatomic) NSInteger frequencyLinearStep;

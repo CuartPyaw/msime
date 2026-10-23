@@ -1,8 +1,14 @@
-//! 「中英文之间加空格」：一次上屏的文本里，汉字与 ASCII 字母、数字相邻处插入一个半角空格，语义同 rime-ice 的 `cn_en_spacer.lua`（#7172）。两次上屏之间不加。
+//! 中英文空格：单次文本变换和跨次边界共用汉字与 ASCII 字母、数字的判定；跨次边界由宿主读取真实文档后单独查询。
 
 use msime_client_services::dictionary::is_han_character;
 use msime_engine::SchemeType;
 use msime_input_runtime::OutputContext;
+
+/// 单次文本内部和跨次上屏共用的边界规则：只认汉字与 ASCII 字母、数字，不处理标点和已有空白。
+pub(crate) fn boundary(left: char, right: char) -> bool {
+    (is_han_character(left) && right.is_ascii_alphanumeric())
+        || (left.is_ascii_alphanumeric() && is_han_character(right))
+}
 
 /// 这次上屏是否要加空格：只看上屏前记下的 `commit_context`，没有时不处理。
 ///
@@ -20,10 +26,6 @@ pub(crate) fn applies(context: Option<&OutputContext>) -> bool {
 ///
 /// 已经隔着空格的不再插入，首尾也不加：上屏的第一个和最后一个字符保持不变，宿主的智能标点按它们判断前一个字符。汉字取 `is_han_character` 的范围（基本区、扩展 A 到 F 和兼容表意文字）；假名、谚文、全角字母和 ASCII 标点都不算。
 pub(crate) fn space(text: &str) -> Option<String> {
-    let boundary = |left: char, right: char| {
-        (is_han_character(left) && right.is_ascii_alphanumeric())
-            || (left.is_ascii_alphanumeric() && is_han_character(right))
-    };
     let mut pairs = text.chars().zip(text.chars().skip(1));
     if !pairs.any(|(left, right)| boundary(left, right)) {
         return None;
