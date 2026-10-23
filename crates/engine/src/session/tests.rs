@@ -1108,6 +1108,31 @@ fn capital_literal_english_word_wins_over_chinese_and_keeps_completion() {
 }
 
 #[test]
+fn mixed_master_switch_keeps_capital_literal_without_dictionary_completions() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE).with_english(
+        "INSERT INTO english_words VALUES('python','python',100),('pythonic','pythonic',90);",
+    );
+    for scheme in [SchemeType::Quanpin, SchemeType::Shuangpin] {
+        let mut session = fixture.session_with(|options| {
+            options.scheme = scheme;
+            options.helpcode = false;
+            options.mixed_candidates = false;
+            options.english.mixed_candidates = true;
+        });
+        assert!(session.character(b'P', true).handled);
+        type_text(&mut session, "ython");
+        assert!(!session
+            .snapshot()
+            .candidates
+            .iter()
+            .any(|row| row.source == CandidateSource::EnglishDictionary));
+        assert!(!words(&session).contains(&"Pythonic".to_owned()));
+        let index = index_of(&session, "Python");
+        assert_eq!(session.select(index).commit.as_deref(), Some("Python"));
+    }
+}
+
+#[test]
 fn capital_literal_english_case_does_not_mistake_the_word_for_helpcode() {
     let fixture = Fixture::new(QUANPIN_FIXTURE)
         .with_english("INSERT INTO english_words VALUES('hao','hao',100);");
