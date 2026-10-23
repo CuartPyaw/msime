@@ -7636,7 +7636,10 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     }
     NSMutableArray *items = [NSMutableArray arrayWithCapacity:missing.count];
     for (NSString *text in missing) [items addObject:@{@"text": text, @"language": @"en"}];
-    NSDictionary *request = @{@"generation": _view[@"generation"] ?: @0, @"items": items};
+    NSMutableDictionary *request = [@{@"generation": _view[@"generation"] ?: @0, @"items": items} mutableCopy];
+    // 旧配置的活动词库可能位于用户目录，音标表仍随输入法 bundle 分发。
+    NSString *supplementary = NSBundle.mainBundle.resourcePath;
+    if (supplementary.isAbsolutePath) request[@"supplementary_resources"] = supplementary;
     NSArray<NSString *> *asked = missing.array;
     __weak MSIMEInputController *weakSelf = self;
     [_pronunciationQueue addOperationWithBlock:^{
