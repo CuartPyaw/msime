@@ -628,6 +628,8 @@ static NSEvent *WithLayoutCharacters(NSEvent *base, NSString *characters) {
     return event;
 }
 
+static NSEvent *TapEvent(NSEventType type, unsigned short key, NSEventModifierFlags flags, double time);
+
 static NSEvent *ModeKey(unsigned short code, NSEventModifierFlags flags, BOOL repeat) {
     // 字母键带上它在美式布局上打出的字母，和真实事件一样：字母快捷键按这个字符认键。
     const char letter = msime::mac::PhysicalAnsiLetter(code);
@@ -2233,6 +2235,9 @@ static void TestDedicatedEnglish(MSIMEAppearancePreferences *appearance) {
     assert([controller handleEvent:ModeKey(14, flags, NO) client:client]);
     assert(session.dedicatedEnglish && !appearance.englishMode);
     englishCalls = session.englishCandidateCalls;
+    // 上一组 Ctrl+Shift+E 已经结束；下一次 Shift+空格属于新一轮按下。
+    assert(![controller handleEvent:TapEvent(NSEventTypeFlagsChanged, 56, 0, 1.0) client:client]);
+    assert(![controller handleEvent:TapEvent(NSEventTypeFlagsChanged, 56, NSEventModifierFlagShift, 1.1) client:client]);
     assert([controller handleEvent:ModeKey(49, NSEventModifierFlagShift, NO) client:client]);
     assert(!session.dedicatedEnglish && appearance.englishMode && session.englishCandidateCalls == englishCalls + 1);
     assert([controller handleEvent:ModeKey(49, NSEventModifierFlagShift, NO) client:client]);
@@ -5728,6 +5733,33 @@ static void TestModifierTapSurvivesALostRelease() {
     gHeldKeys.clear();
 }
 
+static void TestShiftChordRecoversWithoutFlagsChanged() {
+    for (const auto type : {NSEventTypeKeyDown, NSEventTypeKeyUp}) {
+        MSIMEModifierTap tap;
+        gHeldKeys.clear();
+        tap.setKeyHeldProbe(&SyntheticKeyHeld);
+        assert(!tap.observe(TapEvent(NSEventTypeFlagsChanged, 56, NSEventModifierFlagShift, 1.0), true, true));
+        assert(!tap.observe(TapEvent(NSEventTypeKeyDown, 0, NSEventModifierFlagShift, 1.1), true, true));
+        assert(tap.shiftChordInterrupted());
+        // 双侧 Shift 中只松开一侧，同一轮的取消状态仍保留。
+        assert(!tap.observe(TapEvent(NSEventTypeFlagsChanged, 60, NSEventModifierFlagShift, 1.2), true, true));
+        assert(!tap.observe(TapEvent(NSEventTypeFlagsChanged, 56, NSEventModifierFlagShift, 1.3), true, true));
+        assert(tap.shiftChordInterrupted());
+        // 最后一侧释放通知丢失，但普通按键已经报告 Shift 不再按住。
+        assert(!tap.observe(TapEvent(type, 0, 0, 1.4), true, true));
+        assert(!tap.shiftChordInterrupted());
+        assert(!tap.observe(TapEvent(NSEventTypeFlagsChanged, 60, NSEventModifierFlagShift, 2.0), true, true));
+        assert(!tap.observe(TapEvent(NSEventTypeKeyDown, 49, NSEventModifierFlagShift, 2.1), true, true));
+        assert(!tap.shiftChordInterrupted());
+        assert(!tap.observe(TapEvent(NSEventTypeKeyDown, 49, NSEventModifierFlagShift, 2.2), true, true));
+        assert(!tap.shiftChordInterrupted());
+        assert(!tap.observe(TapEvent(NSEventTypeKeyDown, 0, NSEventModifierFlagShift, 2.3), true, true));
+        assert(tap.shiftChordInterrupted());
+        tap.reset();
+        assert(!tap.shiftChordInterrupted());
+    }
+}
+
 static void TestModifierTaps() {
     for (NSNumber *key in @[@56, @60, @59, @62]) {
         const auto code = key.unsignedShortValue;
@@ -5788,6 +5820,17 @@ static void TestModifierTaps() {
         assert(!tap.observe(TapEvent(NSEventTypeFlagsChanged, otherSide, flag, 1.02), true, true));
         assert(!tap.observe(TapEvent(NSEventTypeFlagsChanged, code, flag, 1.04), true, true));
         assert(tap.observe(TapEvent(NSEventTypeFlagsChanged, otherSide, 0, 1.1), true, true));
+        if (flag == NSEventModifierFlagShift) {
+            tap.reset();
+            assert(!tap.observe(down, true, true));
+            assert(!tap.observe(TapEvent(NSEventTypeKeyDown, 0, flag, 1.02), true, true));
+            assert(tap.shiftChordInterrupted());
+            // 空格本身不应改变状态，控制器随后会把它交给正常输入路径。
+            assert(!tap.observe(TapEvent(NSEventTypeKeyDown, 49, flag, 1.03), true, true));
+            assert(tap.shiftChordInterrupted());
+            assert(!tap.observe(up, true, true));
+            assert(!tap.shiftChordInterrupted());
+        }
     }
 
     NSString *suite = [@"msime.modifier-taps." stringByAppendingString:NSUUID.UUID.UUIDString];
@@ -5894,6 +5937,36 @@ static void TestModifierTaps() {
     assert(![controller handleEvent:down client:other]);
     assert(![controller handleEvent:up client:nil]);
     assert(![controller handleEvent:up client:other] && prefs.englishMode);
+
+    // Shift+字符后仍按住 Shift 按空格：这次空格必须走英文正常输入，不能再次切换中英文。
+    for (const BOOL shiftTap : {NO, YES}) {
+        NSString *spaceSuite = [@"msime.shift-space-chord." stringByAppendingString:NSUUID.UUID.UUIDString];
+        NSUserDefaults *spaceDefaults = [[NSUserDefaults alloc] initWithSuiteName:spaceSuite];
+        MSIMEAppearancePreferences *spacePrefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:spaceDefaults];
+        spacePrefs.inputModeShortcut = YES;
+        spacePrefs.shiftTapShortcut = shiftTap;
+        spacePrefs.englishMode = YES;
+        ModeController *spaceController = [ModeController alloc];
+        ShortcutClient *spaceClient = [ShortcutClient new];
+        ShortcutSession *spaceSession = [ShortcutSession new];
+        [spaceController setValue:spacePrefs forKey:@"appearance"];
+        [spaceController setValue:spaceClient forKey:@"activeClient"];
+        [spaceController setValue:spaceSession forKey:@"session"];
+        [spaceController setValue:@{ @"editing_text": @"", @"candidates": @[] } forKey:@"view"];
+        assert(![spaceController handleEvent:TapEvent(NSEventTypeFlagsChanged, 56, NSEventModifierFlagShift, 5.0) client:spaceClient]);
+        (void)[spaceController handleEvent:ModeKey(0, NSEventModifierFlagShift, NO) client:spaceClient];
+        assert(![spaceController handleEvent:TapEvent(NSEventTypeKeyUp, 0, NSEventModifierFlagShift, 5.1) client:spaceClient]);
+        assert(![spaceController handleEvent:ModeKey(49, NSEventModifierFlagShift, NO) client:spaceClient]);
+        assert(spacePrefs.englishMode);
+        // 漏掉 Shift 释放通知后，字符的 KeyUp 已确认松开；新一轮快捷键仍要切换一次。
+        assert(![spaceController handleEvent:TapEvent(NSEventTypeKeyUp, 0, 0, 5.2) client:spaceClient]);
+        assert(![spaceController handleEvent:TapEvent(NSEventTypeFlagsChanged, 56, NSEventModifierFlagShift, 5.3) client:spaceClient]);
+        assert([spaceController handleEvent:ModeKey(49, NSEventModifierFlagShift, NO) client:spaceClient]);
+        assert(!spacePrefs.englishMode);
+        assert(![spaceController handleEvent:TapEvent(NSEventTypeFlagsChanged, 56, 0, 5.4) client:spaceClient]);
+        assert(!spacePrefs.englishMode);
+        MSIMERemoveTestPreferenceSuite(spaceDefaults, spaceSuite);
+    }
     MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
 
@@ -13556,6 +13629,7 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestRealTrilingualCycle(); }
         @autoreleasepool { TestSmartPunctuationVersionNumberThroughRealSession(); }
         @autoreleasepool { TestModifierTaps(); }
+        @autoreleasepool { TestShiftChordRecoversWithoutFlagsChanged(); }
         @autoreleasepool { TestInputModeStatusItem(); }
         @autoreleasepool { TestModifierTapSurvivesALostRelease(); }
         @autoreleasepool { TestCapsLockTap(); }
