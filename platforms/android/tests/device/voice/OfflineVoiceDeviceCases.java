@@ -51,7 +51,8 @@ final class OfflineVoiceDeviceCases {
     void run() {
         Bundle result = new Bundle();
         try {
-            if (scenario.equals("offline-capture-cancel")) captureCancellation();
+            if (scenario.equals("offline-prepare")) prepareLocalModel();
+            else if (scenario.equals("offline-capture-cancel")) captureCancellation();
             else externalResult();
             result.putString("stream", "Offline voice boundary passed: " + scenario);
             instrumentation.finish(Activity.RESULT_OK, result);
@@ -59,6 +60,57 @@ final class OfflineVoiceDeviceCases {
             result.putString("stream", "Offline voice boundary failed: " + error.getClass().getSimpleName()
                 + ": " + error.getMessage());
             instrumentation.finish(Activity.RESULT_CANCELED, result);
+        }
+    }
+
+    /** 专用模拟器只导入预先校验的合成验收资源，安装与配置保存仍走产品共享接口。 */
+    private void prepareLocalModel() throws Exception {
+        Context context = instrumentation.getTargetContext();
+        Activity home = instrumentation.startActivitySync(new Intent().setClassName(context,
+            "app.msime.android.home.HomeActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        java.io.File options = new java.io.File(context.getFilesDir(), "runtime-options.json");
+        try {
+            await(options::isFile, "Native host did not prepare runtime options");
+            Class<?> client = context.getClassLoader().loadClass("app.msime.android.NativeClient");
+            Class<?> progress = context.getClassLoader().loadClass("app.msime.android.NativeClient$LocalModelProgress");
+            java.io.File archive = new java.io.File(context.getCacheDir(), "synthetic-offline-model.tar.bz2");
+            try {
+                try (var descriptor = instrumentation.getUiAutomation().executeShellCommand(
+                        "cat /data/local/tmp/msime-synthetic-offline-model.tar.bz2");
+                        var input = new java.io.FileInputStream(descriptor.getFileDescriptor());
+                        var output = new java.io.FileOutputStream(archive)) {
+                    byte[] buffer = new byte[64 * 1024];
+                    int count;
+                    while ((count = input.read(buffer)) != -1) output.write(buffer, 0, count);
+                }
+                String request = new org.json.JSONObject()
+                    .put("root", new java.io.File(context.getFilesDir(), "voice-models").getAbsolutePath())
+                    .put("id", "x-asr-zh-en-streaming")
+                    .put("files", new org.json.JSONArray().put(archive.getAbsolutePath())).toString();
+                Object installed = client.getMethod("voiceLocalModelInstall", String.class, progress)
+                    .invoke(null, request, null);
+                org.json.JSONObject model = new org.json.JSONObject((String) installed);
+                if (!model.optBoolean("ok")) throw new AssertionError("Pinned model import failed: " + model.optString("error"));
+                String directory = new org.json.JSONObject(new String(java.nio.file.Files.readAllBytes(options.toPath()),
+                    java.nio.charset.StandardCharsets.UTF_8))
+                    .getString("preferences_directory");
+                org.json.JSONObject loaded = new org.json.JSONObject((String) client
+                    .getMethod("loadPreferences", String.class).invoke(null, directory));
+                if (!loaded.optBoolean("ok")) throw new AssertionError("Shared preferences unavailable");
+                org.json.JSONObject snapshot = loaded.getJSONObject("value");
+                org.json.JSONObject preferences = snapshot.getJSONObject("preferences");
+                org.json.JSONObject voice = preferences.optJSONObject("voice_input");
+                if (voice == null) preferences.put("voice_input", voice = new org.json.JSONObject());
+                voice.put("asr_provider", "local").put("asr_model_path", model.getJSONObject("value").getString("path"));
+                org.json.JSONObject saved = new org.json.JSONObject((String) client
+                    .getMethod("savePreferences", String.class, long.class, String.class)
+                    .invoke(null, directory, snapshot.getLong("revision"), snapshot.toString()));
+                if (!saved.optBoolean("ok")) throw new AssertionError("Shared local model selection failed");
+            } finally {
+                java.nio.file.Files.deleteIfExists(archive.toPath());
+            }
+        } finally {
+            instrumentation.runOnMainSync(home::finish);
         }
     }
 
@@ -92,6 +144,7 @@ final class OfflineVoiceDeviceCases {
                 new java.util.ArrayList<>(java.util.List.of("synthetic stale transcript")));
             Intent request = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
                 .setPackage(context.getPackageName())
+                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
                 .putExtra(RecognizerIntent.EXTRA_RESULTS_PENDINGINTENT, pending)
                 .putExtra(RecognizerIntent.EXTRA_RESULTS_PENDINGINTENT_BUNDLE, extras)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
@@ -108,9 +161,14 @@ final class OfflineVoiceDeviceCases {
                 started.setAccessible(true);
                 if (started.getBoolean(activity)) throw new AssertionError("Recording started before permission");
                 try (var input = instrumentation.getUiAutomation().executeShellCommand("input keyevent 3")) {
-                    new java.io.FileInputStream(input.getFileDescriptor()).readAllBytes();
+                    try (var stream = new java.io.FileInputStream(input.getFileDescriptor())) {
+                        byte[] discard = new byte[4096];
+                        while (stream.read(discard) != -1) { }
+                    }
                 }
                 await(this::finished, "Home did not cancel permission-stage request");
+            } else if (scenario.equals("offline-asr")) {
+                finishSyntheticSpeech();
             } else if (!scenario.equals("offline-result") && !scenario.equals("offline-cancel")) {
                 throw new AssertionError("Unknown offline scenario");
             }
@@ -119,12 +177,17 @@ final class OfflineVoiceDeviceCases {
             if (failure != null) throw new AssertionError("Activity callback failed", failure);
             if (deliveries.get() != 1) throw new AssertionError("Result delivered more than once");
             Intent data = returned.get();
-            boolean success = scenario.equals("offline-result");
+            boolean success = scenario.equals("offline-result") || scenario.equals("offline-asr");
             if (code.get() != (success ? Activity.RESULT_OK : Activity.RESULT_CANCELED)) {
                 throw new AssertionError("Unexpected result code");
             }
             if (!"preserved".equals(data.getStringExtra("synthetic_marker"))) throw new AssertionError("Caller bundle lost");
-            if (success) {
+            if (scenario.equals("offline-asr")) {
+                var results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                if (results == null || results.size() != 1 || !results.get(0).toLowerCase(java.util.Locale.ROOT).contains("hello")) {
+                    throw new AssertionError("Real local model did not return the synthetic greeting");
+                }
+            } else if (success) {
                 if (!java.util.List.of("synthetic external transcript").equals(
                         data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS))) {
                     throw new AssertionError("Unexpected synthetic result");
@@ -137,6 +200,45 @@ final class OfflineVoiceDeviceCases {
             context.unregisterReceiver(receiver);
             if (activity != null) instrumentation.runOnMainSync(activity::finish);
         }
+    }
+
+    /** 等待外部注入的合成音频经过实际麦克风、模型和界面，再点击产品完成按钮。 */
+    private void finishSyntheticSpeech() throws Exception {
+        var listening = activity.getClass().getDeclaredField("listening");
+        listening.setAccessible(true);
+        Object view = listening.get(activity);
+        var level = view.getClass().getDeclaredField("level");
+        level.setAccessible(true);
+        var status = activity.getClass().getDeclaredField("status");
+        status.setAccessible(true);
+        AtomicBoolean audible = new AtomicBoolean();
+        AtomicBoolean greeting = new AtomicBoolean();
+        long deadline = SystemClock.uptimeMillis() + 50000;
+        while (!greeting.get() && SystemClock.uptimeMillis() < deadline && !finished()) {
+            instrumentation.runOnMainSync(() -> {
+                try {
+                    if (level.getFloat(view) > .02f) audible.set(true);
+                    String text = ((android.widget.TextView) status.get(activity)).getText().toString();
+                    if (text.toLowerCase(java.util.Locale.ROOT).contains("hello")) greeting.set(true);
+                } catch (ReflectiveOperationException error) {
+                    throw new AssertionError(error);
+                }
+            });
+            SystemClock.sleep(25);
+        }
+        if (!audible.get()) throw new AssertionError("Synthetic microphone audio did not drive the listening signal");
+        if (!greeting.get()) throw new AssertionError("Real model did not produce the synthetic partial greeting");
+        var done = activity.getClass().getDeclaredField("done");
+        done.setAccessible(true);
+        instrumentation.runOnMainSync(() -> {
+            try {
+                android.widget.Button button = (android.widget.Button) done.get(activity);
+                if (!button.isEnabled()) throw new AssertionError("Listening request cannot finish");
+                button.performClick();
+            } catch (ReflectiveOperationException error) {
+                throw new AssertionError(error);
+            }
+        });
     }
 
     private boolean finished() {
