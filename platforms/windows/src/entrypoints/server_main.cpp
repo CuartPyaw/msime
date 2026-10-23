@@ -1,4 +1,5 @@
 #include "../../../shared/contracts/windows_ipc.h"
+#include "../../compat/WindowsDpi.h"
 #include "../../../common/HostApiString.h"
 #include "AuxListener.h"
 #include "VoiceTheme.h"
@@ -888,6 +889,7 @@ std::optional<DWORD> candidate_window_band(HWND window) {
 }
 } // namespace
 int wmain(int argc, wchar_t **argv) {
+  msime::windows::compat::initialize_legacy_process_dpi();
   // Before any thread exists: libcurl's global init is not thread-safe, and the online workers use it.
   curl_global_init(CURL_GLOBAL_DEFAULT);
   // Crash capture only writes this session's crash record to disk, and only once telemetry::begin armed it with the user's consent; the next start reports it.
@@ -2377,7 +2379,7 @@ int wmain(int argc, wchar_t **argv) {
                 shown->lease.epoch == view->lease.epoch &&
                 same_ticket(shown->lease.transport, view->lease.transport) &&
                 shown->caret_anchor_known) {
-              const long line = MulDiv(20, static_cast<int>(GetDpiForSystem()), USER_DEFAULT_SCREEN_DPI);
+              const long line = MulDiv(20, static_cast<int>(msime::windows::compat::system_dpi()), USER_DEFAULT_SCREEN_DPI);
               caret = HudRect{shown->caret_anchor_x, shown->caret_anchor_y - line,
                               shown->caret_anchor_x + 1, shown->caret_anchor_y};
             }

@@ -1,4 +1,5 @@
 #include "TrayMenuWindow.h"
+#include "../../compat/WindowsDpi.h"
 #include "AccessibleWindow.h"
 #include "IconFont.h"
 #include "TrayMenuAccessibility.h"
@@ -29,18 +30,8 @@ std::bitset<256> swallowed_keys;
 // 读屏键（Caps Lock、Insert）此刻是否按着，由钩子按它看到的按下和松开记录：读屏自己的钩子会吞掉读屏键，GetAsyncKeyState 读不到它按着。
 bool caps_lock_held = false;
 bool insert_held = false;
-// Affect only this UI operation; restore the caller's thread context even on
-// failure.
-struct DpiScope {
-  DPI_AWARENESS_CONTEXT previous;
-  DpiScope()
-      : previous(SetThreadDpiAwarenessContext(
-            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
-    if (!previous)
-      throw std::runtime_error("Per-monitor DPI unavailable");
-  }
-  ~DpiScope() { SetThreadDpiAwarenessContext(previous); }
-};
+// 系统支持时只在这次界面操作中切换线程 DPI 并恢复；旧系统沿用宿主启动时设置的系统 DPI。
+using DpiScope = msime::windows::compat::ThreadDpiScope;
 struct Painting {
   HWND window;
   PAINTSTRUCT state{};

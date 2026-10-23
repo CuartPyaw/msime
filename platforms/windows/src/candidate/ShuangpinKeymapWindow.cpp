@@ -1,4 +1,5 @@
 #include "ShuangpinKeymapWindow.h"
+#include "../../compat/WindowsDpi.h"
 #include "CandidateWindow.h"
 #include "ToolbarCoordinates.h"
 #include "ToolbarTooltips.h"
@@ -14,16 +15,8 @@
 namespace msime::windows {
 namespace {
 constexpr wchar_t kClassName[] = L"MSIME.Client.ShuangpinKeymap" MSIME_EDITION_NAME_SUFFIX;
-// 和候选窗一样只在这次界面操作里切到每显示器 DPI v2，结束时恢复调用方的线程设置；窗口坐标都是物理像素，和候选窗、TSF 报来的锚点一致。
-struct DpiScope {
-  DPI_AWARENESS_CONTEXT previous;
-  DpiScope()
-      : previous(SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
-    if (!previous)
-      throw std::runtime_error("Per-monitor DPI unavailable");
-  }
-  ~DpiScope() { SetThreadDpiAwarenessContext(previous); }
-};
+// 系统支持时只在这次界面操作中切换线程 DPI 并恢复；旧系统沿用宿主启动时设置的系统 DPI。
+using DpiScope = msime::windows::compat::ThreadDpiScope;
 long scaled(double value, double unit) { return static_cast<long>(std::lround(value * unit)); }
 std::wstring wide(const std::string &text) {
   if (text.empty())
@@ -128,7 +121,7 @@ void ShuangpinKeymapWindow::update(const std::optional<ShuangpinKeymapFrame> &fr
     load_profile(profile);
     highlighted_ = frame->hint.key;
     // 尺寸按候选窗所在显示器的 DPI 算，和候选窗一起跨屏时也一致。
-    const double unit = toolbar_pixel_unit(GetDpiForWindow(candidate), 1.0);
+    const double unit = toolbar_pixel_unit(msime::windows::compat::window_dpi(candidate), 1.0);
     ShuangpinKeymapPlacementInput placement;
     placement.candidate = {card.left, card.top, card.right, card.bottom};
     placement.anchor_x = frame->anchor_x;

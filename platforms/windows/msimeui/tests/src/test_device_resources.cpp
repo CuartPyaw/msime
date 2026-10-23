@@ -1,4 +1,5 @@
 #include "tests/includes/test_framework.h"
+#include "../../../compat/WindowsDpi.h"
 
 #include "msimeui/DeviceResources.h"
 
@@ -37,7 +38,7 @@ void CheckReusedTargetDpi(bool composition)
     REQUIRE(ensure());
     ID2D1RenderTarget *const target = resources.GetRenderTarget();
     REQUIRE(target != nullptr);
-    const float windowDpi = static_cast<float>(GetDpiForWindow(window.hwnd));
+    const float windowDpi = static_cast<float>(msime::windows::compat::window_dpi(window.hwnd));
 
     // Reproduce the retained render target from the previous monitor DPI without
     // changing the user's display settings. Reuse must refresh DPI, not recreate it.

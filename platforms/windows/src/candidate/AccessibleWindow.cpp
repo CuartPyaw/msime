@@ -1,4 +1,5 @@
 #include "AccessibleWindow.h"
+#include "../../compat/WindowsDpi.h"
 #include <ole2.h>
 #include <oleauto.h>
 #include <uiautomation.h>
@@ -89,10 +90,10 @@ int control_type(AccessibleContainer container) {
 struct ThreadDpi {
   DPI_AWARENESS_CONTEXT previous;
   explicit ThreadDpi(DPI_AWARENESS_CONTEXT context)
-      : previous(context ? SetThreadDpiAwarenessContext(context) : nullptr) {}
+      : previous(context ? msime::windows::compat::thread_context(context) : nullptr) {}
   ~ThreadDpi() {
     if (previous)
-      SetThreadDpiAwarenessContext(previous);
+      msime::windows::compat::thread_context(previous);
   }
   ThreadDpi(const ThreadDpi &) = delete;
   ThreadDpi &operator=(const ThreadDpi &) = delete;
@@ -103,7 +104,7 @@ std::optional<AccessibleFrame> window_frame(HWND window) {
     return std::nullopt;
   RECT client{};
   {
-    ThreadDpi scope(GetWindowDpiAwarenessContext(window));
+    ThreadDpi scope(msime::windows::compat::window_context(window));
     if (!GetClientRect(window, &client))
       return std::nullopt;
   }

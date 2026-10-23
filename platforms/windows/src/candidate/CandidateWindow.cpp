@@ -1,4 +1,5 @@
 #include "CandidateWindow.h"
+#include "../../compat/WindowsDpi.h"
 #include "CandidateCanvasDrawing.h"
 #include "CandidateDecorationDrawing.h"
 #include "AccessibleWindow.h"
@@ -52,18 +53,8 @@ constexpr UINT_PTR image_frame_timer = 0x4504;
 constexpr UINT typing_flash_frame_millis = 30;
 // 还没有会话发布特效设置时闪光的强度。Windows 固定打字效果强度为 50（client-core 的 `HostPlatform::fixed_effect_intensity`），不读 plugins.effect_intensity；特效包自带的强度随每个按键从输入线程发布（TypingEffectSignal），不受影响。
 constexpr uint32_t typing_effect_default_intensity = 50;
-// Affect only this UI operation; restore the caller's thread context even on
-// failure. The created HWND retains PMv2 awareness for its entire lifetime.
-struct DpiScope {
-  DPI_AWARENESS_CONTEXT previous;
-  DpiScope()
-      : previous(SetThreadDpiAwarenessContext(
-            DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)) {
-    if (!previous)
-      throw std::runtime_error("Per-monitor DPI unavailable");
-  }
-  ~DpiScope() { SetThreadDpiAwarenessContext(previous); }
-};
+// 系统支持时只在这次界面操作中切换线程 DPI 并恢复；旧系统沿用宿主启动时设置的系统 DPI。
+using DpiScope = msime::windows::compat::ThreadDpiScope;
 struct Font {
   HDC dc;
   HFONT font;
@@ -1004,7 +995,7 @@ void CandidateWindow::reposition() {
   }
   value = anchored;
   // render_serial 也要比：读音在同一个 Engine generation 上单独到达（CandidateMailbox::readings），只换了快照编号。
-  if (shown_ && shown_dpi_ == GetDpiForWindow(window_) &&
+  if (shown_ && shown_dpi_ == msime::windows::compat::window_dpi(window_) &&
       shown_->session == value->session &&
       shown_->generation == value->generation &&
       shown_->render_serial == value->render_serial && shown_->x == value->x &&
@@ -1032,7 +1023,7 @@ void CandidateWindow::reposition() {
                       SWP_NOACTIVATE | SWP_NOZORDER))
       throw std::runtime_error("Candidate monitor move failed");
   }
-  const auto dpi = GetDpiForWindow(window_);
+  const auto dpi = msime::windows::compat::window_dpi(window_);
   const auto bounds = card_bounds(*value, work, dpi);
   const bool was_visible = IsWindowVisible(window_) != FALSE;
   const auto previous_highlight = [&]() -> std::optional<size_t> {
@@ -1438,7 +1429,7 @@ void CandidateWindow::paint() {
   device_.SetDpiOverride(
       style_.scale_percent == 100
           ? 0.0f
-          : static_cast<float>(layout_scale(GetDpiForWindow(window_)) * 96.0));
+          : static_cast<float>(layout_scale(msime::windows::compat::window_dpi(window_)) * 96.0));
   // 皮肤的系统材质（CandidateBackdrop.h）：要垫材质时 DeviceResources 换成 Windows.UI.Composition 合成，材质参数先交给它，建表面时就用上。建不起来就记下，这个窗口以后按材质不可用的回退画。
   auto backdrop = backdrop_plan();
   if (backdrop.active())
@@ -1761,7 +1752,7 @@ void CandidateWindow::paint() {
   // Loaded at the size it is drawn at, in real pixels, as the floating toolbar loads it, and skipped rather than substituted if the icon will not load.
   if (metrics.logo_visible)
     if (auto *logo = logo_bitmap(static_cast<int>(std::lround(
-            metrics.logo_side * layout_scale(GetDpiForWindow(window_))))))
+            metrics.logo_side * layout_scale(msime::windows::compat::window_dpi(window_))))))
       target->DrawBitmap(logo, box(candidate_logo_bounds(metrics)), 1.0f,
                          D2D1_BITMAP_INTERPOLATION_MODE_LINEAR);
   // 皮肤打开 `page_arrows` 时首行不画翻页，箭头在候选画完之后画进列表（candidate_list_arrows_layout）。
@@ -1897,7 +1888,7 @@ void CandidateWindow::paint() {
         candidate_expand_held_viewport(expand_.expanded, value->expanded != nullptr,
                                        expand_viewport_));
     candidate_expand_clamp(expand_, expand_layout->max_offset());
-    const double pixels = layout_scale(GetDpiForWindow(window_));
+    const double pixels = layout_scale(msime::windows::compat::window_dpi(window_));
     expand_offset = std::round(expand_.offset * pixels) / pixels;
     rows = expand_layout->rows;
     for (auto &row : rows) {
@@ -2235,7 +2226,7 @@ void CandidateWindow::paint() {
   painted_ = value;
   painted_rows_ = std::move(rows);
   painted_pager_ = pager ? pager : list_pager;
-  painted_dpi_ = GetDpiForWindow(window_);
+  painted_dpi_ = msime::windows::compat::window_dpi(window_);
   painted_backdrop_ = backdrop;
   painted_card_ = D2D1_RECT_F{static_cast<float>(panel.left), static_cast<float>(panel.top),
                               static_cast<float>(panel.right), static_cast<float>(panel.bottom)};

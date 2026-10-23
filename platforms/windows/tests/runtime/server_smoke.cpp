@@ -1,4 +1,5 @@
 #include "CandidateCardSize.h"
+#include "../../compat/WindowsDpi.h"
 #include "CandidateClickWorker.h"
 #include "CandidateFlyoutWindow.h"
 #include "CandidateWindow.h"
@@ -30,7 +31,7 @@ void require_at(bool value, int line) {
 LPARAM first_candidate_point(HWND window, size_t count) {
   RECT client{};
   require(GetClientRect(window, &client));
-  const double scale = GetDpiForWindow(window) / 96.0;
+  const double scale = msime::windows::compat::window_dpi(window) / 96.0;
   // The card sits inside transparent shadow margins, and the window hit-tests
   // against the card rather than against itself: rows are laid out in the
   // card's width, and a point in card space has to be moved back out by the
@@ -86,7 +87,7 @@ bool running_under_wine() {
 // Wine, which does not carry v2 through to the window. The thread's own context
 // is still asserted strictly, so the product is still on the hook for setting it.
 bool window_awareness_is_expected(HWND window) {
-  const auto context = GetWindowDpiAwarenessContext(window);
+  const auto context = msime::windows::compat::window_context(window);
   if (AreDpiAwarenessContextsEqual(context,
                                    DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2))
     return true;
