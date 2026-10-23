@@ -7127,7 +7127,33 @@ static void TestEnglishModePunctuationAndWidthOutput() {
     NSEvent *toggle = EnglishKey(@".", 47, NSEventModifierFlagControl);
     NSEvent *widthToggle = EnglishKey(@" ", 49, NSEventModifierFlagControl | NSEventModifierFlagShift);
 
-    // A Chinese lock converts English-mode punctuation with the Engine's forward table.
+    // 默认英文直接进入新应用时，不必先来回切换一次中英文才能得到英文标点。
+    [prefs applySharedInputPreferences:@{@"default_ime_mode":@"english", @"ime_mode_scope":@"app",
+                                        @"chinese_punctuation":@YES, @"punctuation_lock":@"follow"}];
+    [prefs activateInputModeForApplication:client.bundleIdentifier];
+    assert(prefs.englishMode && !prefs.runtimeChinesePunctuation);
+    assert(type(comma) == nil && type(letter) == nil);
+    assert(!prefs.runtimeFullWidthInput && prefs.chinesePunctuation);
+
+    // 手动覆盖仍按应用保留；新应用从英文标点开始，返回原应用不抹掉手动选择。
+    prefs.runtimeChinesePunctuation = YES;
+    [prefs activateInputModeForApplication:@"org.example.english-output-other"];
+    assert(prefs.englishMode && !prefs.runtimeChinesePunctuation);
+    [prefs activateInputModeForApplication:client.bundleIdentifier];
+    assert(prefs.englishMode && prefs.runtimeChinesePunctuation);
+    [prefs resetAllRuntimeInputState];
+    assert(!prefs.runtimeChinesePunctuation);
+
+    // 切回中文恢复保存的中文标点，回到英文重新跟随模式；固定英文标点不受模式影响。
+    [controller setEnglishInputMode:NO];
+    assert(!prefs.englishMode && prefs.runtimeChinesePunctuation);
+    [controller setEnglishInputMode:YES];
+    assert(prefs.englishMode && !prefs.runtimeChinesePunctuation && type(comma) == nil);
+    prefs.punctuationLock = @"english";
+    [controller setEnglishInputMode:NO];
+    assert(!prefs.runtimeChinesePunctuation);
+
+    // 固定中文标点时，英文模式仍按引擎正向表转换标点。
     prefs.punctuationLock = @"chinese";
     [controller setEnglishInputMode:YES];
     assert(prefs.englishMode && prefs.runtimeChinesePunctuation);
@@ -11131,6 +11157,11 @@ int main(int argc, char **argv) {
     assert(MSIMEShouldRegisterInputSource(2, registerArguments));
     @autoreleasepool {
         [NSApplication sharedApplication];
+        if (argc == 2 && std::string(argv[1]) == "--english-punctuation") {
+            @autoreleasepool { TestPerApplicationPunctuationAndWidth(); }
+            @autoreleasepool { TestEnglishModePunctuationAndWidthOutput(); }
+            return 0;
+        }
         if (argc == 2 && std::string(argv[1]) == "--caps-lock") {
             TestCapsLockTap();
             return 0;
