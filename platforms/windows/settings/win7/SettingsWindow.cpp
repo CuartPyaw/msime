@@ -2,6 +2,7 @@
 #include "PreferencesStore.h"
 #include "CloudCandidateForm.h"
 #include "InputModeForm.h"
+#include "AdvancedInputForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -35,10 +36,11 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode };
-constexpr std::array<std::pair<Surface, const wchar_t*>, 4> input_pages{{
+enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced };
+constexpr std::array<std::pair<Surface, const wchar_t*>, 5> input_pages{{
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
     {Surface::candidates, L"候选与联想"}, {Surface::output, L"输出设置"},
+    {Surface::advanced, L"高级选项"},
 }};
 struct ToolbarCheck { int id; const char* field; const wchar_t* label; };
 constexpr std::array<ToolbarCheck, 11> toolbar_checks{{
@@ -144,6 +146,63 @@ std::filesystem::path preferences_directory() {
   return settings_state_directory(injected, root, configured);
 }
 
+// 资源和插件目录仅由工作线程读取；采用与现代窗口相同的宿主选项来源。
+HelpcodeSources helpcode_sources(const std::filesystem::path& directory) {
+  HelpcodeSources sources;
+  if (!HelpcodeForm::offered()) return sources;
+  auto options_file = std::filesystem::path(environment(L"MSIME_CLIENT_HOST_OPTIONS"));
+  std::error_code error;
+  if (!options_file.is_absolute() || !std::filesystem::is_regular_file(options_file, error)) {
+    const auto injected = std::filesystem::path(environment(L"MSIME_CLIENT_STATE_DIR"));
+    const auto root = injected.is_absolute() ? injected : msime::windows::resolve_state_directory();
+    options_file = root / L"runtime-options.json";
+  }
+  std::ifstream input(options_file, std::ios::binary);
+  constexpr size_t limit = 1024 * 1024;
+  std::string content(limit + 1, '\0');
+  if (input) {
+    input.read(content.data(), static_cast<std::streamsize>(content.size()));
+    content.resize(static_cast<size_t>(input.gcount()));
+    const auto options = content.size() <= limit ? Json::parse(content, nullptr, false) : Json();
+    if (options.is_object() && options.contains("resources") && options.at("resources").is_string()) {
+      const auto resources = options.at("resources").get<std::string>();
+      if (std::filesystem::u8path(resources).is_absolute()) {
+        auto owned = msime::host_api::own_string(msime_client_helpcode_schemas(
+            reinterpret_cast<const uint8_t*>(resources.data()), resources.size()));
+        const auto response = owned ? Json::parse(owned.get(), nullptr, false) : Json();
+        if (response.is_object() && response.value("ok", false) && response.contains("value") && response.at("value").is_array()) {
+          for (const auto& schema : response.at("value")) {
+            if (!schema.is_object()) continue;
+            const auto value = schema.value("schema", std::string{});
+            if (value.compare(0, 7, "custom/") != 0) continue;
+            const auto name = schema.value("name", std::string{});
+            const auto english = schema.value("name_en", std::string{});
+            auto label = name;
+            if (!name.empty() && !english.empty() && name != english) label += " (" + english + ")";
+            if (label.empty()) label = english;
+            if (label.empty()) label = schema.value("file_stem", value);
+            sources.custom.push_back({value, control_text::wide(label)});
+          }
+        }
+      }
+    }
+  }
+  const auto request = Json{{"state_root", directory.u8string()}, {"sound_packs", nullptr},
+      {"action", {{"operation", "catalog"}}}}.dump();
+  auto owned = msime::host_api::own_string(msime_client_plugins(
+      reinterpret_cast<const uint8_t*>(request.data()), request.size()));
+  const auto response = owned ? Json::parse(owned.get(), nullptr, false) : Json();
+  if (response.is_object() && response.value("ok", false) && response.contains("value") && response.at("value").is_object()) {
+    const auto& value = response.at("value");
+    if (value.contains("packages") && value.at("packages").is_array()) {
+      for (const auto& pack : value.at("packages"))
+        if (pack.is_object() && pack.value("kind", std::string{}) == "helpcode")
+          sources.packs.push_back({pack.at("id").get<std::string>(), control_text::wide(pack.at("name").get<std::string>())});
+    }
+  }
+  return sources;
+}
+
 bool offers_japanese_switch() {
   bool japanese = false;
   bool chinese = false;
@@ -156,7 +215,7 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
@@ -168,6 +227,7 @@ struct Completion {
   std::wstring notice;
   std::filesystem::path folder;
   std::filesystem::path directory;
+  HelpcodeSources helpcodes;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
@@ -205,7 +265,9 @@ private:
       if (directory_.empty()) return {Outcome::storage, std::nullopt};
       store_.emplace(directory_.u8string());
     }
+    if (job.reload || job.action == Job::Action::helpcode_sources) helpcodes_ = helpcode_sources(directory_);
     Result result;
+    if (job.action == Job::Action::helpcode_sources) return {Outcome::loaded, snapshot_};
     if (job.action == Job::Action::export_file) {
       const auto document = store_->export_document();
       notice_ = document && write_settings_document(job.file, *document) ?
@@ -261,7 +323,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -285,6 +347,7 @@ private:
   std::filesystem::path directory_;
   std::filesystem::path folder_;
   std::wstring notice_;
+  HelpcodeSources helpcodes_;
   std::thread thread_;
 };
 
@@ -316,6 +379,7 @@ struct SettingsWindow::State {
   int punctuation_height = 0;
   int candidates_height = 0;
   int mode_height = 0;
+  int advanced_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
   std::vector<std::string> word_choices;
@@ -330,6 +394,8 @@ struct SettingsWindow::State {
   FilePicker file_picker;
   CloudCandidateForm cloud_form;
   InputModeForm mode_form;
+  AdvancedInputForm advanced_form;
+  Confirmation confirmation;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
 
@@ -402,6 +468,10 @@ struct SettingsWindow::State {
     mode_height = mode_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                          int id, int top, int height) {
       return surface_row(Surface::mode, type, text, style, id, top, height);
+    });
+    advanced_height = advanced_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+                                                 int id, int top, int height) {
+      return surface_row(Surface::advanced, type, text, style, id, top, height);
     });
     enable(false);
     layout();
@@ -668,6 +738,7 @@ struct SettingsWindow::State {
         snapshot->preferences().at("mixed_input").at("english").get<bool>());
     cloud_form.enable(enabled);
     mode_form.enable(enabled);
+    advanced_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -703,7 +774,7 @@ struct SettingsWindow::State {
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
-        surface == Surface::mode ? mode_height : content_height;
+        surface == Surface::mode ? mode_height : surface == Surface::advanced ? advanced_height : content_height;
     info.nMax = reference ? 0 : dip(total) - 1;
     info.nPage = static_cast<UINT>(std::max(client.bottom, 0L));
     info.nPos = reference ? 0 : scroll;
@@ -738,7 +809,9 @@ struct SettingsWindow::State {
         GetDlgCtrlID(control) == bracket_style || GetDlgCtrlID(control) == mixed_first_page_count ||
         GetDlgCtrlID(control) == cloud_source || GetDlgCtrlID(control) == cloud_method ||
         GetDlgCtrlID(control) == cloud_response_format || GetDlgCtrlID(control) == default_ime_mode ||
-        GetDlgCtrlID(control) == ime_mode_scope || GetDlgCtrlID(control) == app_rule_mode)
+        GetDlgCtrlID(control) == ime_mode_scope || GetDlgCtrlID(control) == app_rule_mode ||
+        GetDlgCtrlID(control) == frequency_mode || GetDlgCtrlID(control) == frequency_trigger ||
+        GetDlgCtrlID(control) == frequency_step)
       rectangle.bottom = rectangle.top + dip(32);
     if (rectangle.top < 0) scroll_to(scroll + rectangle.top);
     else if (rectangle.bottom > viewport.bottom) scroll_to(scroll + rectangle.bottom - viewport.bottom);
@@ -757,6 +830,7 @@ struct SettingsWindow::State {
     case Job::Action::restart: message = L"正在请求重启…"; break;
     case Job::Action::data_directory:
     case Job::Action::logs_directory: message = L"正在打开目录…"; break;
+    case Job::Action::helpcode_sources: message = L"正在读取辅助码方案…"; break;
     case Job::Action::preferences: break;
     }
     SetWindowTextW(status, message);
@@ -836,6 +910,7 @@ struct SettingsWindow::State {
     if (mixed.value("first_page_count", 1) < 1 || mixed.value("first_page_count", 1) > 3) return false;
     if (!CloudCandidateForm::valid(preferences.at("cloud_candidate_provider"))) return false;
     if (!InputModeForm::valid(preferences)) return false;
+    if (!AdvancedInputForm::valid(preferences)) return false;
     return true;
   }
 
@@ -983,6 +1058,7 @@ struct SettingsWindow::State {
       refresh_output_and_punctuation();
       refresh_candidates();
       mode_form.refresh(snapshot->preferences());
+      advanced_form.refresh(snapshot->preferences(), completed->helpcodes);
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1034,6 +1110,12 @@ struct SettingsWindow::State {
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
       scroll = 0;
       layout();
+      if (selected == 3 && !busy && HelpcodeForm::offered()) {
+        Job job;
+        job.reload = false;
+        job.action = Job::Action::helpcode_sources;
+        submit(std::move(job));
+      }
       return;
     }
     if (busy) return;
@@ -1055,6 +1137,23 @@ struct SettingsWindow::State {
         job.changes = std::move(mode_change.changes);
         submit(std::move(job));
       } else if (!mode_change.message.empty()) SetWindowTextW(status, mode_change.message.c_str());
+      return;
+    }
+    auto advanced_change = advanced_form.command(command);
+    if (advanced_change.handled) {
+      if (advanced_change.reset_confirmation) {
+        const wchar_t* title = L"关闭模糊音";
+        const wchar_t* text = L"所有模糊音规则会被清空。是否关闭并清空？";
+        const bool confirmed = confirmation ? confirmation(window, title, text) :
+            MessageBoxW(window, text, title, MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+        if (confirmed) advanced_change.changes = AdvancedInputForm::reset();
+      }
+      if (!advanced_change.changes.empty()) {
+        Job job;
+        job.reload = false;
+        job.changes = std::move(advanced_change.changes);
+        submit(std::move(job));
+      }
       return;
     }
     if ((id == cloud_source || id == cloud_method || id == cloud_response_format) && HIWORD(command) == CBN_SELCHANGE) {
@@ -1196,6 +1295,8 @@ struct SettingsWindow::State {
           ((LOWORD(wparam) >= default_ime_mode && LOWORD(wparam) <= app_rule_remove) &&
               (HIWORD(wparam) == CBN_SETFOCUS || HIWORD(wparam) == EN_SETFOCUS || HIWORD(wparam) == BN_SETFOCUS ||
                   (LOWORD(wparam) == app_rule_list && HIWORD(wparam) == LBN_SETFOCUS))) ||
+          ((LOWORD(wparam) >= shift_letter_modes && LOWORD(wparam) < helpcode_first + 6) &&
+              (HIWORD(wparam) == BN_SETFOCUS || HIWORD(wparam) == CBN_SETFOCUS)) ||
           (LOWORD(wparam) == data_directory_text && HIWORD(wparam) == EN_SETFOCUS))
         self->reveal(reinterpret_cast<HWND>(lparam));
       else self->command(wparam);
@@ -1274,8 +1375,9 @@ struct SettingsWindow::State {
   }
 };
 
-SettingsWindow::SettingsWindow(FilePicker file_picker) : state_(std::make_unique<State>()) {
+SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation) : state_(std::make_unique<State>()) {
   state_->file_picker = std::move(file_picker);
+  state_->confirmation = std::move(confirmation);
 }
 
 SettingsWindow::~SettingsWindow() {

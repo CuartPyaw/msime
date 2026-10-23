@@ -28,13 +28,17 @@ enum ControlId {
   mixed_kaomoji, mixed_japanese, learn_candidates, single_character_only, word_lattice,
   default_ime_mode = 800, ime_mode_scope, input_mode_hud, app_rule_name, app_rule_add,
   app_rule_list, app_rule_mode, app_rule_remove,
+  shift_letter_modes = 900, local_mode_first = 910, fuzzy_enabled = 930, fuzzy_reset,
+  fuzzy_rule_first = 940, frequency_mode = 960, frequency_trigger, frequency_step,
+  helpcode_first = 980,
 };
 
 class SettingsWindow {
 public:
   // 默认使用系统文件选择器；原生集成测试可注入合成路径，继续走正式文件与存储流程。
   using FilePicker = std::function<std::optional<std::filesystem::path>(HWND, bool)>;
-  explicit SettingsWindow(FilePicker file_picker = {});
+  using Confirmation = std::function<bool(HWND, const wchar_t*, const wchar_t*)>;
+  explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;

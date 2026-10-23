@@ -1,5 +1,6 @@
 #include "../../settings/win7/SettingsWindow.h"
 #include "../../settings/win7/PreferencesStore.h"
+#include "../../settings/InputSettingsModel.h"
 #include "../../../../shared/contracts/msime_edition.h"
 
 #include <commctrl.h>
@@ -33,20 +34,21 @@ struct TemporaryDirectory {
 };
 
 struct InjectedDirectory {
-  explicit InjectedDirectory(const std::filesystem::path& path) {
-    const DWORD required = GetEnvironmentVariableW(L"MSIME_CLIENT_STATE_DIR", nullptr, 0);
+  explicit InjectedDirectory(const std::filesystem::path& path, const wchar_t* variable = L"MSIME_CLIENT_STATE_DIR") : name(variable) {
+    const DWORD required = GetEnvironmentVariableW(name, nullptr, 0);
     present = required != 0;
     if (present) {
       previous.resize(required);
-      const DWORD length = GetEnvironmentVariableW(L"MSIME_CLIENT_STATE_DIR", previous.data(), required);
+      const DWORD length = GetEnvironmentVariableW(name, previous.data(), required);
       assert(length < required);
       previous.resize(length);
     }
-    assert(SetEnvironmentVariableW(L"MSIME_CLIENT_STATE_DIR", path.c_str()));
+    assert(SetEnvironmentVariableW(name, path.c_str()));
   }
   ~InjectedDirectory() {
-    SetEnvironmentVariableW(L"MSIME_CLIENT_STATE_DIR", present ? previous.c_str() : nullptr);
+    SetEnvironmentVariableW(name, present ? previous.c_str() : nullptr);
   }
+  const wchar_t* name;
   bool present = false;
   std::wstring previous;
 };
@@ -133,8 +135,27 @@ int main() {
 
   // 真实 HWND、系统控件通知和工作线程贯通到同源 Rust，不触碰测试目录之外的数据。
   const auto file = temporary.path / L"synthetic-settings.json";
+  const auto resources = temporary.path / L"resources";
+  const auto custom_directory = resources / L"helpcodes" / L"custom";
+  const auto plugin_directory = temporary.path / L"plugins" / L"helpcode" / L"synthetic-codes";
+  std::filesystem::create_directories(custom_directory);
+  std::filesystem::create_directories(plugin_directory);
+  {
+    std::ofstream custom(custom_directory / L"synthetic.txt", std::ios::binary);
+    custom << "# name: 合成辅助码\n# name_en: Synthetic helper\n字=ab\n";
+    std::ofstream manifest(plugin_directory / L"plugin.toml", std::ios::binary);
+    manifest << "schema_version = 1\nkind = 'helpcode'\nid = 'synthetic-codes'\nname = '合成插件'\nversion = '1'\nlicense = 'CC0-1.0'\n[helpcode]\ntable = 'table.txt'\n";
+    std::ofstream table(plugin_directory / L"table.txt", std::ios::binary);
+    table << "字=cd\n";
+    std::ofstream options(temporary.path / L"runtime-options.json", std::ios::binary);
+    options << Json{{"resources", resources.u8string()}}.dump();
+    assert(custom.good() && manifest.good() && table.good() && options.good());
+  }
+  InjectedDirectory host_options(temporary.path / L"runtime-options.json", L"MSIME_CLIENT_HOST_OPTIONS");
   unsigned selections = 0;
   bool cancel_selection = false;
+  bool allow_fuzzy_reset = false;
+  unsigned reset_confirmations = 0;
   SettingsWindow window([&](HWND owner, bool save) -> std::optional<std::filesystem::path> {
     DWORD process = 0;
     GetWindowThreadProcessId(owner, &process);
@@ -143,6 +164,12 @@ int main() {
     assert(save == (selections == 0));
     ++selections;
     return file;
+  }, [&](HWND owner, const wchar_t* title, const wchar_t* text) {
+    assert(IsWindow(owner));
+    assert(std::wstring_view(title) == L"关闭模糊音");
+    assert(std::wstring_view(text).find(L"清空") != std::wstring_view::npos);
+    ++reset_confirmations;
+    return allow_fuzzy_reset;
   });
   assert(window.create(GetModuleHandleW(nullptr)));
   const HWND host = window.handle();
@@ -163,6 +190,7 @@ int main() {
     assert(selector);
     SendMessageW(selector, CB_SETCURSEL, index, 0);
     SendMessageW(host, WM_COMMAND, MAKEWPARAM(page_selector, CBN_SELCHANGE), reinterpret_cast<LPARAM>(selector));
+    pump_until([&] { return IsWindowEnabled(language) != FALSE; });
   };
   SendMessageW(language, CB_SETCURSEL, 3, 0);
   SendMessageW(body, WM_COMMAND, MAKEWPARAM(language_switch, CBN_SELCHANGE), reinterpret_cast<LPARAM>(language));
@@ -497,6 +525,155 @@ int main() {
   assert(!IsWindowEnabled(GetDlgItem(body, app_rule_remove)));
   assert(!IsWindowEnabled(GetDlgItem(body, app_rule_mode)));
   assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  // 快捷模式的总开关不清除单项；/ 和 @ 独立，地名只从属于 @。
+  select_tab(L"高级选项");
+  assert(store.load().snapshot->revision() == saved.snapshot->revision());
+  const auto advanced_seed = store.save(*saved.snapshot, {
+      {{"local_modes", "shift_letter_entry"}, true}, {{"local_modes", "quick_phrase"}, true},
+      {{"local_modes", "mention"}, false}, {{"local_modes", "mention_places"}, false},
+      {{"fuzzy_pinyin", "enabled"}, false}, {{"fuzzy_pinyin", "rules"}, Json::array()},
+      {{"fuzzy_pinyin", "seeded"}, false}, {{"learning"}, true},
+      {{"frequency", "mode"}, "promote"}, {{"frequency", "trigger_count"}, 9}, {{"frequency", "linear_step"}, 8}});
+  assert(advanced_seed.outcome == Outcome::saved);
+  SendMessageW(host, WM_COMMAND, MAKEWPARAM(reload_settings, BN_CLICKED), 0);
+  pump_until([&] { return IsWindowEnabled(GetDlgItem(body, shift_letter_modes)) != FALSE; });
+  const auto local_control = [&](std::wstring_view key) {
+    for (size_t index = 0; index < msime::settings::input::local_modes.size(); ++index)
+      if (msime::settings::input::local_modes[index].id == key) return local_mode_first + static_cast<int>(index);
+    assert(false && "Requested local mode does not exist");
+    return -1;
+  };
+#if MSIME_EDITION_TEMPORARY_JAPANESE
+  assert(GetDlgItem(body, local_control(L"temporary_japanese")));
+#else
+  assert(!GetDlgItem(body, local_control(L"temporary_japanese")));
+#endif
+  click(shift_letter_modes);
+  assert(!IsWindowEnabled(GetDlgItem(body, local_control(L"quick_phrase"))));
+  assert(IsWindowEnabled(GetDlgItem(body, local_control(L"command"))));
+  assert(IsWindowEnabled(GetDlgItem(body, local_control(L"mention"))));
+  assert(store.load().snapshot->preferences().at("local_modes").at("quick_phrase") == true);
+  click(shift_letter_modes);
+  click(local_control(L"chaizi"));
+  assert(store.load().snapshot->preferences().at("local_modes").at("chaizi") == true);
+  assert(!IsWindowEnabled(GetDlgItem(body, local_control(L"mention_places"))));
+  click(local_control(L"mention"));
+  assert(IsWindowEnabled(GetDlgItem(body, local_control(L"mention_places"))));
+  click(local_control(L"mention_places"));
+  click(local_control(L"mention"));
+  assert(!IsWindowEnabled(GetDlgItem(body, local_control(L"mention_places"))));
+  assert(store.load().snapshot->preferences().at("local_modes").at("mention_places") == true);
+  const auto before_fuzzy = store.load().snapshot->revision();
+  click(fuzzy_enabled);
+  saved = store.load();
+  assert(saved.snapshot->revision() == before_fuzzy + 1);
+  assert(saved.snapshot->preferences().at("fuzzy_pinyin").at("seeded") == true);
+  assert(saved.snapshot->preferences().at("fuzzy_pinyin").at("rules").size() == 11);
+  click(fuzzy_rule_first);
+  click(fuzzy_enabled);
+  assert(!IsWindowEnabled(GetDlgItem(body, fuzzy_rule_first)));
+  assert(store.load().snapshot->preferences().at("fuzzy_pinyin").at("rules").size() == 10);
+  click(fuzzy_enabled);
+  assert(store.load().snapshot->preferences().at("fuzzy_pinyin").at("rules").size() == 10);
+  saved = store.load();
+  click(fuzzy_reset);
+  assert(reset_confirmations == 1 && store.load().snapshot->revision() == saved.snapshot->revision());
+  allow_fuzzy_reset = true;
+  click(fuzzy_reset);
+  assert(reset_confirmations == 2);
+  saved = store.load();
+  assert(saved.snapshot->preferences().at("fuzzy_pinyin").at("enabled") == false);
+  assert(saved.snapshot->preferences().at("fuzzy_pinyin").at("rules").empty());
+  assert(saved.snapshot->preferences().at("fuzzy_pinyin").at("seeded") == true);
+  click(fuzzy_enabled);
+  assert(store.load().snapshot->preferences().at("fuzzy_pinyin").at("rules").empty());
+  // 超出界面常用档但仍合法的既有调频值照实展示，不因刷新归一化。
+  assert(SendMessageW(GetDlgItem(body, frequency_trigger), CB_GETCOUNT, 0, 0) == 7);
+  assert(SendMessageW(GetDlgItem(body, frequency_trigger), CB_GETCURSEL, 0, 0) == 6);
+  assert(store.load().snapshot->preferences().at("frequency").at("trigger_count") == 9);
+  select_value(frequency_mode, 0);
+  assert(!IsWindowEnabled(GetDlgItem(body, frequency_trigger)));
+  assert(!IsWindowEnabled(GetDlgItem(body, frequency_step)));
+  select_value(frequency_mode, 3);
+  assert(IsWindowEnabled(GetDlgItem(body, frequency_trigger)));
+  assert(IsWindowEnabled(GetDlgItem(body, frequency_step)));
+  select_value(frequency_trigger, 2);
+  select_value(frequency_step, 4);
+  assert(store.load().snapshot->preferences().at("frequency").at("trigger_count") == 3);
+  assert(store.load().snapshot->preferences().at("frequency").at("linear_step") == 5);
+  select_value(frequency_mode, 4);
+  assert(!IsWindowEnabled(GetDlgItem(body, frequency_step)));
+  select_tab(L"候选与联想");
+  click(learn_candidates);
+  select_tab(L"高级选项");
+  assert(!IsWindowEnabled(GetDlgItem(body, frequency_mode)));
+  saved = store.load();
+  assert(saved.snapshot->preferences().at("frequency").at("linear_step") == 5);
+  assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  bool offers_helpcode = false;
+  for (std::string_view scheme : {MSIME_EDITION_INPUT_SCHEMES})
+    offers_helpcode = offers_helpcode || scheme == "quanpin" || scheme == "shuangpin";
+  assert((GetDlgItem(body, helpcode_first) != nullptr) == offers_helpcode);
+  if (offers_helpcode) {
+    // 当前未安装的插件仍可见；换回内置方案时同次清除插件，其他插件配置与另一族不动。
+    auto plugins = saved.snapshot->preferences().value("plugins", Json::object());
+    plugins["helpcode_pack_quanpin"] = "synthetic-missing";
+    plugins["helpcode_pack_shuangpin"] = "synthetic-other";
+    plugins["combo_counter"] = true;
+    const auto before_helpcode = store.save(*saved.snapshot, {{{"plugins"}, plugins},
+        {{"quanpin_helpcode", "enabled"}, true}, {{"quanpin_helpcode", "schema"}, "custom/synthetic-missing"}});
+    assert(before_helpcode.outcome == Outcome::saved);
+    SendMessageW(host, WM_COMMAND, MAKEWPARAM(reload_settings, BN_CLICKED), 0);
+    pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+    const HWND schema = GetDlgItem(body, helpcode_first + 1);
+    const auto find_option = [&](const wchar_t* label) {
+      return static_cast<int>(SendMessageW(schema, CB_FINDSTRINGEXACT, static_cast<WPARAM>(-1), reinterpret_cast<LPARAM>(label)));
+    };
+    const auto selected_text = [&] {
+      const auto selected = SendMessageW(schema, CB_GETCURSEL, 0, 0);
+      const auto length = SendMessageW(schema, CB_GETLBTEXTLEN, selected, 0);
+      assert(length >= 0);
+      std::wstring value(static_cast<size_t>(length) + 1, L'\0');
+      SendMessageW(schema, CB_GETLBTEXT, selected, reinterpret_cast<LPARAM>(value.data()));
+      value.resize(static_cast<size_t>(length));
+      return value;
+    };
+    assert(selected_text() == L"synthetic-missing（插件，未找到）");
+    assert(find_option(L"custom/synthetic-missing") >= 0);
+    assert(find_option(L"合成辅助码 (Synthetic helper)") >= 0);
+    assert(find_option(L"合成插件（插件）") >= 0);
+    assert(store.load().snapshot->revision() == before_helpcode.snapshot->revision());
+    select_value(helpcode_first + 1, find_option(L"小鹤"));
+    saved = store.load();
+    assert(saved.snapshot->revision() == before_helpcode.snapshot->revision() + 1);
+    assert(saved.snapshot->preferences().at("quanpin_helpcode").at("schema") == "xiaohe");
+    assert(!saved.snapshot->preferences().at("plugins").contains("helpcode_pack_quanpin"));
+    assert(saved.snapshot->preferences().at("plugins").at("helpcode_pack_shuangpin") == "synthetic-other");
+    assert(saved.snapshot->preferences().at("plugins").at("combo_counter") == true);
+    select_value(helpcode_first + 1, find_option(L"合成插件（插件）"));
+    saved = store.load();
+    assert(saved.snapshot->preferences().at("plugins").at("helpcode_pack_quanpin") == "synthetic-codes");
+    assert(saved.snapshot->preferences().at("quanpin_helpcode").at("schema") == "xiaohe");
+    click(helpcode_first);
+    assert(!IsWindowEnabled(schema));
+    assert(IsWindowEnabled(GetDlgItem(body, helpcode_first + 2)));
+    click(helpcode_first + 2);
+    assert(store.load().snapshot->preferences().at("plugins").at("helpcode_pack_quanpin") == "synthetic-codes");
+    click(helpcode_first);
+    select_value(helpcode_first + 1, find_option(L"合成辅助码 (Synthetic helper)"));
+    saved = store.load();
+    assert(saved.snapshot->preferences().at("quanpin_helpcode").at("schema") == "custom/synthetic");
+    assert(!saved.snapshot->preferences().at("plugins").contains("helpcode_pack_quanpin"));
+    const auto revision = saved.snapshot->revision();
+    std::filesystem::remove_all(custom_directory);
+    std::filesystem::remove_all(plugin_directory);
+    select_page(0);
+    select_page(3);
+    assert(selected_text() == L"custom/synthetic");
+    assert(find_option(L"合成插件（插件）") == CB_ERR);
+    assert(store.load().snapshot->revision() == revision);
+    assert(store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  }
   // 原有自定义尺寸只在用户选择标准档位后才改变；两个尺寸字段原子保存。
   select_page(1);
   const HWND size = GetDlgItem(body, toolbar_size);
