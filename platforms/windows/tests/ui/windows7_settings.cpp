@@ -1,5 +1,6 @@
 #include "../../settings/win7/SettingsWindow.h"
 #include "../../settings/win7/PreferencesStore.h"
+#include "../../settings/win7/ThemeData.h"
 #include "../../settings/InputSettingsModel.h"
 #include "../../../../shared/contracts/msime_edition.h"
 
@@ -155,6 +156,28 @@ int main() {
     assert(custom.good() && manifest.good() && table.good() && options.good());
   }
   InjectedDirectory host_options(temporary.path / L"runtime-options.json", L"MSIME_CLIENT_HOST_OPTIONS");
+  const auto skins_root = temporary.path / L"skins";
+  const auto imported_skin = temporary.path / L"import-source" / L"synthetic-light";
+  const auto make_skin = [](const std::filesystem::path& directory, const std::string& id, const std::string& base, const std::string& mode) {
+    std::filesystem::create_directories(directory);
+    std::ofstream manifest(directory / L"skin.toml", std::ios::binary);
+    manifest << "schema_version = 1\nid = '" << id << "'\nname = '合成皮肤 " << id << "'\nversion = '1'\nbase = '" << base
+        << "'\n[supports]\nlayouts = ['horizontal', 'vertical']\nthemes = ['" << mode
+        << "']\n[candidate_window]\nmin_width_dip = 180\n[candidate_window.background]\nimage = 'sample.gif'\nfit = 'stretch'\nopacity = 0.5\n"
+        << "[candidate_window.decoration]\nimage = 'sample.gif'\ntop_inset_dip = 24\nwidth_dip = 24\n";
+    assert(manifest.good());
+    // 一帧、一个红色像素的合成 GIF，同时验证背景与装饰的正式资源读取和解码。
+    const unsigned char gif[]{'G','I','F','8','9','a',1,0,1,0,128,0,0,255,0,0,0,0,255,
+        0x21,0xf9,4,4,1,0,0,0,0x2c,0,0,0,0,1,0,1,0,0,2,2,0x44,1,0,0x3b};
+    std::ofstream image(directory / L"sample.gif", std::ios::binary);
+    image.write(reinterpret_cast<const char*>(gif), sizeof(gif));
+    assert(image.good());
+  };
+  make_skin(imported_skin, "synthetic-light", "light", "light");
+  make_skin(skins_root / L"synthetic-dark", "synthetic-dark", "night", "dark");
+  bool cancel_skin_folder = false;
+  bool allow_skin_import = false;
+  unsigned skin_confirmations = 0;
   unsigned selections = 0;
   bool cancel_selection = false;
   bool allow_fuzzy_reset = false;
@@ -169,10 +192,18 @@ int main() {
     return file;
   }, [&](HWND owner, const wchar_t* title, const wchar_t* text) {
     assert(IsWindow(owner));
+    if (std::wstring_view(title) == L"导入皮肤") {
+      assert(std::wstring_view(text).find(imported_skin.wstring()) != std::wstring_view::npos);
+      ++skin_confirmations;
+      return allow_skin_import;
+    }
     assert(std::wstring_view(title) == L"关闭模糊音");
     assert(std::wstring_view(text).find(L"清空") != std::wstring_view::npos);
     ++reset_confirmations;
     return allow_fuzzy_reset;
+  }, [&](HWND owner) -> std::optional<std::filesystem::path> {
+    assert(IsWindow(owner));
+    return cancel_skin_folder ? std::nullopt : std::optional<std::filesystem::path>(imported_skin);
   });
   assert(window.create(GetModuleHandleW(nullptr)));
   const HWND host = window.handle();
@@ -1046,6 +1077,153 @@ int main() {
   click(appearance_game_never_remove);
   assert(store.load().snapshot->preferences().at("game_compatibility").at("excluded_processes").empty());
   assert(!IsWindowEnabled(GetDlgItem(body, appearance_game_never_remove)));
+  assert(store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  saved = store.load();
+  // 主题目录、皮肤、配色和预览走实际控件、串行 worker 与同源 Rust。
+  const auto before_themes = store.load().snapshot->document;
+  select_page(8);
+  assert((GetWindowLongPtrW(GetDlgItem(body, theme_global), GWL_STYLE) & WS_VISIBLE) != 0);
+  assert(store.load().snapshot->document == before_themes);
+  const auto theme_response = theme_data::value(theme_data::response(msime_client_theme_catalog()));
+  assert(theme_response && theme_response->at("themes").is_array());
+  assert(SendMessageW(GetDlgItem(body, theme_global), CB_GETCOUNT, 0, 0) == static_cast<LRESULT>(theme_response->at("themes").size()));
+  const auto select_theme = [&](const char* id) {
+    const auto& themes = theme_response->at("themes");
+    for (size_t index = 0; index < themes.size(); ++index) if (themes[index].at("id") == id) {
+      select_value(theme_global, static_cast<int>(index)); return;
+    }
+    assert(false);
+  };
+  select_theme("paper");
+  assert(store.load().snapshot->preferences().at("global_theme") == "paper");
+  const auto paper = store.load().snapshot->revision();
+  select_theme("paper");
+  assert(store.load().snapshot->revision() == paper);
+  select_value(theme_mode, 2);
+  select_value(theme_candidate_mode, 1);
+  assert(store.load().snapshot->preferences().at("theme") == "dark");
+  assert(store.load().snapshot->preferences().at("candidate_theme") == "light");
+  const auto before_preview = store.load().snapshot->document;
+  select_value(theme_preview_mode, 2);
+  assert(store.load().snapshot->document == before_preview);
+  select_value(theme_preview_mode, 0);
+  assert(store.load().snapshot->document == before_preview);
+  const auto skin_list = GetDlgItem(body, theme_skins);
+  assert(SendMessageW(skin_list, LB_GETCOUNT, 0, 0) == 1);
+  click(theme_skin_import);
+  assert(skin_confirmations == 1 && !std::filesystem::exists(skins_root / L"synthetic-light"));
+  allow_skin_import = true;
+  click(theme_skin_import);
+  if (skin_confirmations != 2 || !std::filesystem::is_regular_file(skins_root / L"synthetic-light" / L"skin.toml")) {
+    std::fprintf(stderr, "Synthetic skin import: confirmations=%u catalog=%s\n", skin_confirmations,
+        theme_data::catalog(imported_skin.parent_path()).dump().c_str());
+    std::fwprintf(stderr, L"Synthetic skin import status: %ls\n", caption(GetDlgItem(host, status_text)).c_str());
+    std::abort();
+  }
+  assert(SendMessageW(skin_list, LB_GETCOUNT, 0, 0) == 2);
+  assert(store.load().snapshot->document == before_preview);
+  {
+    std::ofstream stale(skins_root / L"synthetic-light" / L"stale.txt");
+    stale << "synthetic obsolete file";
+    assert(stale.good());
+  }
+  click(theme_skin_import);
+  assert(skin_confirmations == 3 && !std::filesystem::exists(skins_root / L"synthetic-light" / L"stale.txt"));
+  cancel_skin_folder = true;
+  click(theme_skin_import);
+  assert(skin_confirmations == 3);
+  const auto choose_skin = [&](const wchar_t* id) {
+    for (LRESULT index = 0; index < SendMessageW(skin_list, LB_GETCOUNT, 0, 0); ++index) {
+      wchar_t title[256]{};
+      assert(SendMessageW(skin_list, LB_GETTEXTLEN, index, 0) < 256);
+      SendMessageW(skin_list, LB_GETTEXT, index, reinterpret_cast<LPARAM>(title));
+      if (std::wstring(title).find(id) == std::wstring::npos) continue;
+      SendMessageW(skin_list, LB_SETCURSEL, index, 0);
+      SendMessageW(body, WM_COMMAND, MAKEWPARAM(theme_skins, LBN_SELCHANGE), reinterpret_cast<LPARAM>(skin_list));
+      return;
+    }
+    assert(false);
+  };
+  choose_skin(L"synthetic-light");
+  assert(IsWindowEnabled(GetDlgItem(body, theme_skin_use)));
+  const auto before_skin = store.load().snapshot->revision();
+  click(theme_skin_use);
+  saved = store.load();
+  assert(saved.snapshot->revision() == before_skin + 1);
+  assert(saved.snapshot->preferences().at("global_theme") == "custom");
+  assert(saved.snapshot->preferences().at("custom_theme").at("candidate_skin") == "synthetic-light");
+  const auto resolved_skin = theme_data::preview(saved.snapshot->preferences(), skins_root, 1);
+  assert(resolved_skin.resolved.at("candidate_skin") == "synthetic-light");
+  assert(resolved_skin.background.width == 1 && resolved_skin.decoration.width == 1 && !resolved_skin.image_failed);
+  assert(resolved_skin.background.bgra == std::vector<uint8_t>({0, 0, 255, 255}));
+  const auto before_custom_choice = saved.snapshot->revision();
+  select_theme("custom");
+  saved = store.load();
+  assert(saved.snapshot->revision() == before_custom_choice + 1);
+  assert(!saved.snapshot->preferences().at("custom_theme").contains("candidate_skin"));
+  choose_skin(L"synthetic-light");
+  click(theme_skin_use);
+  choose_skin(L"synthetic-dark");
+  click(theme_skin_use);
+  saved = store.load();
+  assert(saved.snapshot->preferences().at("custom_theme").at("candidate_skin") == "synthetic-light");
+  assert(saved.snapshot->preferences().at("custom_theme").at("candidate_skin_dark") == "synthetic-dark");
+  assert(caption(GetDlgItem(body, theme_slot_summary)).find(L"synthetic-light") != std::wstring::npos);
+  assert(caption(GetDlgItem(body, theme_slot_summary)).find(L"synthetic-dark") != std::wstring::npos);
+  click(theme_skin_stop);
+  saved = store.load();
+  assert(saved.snapshot->preferences().at("custom_theme").at("candidate_skin") == "synthetic-light");
+  assert(!saved.snapshot->preferences().at("custom_theme").contains("candidate_skin_dark"));
+  const auto surface_edit = GetDlgItem(body, theme_color_first);
+  SetWindowTextW(surface_edit, L"#12XX56");
+  const auto before_invalid_color = saved.snapshot->revision();
+  click(theme_color_first + 1);
+  assert(store.load().snapshot->revision() == before_invalid_color);
+  assert(caption(GetDlgItem(host, status_text)).find(L"#RRGGBB") != std::wstring::npos);
+  select_theme("paper");
+  SetWindowTextW(surface_edit, L"#123ABC");
+  const auto before_color = store.load().snapshot->revision();
+  click(theme_color_first + 1);
+  saved = store.load();
+  assert(saved.snapshot->revision() == before_color + 1);
+  assert(saved.snapshot->preferences().at("global_theme") == "custom");
+  assert(saved.snapshot->preferences().at("custom_theme").at("base") == "paper");
+  assert(saved.snapshot->preferences().at("custom_theme").at("candidate_colors").at("surface") == "#123abc");
+  assert(!saved.snapshot->preferences().at("custom_theme").contains("candidate_skin"));
+  assert(!saved.snapshot->preferences().at("custom_theme").contains("candidate_skin_dark"));
+  // 从解析出来的调色板绘制，确认没有继续画固定灰色占位。
+  const auto preview_dc = CreateCompatibleDC(nullptr);
+  BITMAPINFO preview_info{};
+  preview_info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
+  preview_info.bmiHeader.biWidth = 600; preview_info.bmiHeader.biHeight = -228;
+  preview_info.bmiHeader.biPlanes = 1; preview_info.bmiHeader.biBitCount = 32;
+  void* preview_bits = nullptr;
+  const auto preview_bitmap = CreateDIBSection(preview_dc, &preview_info, DIB_RGB_COLORS, &preview_bits, nullptr, 0);
+  assert(preview_dc && preview_bitmap && preview_bits);
+  const auto old_preview_bitmap = SelectObject(preview_dc, preview_bitmap);
+  DRAWITEMSTRUCT draw{};
+  draw.CtlType = ODT_STATIC; draw.CtlID = theme_preview; draw.hwndItem = GetDlgItem(body, theme_preview);
+  draw.hDC = preview_dc; draw.rcItem = RECT{0, 0, 600, 228};
+  assert(SendMessageW(body, WM_DRAWITEM, theme_preview, reinterpret_cast<LPARAM>(&draw)));
+  // 本用例前面可能调整过不透明度，取当前数值计算合成后的表面色。
+  const int alpha = saved.snapshot->preferences().at("candidate_opacity_percent").get<int>() * 255 / 100;
+  const auto native = GetSysColor(COLOR_BTNFACE);
+  const auto channel = [alpha](int a, int b) { return (a * alpha + b * (255 - alpha) + 127) / 255; };
+  assert(GetPixel(preview_dc, 570, 200) == RGB(channel(0x12, GetRValue(native)), channel(0x3a, GetGValue(native)), channel(0xbc, GetBValue(native))));
+  SelectObject(preview_dc, old_preview_bitmap); DeleteObject(preview_bitmap); DeleteDC(preview_dc);
+  click(theme_color_first + 2);
+  assert(!store.load().snapshot->preferences().at("custom_theme").contains("candidate_colors"));
+  SetWindowTextW(surface_edit, L"#654321");
+  click(theme_skin_refresh);
+  assert(caption(surface_edit) == L"#654321");
+  // CAS 冲突不能覆盖另一个窗口刚选择的主题。
+  saved = store.load();
+  auto theme_peer = store.save(*saved.snapshot, {{{"global_theme"}, "night"}});
+  assert(theme_peer.outcome == Outcome::saved);
+  select_theme("light");
+  assert(store.load().snapshot->revision() == theme_peer.snapshot->revision());
+  assert(store.load().snapshot->preferences().at("global_theme") == "night");
+  assert(caption(GetDlgItem(host, status_text)).find(L"其他窗口") != std::wstring::npos);
   assert(store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
   saved = store.load();
   // 原有自定义尺寸只在用户选择标准档位后才改变；两个尺寸字段原子保存。

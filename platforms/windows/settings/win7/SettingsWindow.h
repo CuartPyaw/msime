@@ -52,6 +52,10 @@ enum ControlId {
   account_status = 1500, account_refresh, account_email, account_phone, account_target,
   account_request_code, account_code, account_login, account_google, account_logout,
   account_logout_all, account_notice,
+  theme_mode = 1600, theme_candidate_mode, theme_global, theme_preview_mode,
+  theme_preview, theme_skins, theme_skin_use, theme_skin_stop, theme_skin_refresh,
+  theme_skin_import, theme_skin_directory, theme_skin_notice, theme_slot_summary,
+  theme_color_first = 1640,
 };
 
 class SettingsWindow {
@@ -59,7 +63,8 @@ public:
   // 默认使用系统文件选择器；原生集成测试可注入合成路径，继续走正式文件与存储流程。
   using FilePicker = std::function<std::optional<std::filesystem::path>(HWND, bool)>;
   using Confirmation = std::function<bool(HWND, const wchar_t*, const wchar_t*)>;
-  explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {});
+  using FolderPicker = std::function<std::optional<std::filesystem::path>(HWND)>;
+  explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {}, FolderPicker folder_picker = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;

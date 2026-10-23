@@ -9,6 +9,7 @@
 #include "CandidateAppearanceForm.h"
 #include "AiForm.h"
 #include "AccountForm.h"
+#include "ThemeForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -43,7 +44,7 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account };
+  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -245,7 +246,7 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
@@ -253,6 +254,13 @@ struct Job {
   std::string text;
   std::optional<Json> credential;
   bool ai_models = false;
+  int preview_mode = 0;
+};
+
+struct ThemeCompletion {
+  std::optional<Json> themes;
+  std::optional<Json> catalog;
+  theme_data::Preview preview;
 };
 
 struct Completion {
@@ -269,6 +277,7 @@ struct Completion {
   bool ai_models = false;
   std::optional<Json> fonts;
   bool game_profile_enabled = false;
+  std::optional<ThemeCompletion> theme;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
@@ -314,6 +323,25 @@ private:
     if (job.reload || job.action == Job::Action::helpcode_sources) helpcodes_ = helpcode_sources(directory_);
     Result result;
     if (job.action == Job::Action::helpcode_sources) return {Outcome::loaded, snapshot_};
+    if (job.action == Job::Action::theme_preview) theme_preview_mode_ = job.preview_mode;
+    if (job.action == Job::Action::theme_scan || job.action == Job::Action::theme_preview)
+      return {Outcome::loaded, snapshot_};
+    if (job.action == Job::Action::skin_import) {
+      const auto response = theme_data::call(msime_client_skin_import,
+          {{"source", job.file.u8string()}, {"directory", (directory_ / L"skins").u8string()}});
+      const auto imported = theme_data::value(response);
+      notice_ = imported && imported->is_object() && imported->contains("id") ?
+          L"皮肤已导入，可在列表中选用。" : L"导入皮肤失败，请确认文件夹内含有效的 skin.toml，且目录可以写入。";
+      return {Outcome::loaded, snapshot_};
+    }
+    if (job.action == Job::Action::skin_directory) {
+      const auto root = directory_ / L"skins";
+      std::error_code error;
+      std::filesystem::create_directories(root, error);
+      if (!error && std::filesystem::is_directory(root, error)) folder_ = root;
+      else notice_ = L"无法打开皮肤目录，请检查数据目录权限。";
+      return {Outcome::loaded, snapshot_};
+    }
     if (job.action == Job::Action::game_profile) {
       notice_ = msime::windows::game_profile::apply(window_, !msime::windows::game_profile::enabled());
       if (notice_.empty()) notice_ = L"登记名称已更新，请重启游戏并重新切换输入法。";
@@ -415,9 +443,33 @@ private:
         snapshot_.reset();
         result = {Outcome::storage, std::nullopt};
       }
+      theme_.reset();
+      try {
+        if (result.snapshot) {
+          const bool scan = job.reload || job.action == Job::Action::theme_scan || job.action == Job::Action::skin_import;
+          const bool changed = std::any_of(job.changes.begin(), job.changes.end(), [](const Change& change) {
+            if (change.path.empty()) return false;
+            for (const auto* key : {"theme", "candidate_theme", "global_theme", "custom_theme", "candidate_layout", "candidate_opacity_percent", "candidate_corner_radius"})
+              if (change.path.front() == key) return true;
+            return false;
+          });
+          if (scan || changed || job.action == Job::Action::import_file || job.action == Job::Action::theme_preview) {
+            ThemeCompletion completion;
+            if (scan) {
+              completion.themes = theme_data::response(msime_client_theme_catalog());
+              completion.catalog = theme_data::catalog(directory_ / L"skins");
+            }
+            completion.preview = theme_data::preview(result.snapshot->preferences(), directory_ / L"skins", theme_preview_mode_);
+            theme_ = std::move(completion);
+          }
+        }
+      } catch (const std::exception&) {
+        // 预览或目录失败不能把已经保存的设置误报为存储失败。
+        theme_ = ThemeCompletion{};
+      }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled()};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_)};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -447,6 +499,8 @@ private:
   std::optional<Json> ai_models_response_;
   std::optional<Json> account_response_;
   std::optional<Json> fonts_;
+  std::optional<ThemeCompletion> theme_;
+  int theme_preview_mode_ = 0;
   std::thread thread_;
 };
 
@@ -483,6 +537,7 @@ struct SettingsWindow::State {
   int appearance_height = 0;
   int ai_height = 0;
   int account_height = 0;
+  int theme_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
   int expression_tab = 0;
@@ -506,6 +561,8 @@ struct SettingsWindow::State {
   CandidateAppearanceForm appearance_form;
   AiForm ai_form;
   AccountForm account_form;
+  ThemeForm theme_form;
+  FolderPicker folder_picker;
   Confirmation confirmation;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
@@ -531,7 +588,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -608,6 +665,10 @@ struct SettingsWindow::State {
     account_height = account_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                                 int id, int top, int height) {
       return surface_row(Surface::account, type, text, style, id, top, height);
+    });
+    theme_height = theme_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+                                            int id, int top, int height) {
+      return surface_row(Surface::themes, type, text, style, id, top, height);
     });
     enable(false);
     layout();
@@ -709,6 +770,34 @@ struct SettingsWindow::State {
     if (FAILED(resolved) || !path) return failure();
     const std::filesystem::path result(path);
     CoTaskMemFree(path);
+    return result;
+  }
+
+  std::optional<std::filesystem::path> pick_skin_folder() const {
+    if (folder_picker) return folder_picker(window);
+    IFileOpenDialog* dialog = nullptr;
+    if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) {
+      SetWindowTextW(status, L"无法打开皮肤文件夹选择窗口。"); return std::nullopt;
+    }
+    FILEOPENDIALOGOPTIONS options = 0;
+    std::optional<std::filesystem::path> result;
+    HRESULT status_code = dialog->GetOptions(&options);
+    if (SUCCEEDED(status_code)) status_code = dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_DONTADDTORECENT | FOS_PATHMUSTEXIST);
+    if (SUCCEEDED(status_code)) status_code = dialog->SetTitle(L"导入皮肤文件夹");
+    if (SUCCEEDED(status_code)) status_code = dialog->Show(window);
+    if (SUCCEEDED(status_code)) {
+      IShellItem* selected = nullptr;
+      status_code = dialog->GetResult(&selected);
+      if (SUCCEEDED(status_code)) {
+        PWSTR path = nullptr;
+        status_code = selected->GetDisplayName(SIGDN_FILESYSPATH, &path);
+        if (SUCCEEDED(status_code) && path) result = std::filesystem::path(path);
+        CoTaskMemFree(path); selected->Release();
+      }
+    }
+    dialog->Release();
+    if (FAILED(status_code) && status_code != HRESULT_FROM_WIN32(ERROR_CANCELLED))
+      SetWindowTextW(status, L"无法读取所选皮肤文件夹。");
     return result;
   }
 
@@ -881,6 +970,7 @@ struct SettingsWindow::State {
     appearance_form.enable(enabled);
     ai_form.enable(enabled);
     account_form.enable(enabled);
+    theme_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -913,7 +1003,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -977,6 +1067,10 @@ struct SettingsWindow::State {
     case Job::Action::account: message = L"正在读取账号…"; break;
     case Job::Action::wubi_lookup: message = L"正在查询编码…"; break;
     case Job::Action::helpcode_sources: message = L"正在读取辅助码方案…"; break;
+    case Job::Action::theme_scan: message = L"正在读取主题与皮肤…"; break;
+    case Job::Action::theme_preview: message = L"正在更新预览…"; break;
+    case Job::Action::skin_import: message = L"正在导入皮肤…"; break;
+    case Job::Action::skin_directory: message = L"正在打开皮肤目录…"; break;
     case Job::Action::preferences: break;
     }
     SetWindowTextW(status, message);
@@ -1056,7 +1150,7 @@ struct SettingsWindow::State {
     if (mixed.value("first_page_count", 1) < 1 || mixed.value("first_page_count", 1) > 3) return false;
     if (!CloudCandidateForm::valid(preferences.at("cloud_candidate_provider"))) return false;
     if (!TranslationForm::valid(preferences)) return false;
-    if (!CandidateAppearanceForm::valid(preferences)) return false;
+    if (!CandidateAppearanceForm::valid(preferences) || !ThemeForm::valid(preferences)) return false;
     if (!GlossForm::valid(preferences)) return false;
     if (!InputModeForm::valid(preferences)) return false;
     if (!AdvancedInputForm::valid(preferences) || !SchemeForm::valid(preferences) || !AiForm::valid(preferences)) return false;
@@ -1212,6 +1306,7 @@ struct SettingsWindow::State {
       gloss_form.refresh(snapshot->preferences());
       translation_form.refresh(snapshot->preferences());
       appearance_form.refresh(snapshot->preferences());
+      theme_form.refresh(snapshot->preferences());
       ai_form.refresh(snapshot->preferences());
       account_form.refresh();
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
@@ -1241,6 +1336,11 @@ struct SettingsWindow::State {
         job.credential = account_form.status_request();
         submit(std::move(job));
       }
+    }
+    if (completed->theme) {
+      if (completed->theme->themes && completed->theme->catalog)
+        theme_form.catalogs(*completed->theme->themes, *completed->theme->catalog);
+      theme_form.preview(std::move(completed->theme->preview));
     }
     appearance_form.game_profile(completed->game_profile_enabled);
     enable(snapshot.has_value());
@@ -1284,7 +1384,7 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
@@ -1294,6 +1394,12 @@ struct SettingsWindow::State {
         Job job;
         job.reload = false;
         job.action = Job::Action::helpcode_sources;
+        submit(std::move(job));
+      }
+      if (selected == 8 && !busy) {
+        Job job;
+        job.reload = false;
+        job.action = Job::Action::theme_scan;
         submit(std::move(job));
       }
       if (selected == 7 && !busy) {
@@ -1316,6 +1422,30 @@ struct SettingsWindow::State {
       return;
     }
     if (!snapshot) return;
+    auto theme_change = theme_form.command(command);
+    if (theme_change.handled) {
+      if (!theme_change.message.empty()) { SetWindowTextW(status, theme_change.message.c_str()); return; }
+      Job job;
+      job.reload = false;
+      job.changes = std::move(theme_change.changes);
+      if (theme_change.import) {
+        const auto folder = pick_skin_folder();
+        if (!folder) return;
+        const auto message = L"导入皮肤文件夹：" + folder->wstring() + L"\n如果已有同名皮肤，将完整替换。是否继续？";
+        const bool allowed = confirmation ? confirmation(window, L"导入皮肤", message.c_str()) :
+            MessageBoxW(window, message.c_str(), L"导入皮肤", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+        if (!allowed) return;
+        job.action = Job::Action::skin_import;
+        job.file = *folder;
+      } else if (theme_change.scan) job.action = Job::Action::theme_scan;
+      else if (theme_change.directory) job.action = Job::Action::skin_directory;
+      else if (theme_change.preview) {
+        job.action = Job::Action::theme_preview;
+        job.preview_mode = *theme_change.preview;
+      } else if (job.changes.empty()) return;
+      submit(std::move(job));
+      return;
+    }
     auto appearance_change = appearance_form.command(command);
     if (appearance_change.handled) {
       if (!appearance_change.message.empty()) SetWindowTextW(status, appearance_change.message.c_str());
@@ -1563,6 +1693,7 @@ struct SettingsWindow::State {
     }
     if (message == WM_DRAWITEM) {
       const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+      if (draw && self->theme_form.draw(*draw)) return TRUE;
       if (draw && draw->CtlID == appearance_preview) {
         RECT rect = draw->rcItem;
         const auto background = CreateSolidBrush(RGB(248, 248, 248));
@@ -1655,9 +1786,10 @@ struct SettingsWindow::State {
   }
 };
 
-SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation) : state_(std::make_unique<State>()) {
+SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker) : state_(std::make_unique<State>()) {
   state_->file_picker = std::move(file_picker);
   state_->confirmation = std::move(confirmation);
+  state_->folder_picker = std::move(folder_picker);
 }
 
 SettingsWindow::~SettingsWindow() {
