@@ -8,6 +8,9 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if (-not [IO.Path]::IsPathRooted($OutputDirectory)) { throw 'OutputDirectory must be an absolute path' }
+if (-not (Get-Command dumpbin -CommandType Application -ErrorAction SilentlyContinue)) {
+    throw 'Win7 core needs the MSVC developer environment (vcvarsall.bat x64 or x64_x86); dumpbin was not found'
+}
 
 function Invoke-CoreCommand {
     param([string]$Command, [string[]]$Arguments)

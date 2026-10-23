@@ -22,7 +22,9 @@ public:
         return NativeTextInputTarget(GetAncestor(foreground, GA_ROOT));
     }
 
-    bool Insert(std::wstring_view text, HWND excluded = nullptr) const
+    // 原有调用保留当前消息标记；自行记统计的面板显式传入 PanelTextSendInputExtraInfo。
+    bool Insert(std::wstring_view text, HWND excluded = nullptr,
+                ULONG_PTR extraInfo = static_cast<ULONG_PTR>(GetMessageExtraInfo())) const
     {
         constexpr size_t kMaxTextUnits = 4000;
         if (target_ == nullptr || text.empty() || text.size() > kMaxTextUnits ||
@@ -42,7 +44,7 @@ public:
             down.type = INPUT_KEYBOARD;
             down.ki.wScan = static_cast<WORD>(unit);
             down.ki.dwFlags = KEYEVENTF_UNICODE;
-            down.ki.dwExtraInfo = GetMessageExtraInfo();
+            down.ki.dwExtraInfo = extraInfo;
             inputs.push_back(down);
 
             INPUT up = down;

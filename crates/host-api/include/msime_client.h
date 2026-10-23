@@ -958,6 +958,16 @@ char *msime_client_translation_gloss_save(const uint8_t *request, size_t request
 /* TranslationQuery accepts the optional sentence:true flag for an explicit
  * single-item sentence request (up to 512 Unicode characters); ordinary
  * candidate gloss requests retain their normal limits. */
+#if defined(_WIN32)
+/* Windows 原生手写面板，阻塞调用，只能放在工作线程，不依赖 WebView。
+ * 请求为 <=262144 字节的 JSON；{operation:"status"} 返回 {system_recognizer:bool}。
+ * {operation:"recognize",request:{language?:"zh-CN",strokes:[{points:[{x,y},...]}]},model?:绝对路径}
+ * 使用 420×420 DIP 坐标；系统识别优先，失败或无结果时可用可信模型回退。
+ * 返回标准封装 {candidates:[...]}；错误码 invalid_stroke、no_chinese_recognizer、
+ * handwriting_unavailable、invalid_handwriting_model；本安装包不提供手写时为 handwriting_not_offered。
+ * 不访问输入会话、不联网、不保留请求；调用方用 msime_client_string_free 释放响应。 */
+char *msime_client_windows_handwriting(const uint8_t *request, size_t length);
+#endif
 #if !defined(_WIN32)
 char *msime_client_translation_provider_request(const uint8_t *query,
                                                 size_t query_length,

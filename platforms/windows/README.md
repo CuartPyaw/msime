@@ -23,6 +23,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File platforms/windows/tests/tool
 
 此脚本只启动这份原生宿主、操作该进程自己的窗口，使用独立合成状态，取消两个系统对话框后检查设置文件没有变化。无交互桌面的 SSH 或服务会话不能代替这条桌面验收。
 
+## Windows 7 手写窗口（开发中）
+
+`panels/win7` 是不依赖 WebView 的原生面板宿主，当前只承载手写。画布支持自动识别、撤销、清空与候选上屏，识别在工作线程执行；清空或继续书写后丢弃旧结果。窗口不激活，只向打开时仍在前台的原编辑器上屏，切换到其他窗口时拒绝输入。成功上屏通过共享接口按手写来源记录聚合统计，使用 TSF 面板标记避免重复计数。
+
+Win7 专用 Rust 目标使用系统 Tablet PC COM 中文识别器，普通 Windows 继续使用 WinRT。缺少系统识别器时可回退到运行时选项 `handwriting_model`、`MSIME_HANDWRITING_MODEL`、随包模型或已发布手写资源包；此独立目标尚不提供模型下载界面。所有设置页、其他面板及安装集成完成前，它不接入普通产品启动器与发布包。
+
+```powershell
+cmake -S platforms/windows/panels/win7 -B target/windows-full/x64/win7-panels -A x64 "-DCMAKE_PREFIX_PATH=<x64 原生依赖前缀>" "-DMSIME_HOST_LIBRARY=$PWD/target/windows7-core/x64/msime_host_api.dll.lib"
+cmake --build target/windows-full/x64/win7-panels --config RelWithDebInfo --parallel 2
+Copy-Item target/windows7-core/x64/msime_host_api.dll target/windows-full/x64/win7-panels/RelWithDebInfo/
+ctest --test-dir target/windows-full/x64/win7-panels -C RelWithDebInfo --output-on-failure
+```
+
+核心必须由同一份源码运行 `Build-Windows7Core.ps1` 重新生成，包含 `msime_client_windows_handwriting`。32 位构建使用 x86 的依赖与核心、`-A Win32`、`target/windows-full/x86/win7-panels`。通过 vcpkg 工具链构建时，`VCPKG_MANIFEST_DIR` 指向 `platforms/windows/settings/win7`，复用其最小清单。两个原生兼容宿主都在程序目录生成当前 edition 的 `edition.json`。
+
+`windows7-handwriting-test.exe` 用实际窗口鼠标消息与真实识别器验证合成笔划，输入提交边界可注入测试回调。另在有中文识别器的交互桌面运行 `windows7-handwriting-test.exe --desktop`，验证合成候选进入它自己创建的编辑器、切换到另一个测试窗口时拒绝上屏，以及按手写来源只记一次；全部状态使用临时合成目录。测试通过不能替代 Win7 SP1 的实际组件、安装和输入法验收。
+
 ## 目录结构
 
 Windows 平台的实现源码在 `src/` 下；`tsf/`、`msimeui/`、`tests/`、`installer/` 各自守着协议、UI、测试与打包的边界，`experiments/` 放不进产品的验证工具。平台根目录放构建文件、脚本、清单和文档。

@@ -27,6 +27,12 @@ foreach ($line in $lines) {
             $imports.Add([pscustomobject]@{ Library = $library; Name = $Matches[1]; Delayed = $delayed; Ordinal = $null })
         } elseif ($line -match '^\s+Ordinal\s+([0-9]+)\s*$') {
             $ordinal = [int]$Matches[1]
+            # Windows SDK 的 Winsock 导入库保留固定序号；只接受 Win7 已有的初始化与清理接口。
+            $winsockOrdinals = @{ 115 = 'WSAStartup'; 116 = 'WSACleanup' }
+            if ($library -eq 'ws2_32.dll' -and -not $delayed -and $winsockOrdinals.ContainsKey($ordinal)) {
+                $imports.Add([pscustomobject]@{ Library = $library; Name = $winsockOrdinals[$ordinal]; Delayed = $false; Ordinal = $ordinal })
+                continue
+            }
             # sherpa 的上游导入库以序号链接这个 C ABI；必须核对实际相邻 DLL 的导出，不能略过。
             if ($library -ne 'onnxruntime.dll' -or $ordinal -ne 1 -or $delayed -or $DependencyDirectory -eq '') {
                 throw "Unverified ordinal import: $library!$ordinal"

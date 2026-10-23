@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <filesystem>
+#include <fstream>
 #include <functional>
 #include <string>
 
@@ -81,9 +82,19 @@ int main() {
   using namespace msime::settings::win7;
   TemporaryDirectory temporary;
   InjectedDirectory injected(temporary.path);
+#if !MSIME_EDITION_IS_FULL
+  // 模拟安装准备阶段写入的状态目录身份；偏好按目录记录取默认值，不按进程包声明取。
+  {
+    std::ofstream record(temporary.path / L"edition", std::ios::binary);
+    record << MSIME_EDITION_ID << '\n';
+    assert(record.good());
+  }
+#endif
   PreferencesStore store(temporary.path.u8string());
   auto loaded = store.load();
   assert(loaded.outcome == Outcome::loaded && loaded.snapshot);
+  // Rust 按状态目录的版本记录选默认值，必须与原生编译期产品身份一致。
+  assert(loaded.snapshot->preferences().at("scheme") == MSIME_EDITION_DEFAULT_SCHEME);
   auto tokens = loaded.snapshot->preferences().at("ai_assistant").at("tokens");
   tokens["https://compat.example.invalid"] = "synthetic-token-not-a-real-credential";
   auto seeded = store.save(*loaded.snapshot, {
