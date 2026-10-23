@@ -11,6 +11,7 @@
 #include "AccountForm.h"
 #include "ThemeForm.h"
 #include "CommunitySkinForm.h"
+#include "StatisticsForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -45,7 +46,7 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community };
+  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -247,7 +248,7 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory, community };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory, community, statistics };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
@@ -256,6 +257,7 @@ struct Job {
   std::optional<Json> credential;
   bool ai_models = false;
   int preview_mode = 0;
+  bool statistics_upload = false;
 };
 
 struct ThemeCompletion {
@@ -281,12 +283,15 @@ struct Completion {
   std::optional<ThemeCompletion> theme;
   std::optional<Json> community_response;
   theme_data::Image community_preview;
+  std::optional<Json> statistics_response;
+  std::optional<Json> statistics_upload_response;
+  bool statistics_upload_changed = false;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
 class Worker {
 public:
-  explicit Worker(HWND window, SettingsWindow::CommunityTransport transport) : window_(window), community_transport_(std::move(transport)), thread_([this] { run(); }) {}
+  explicit Worker(HWND window, SettingsWindow::CommunityTransport transport, SettingsWindow::CommunityTransport statistics_upload_transport) : window_(window), community_transport_(std::move(transport)), statistics_upload_transport_(std::move(statistics_upload_transport)), thread_([this] { run(); }) {}
   ~Worker() {
     {
       std::lock_guard<std::mutex> guard(lock_);
@@ -320,6 +325,8 @@ private:
     fonts_.reset();
     community_response_.reset();
     community_preview_ = {};
+    statistics_response_.reset();
+    statistics_upload_response_.reset();
     if (!store_) {
       directory_ = preferences_directory();
       if (directory_.empty()) return {Outcome::storage, std::nullopt};
@@ -331,6 +338,41 @@ private:
     if (job.action == Job::Action::theme_preview) theme_preview_mode_ = job.preview_mode;
     if (job.action == Job::Action::theme_scan || job.action == Job::Action::theme_preview)
       return {Outcome::loaded, snapshot_};
+    if (job.action == Job::Action::statistics) {
+      try {
+        auto action = job.credential.value_or(Json{{"operation", "load"}});
+        statistics_response_ = theme_data::call(msime_client_typing_statistics,
+            {{"directory", directory_.u8string()}, {"status", true}, {"action", job.statistics_upload ? Json{{"operation", "load"}} : action}});
+        const auto account = account_directory();
+        if (!account.empty()) {
+          if (!job.statistics_upload) action = {{"operation", "typing_upload"}};
+          action["statistics_directory"] = directory_.u8string();
+          action["day"] = msime::settings::typing::day_key(statistics_data::local_day());
+          action["platform"] = "windows";
+          const auto call = [&](const Json& upload_action) {
+            const auto request = Json{{"directory", account.u8string()}, {"action", upload_action}};
+            return statistics_upload_transport_ ? Json::parse(statistics_upload_transport_(request.dump()), nullptr, false) :
+                theme_data::call(msime_client_account, request);
+          };
+          auto response = call(action);
+          if (!theme_data::value(response)) {
+            const auto failure = response.find("error");
+            const auto code = failure != response.end() && failure->is_string() ? failure->get<std::string>() : "account_unavailable";
+            // 上传失败可能已经改变本机开关；重新读实际状态，不能把旧 UI 当成最终结果。
+            response = call({{"operation", "typing_upload_status"}, {"statistics_directory", directory_.u8string()}});
+            if (response.is_object()) {
+              response["operation_error"] = code;
+              if (job.statistics_upload) response["operation_enabled"] = action.value("enabled", false);
+            }
+          }
+          statistics_upload_response_ = std::move(response);
+        } else statistics_upload_response_ = Json{{"ok", false}, {"error", "account_storage"}};
+      } catch (const std::exception&) {
+        if (!statistics_response_) statistics_response_ = Json();
+        statistics_upload_response_ = Json{{"ok", false}, {"error", "account_storage"}};
+      }
+      return {Outcome::loaded, snapshot_};
+    }
     if (job.action == Job::Action::community && job.credential) {
       try {
         const auto account = account_directory();
@@ -517,7 +559,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_), std::move(community_response_), std::move(community_preview_)};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_), std::move(community_response_), std::move(community_preview_), std::move(statistics_response_), std::move(statistics_upload_response_), job.statistics_upload};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -552,6 +594,9 @@ private:
   std::optional<Json> community_response_;
   theme_data::Image community_preview_;
   SettingsWindow::CommunityTransport community_transport_;
+  SettingsWindow::CommunityTransport statistics_upload_transport_;
+  std::optional<Json> statistics_response_;
+  std::optional<Json> statistics_upload_response_;
   std::thread thread_;
 };
 
@@ -590,6 +635,7 @@ struct SettingsWindow::State {
   int account_height = 0;
   int theme_height = 0;
   int community_height = 0;
+  int statistics_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
   int expression_tab = 0;
@@ -616,6 +662,8 @@ struct SettingsWindow::State {
   ThemeForm theme_form;
   CommunitySkinForm community_form;
   CommunityTransport community_transport;
+  CommunityTransport statistics_upload_transport;
+  StatisticsForm statistics_form;
   FolderPicker folder_picker;
   Confirmation confirmation;
 
@@ -642,7 +690,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -719,6 +767,10 @@ struct SettingsWindow::State {
     account_height = account_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                                 int id, int top, int height) {
       return surface_row(Surface::account, type, text, style, id, top, height);
+    });
+    statistics_height = statistics_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+        int id, int top, int height) {
+      return surface_row(Surface::statistics, type, text, style, id, top, height);
     });
     community_height = community_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
         int id, int top, int height) {
@@ -1030,6 +1082,7 @@ struct SettingsWindow::State {
     account_form.enable(enabled);
     theme_form.enable(enabled);
     community_form.enable(enabled);
+    statistics_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -1062,7 +1115,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -1126,6 +1179,7 @@ struct SettingsWindow::State {
     case Job::Action::account: message = L"正在读取账号…"; break;
     case Job::Action::wubi_lookup: message = L"正在查询编码…"; break;
     case Job::Action::helpcode_sources: message = L"正在读取辅助码方案…"; break;
+    case Job::Action::statistics: message = L"正在读取打字统计…"; break;
     case Job::Action::community: message = L"正在处理社区皮肤操作…"; break;
     case Job::Action::theme_scan: message = L"正在读取主题与皮肤…"; break;
     case Job::Action::theme_preview: message = L"正在更新预览…"; break;
@@ -1409,6 +1463,8 @@ struct SettingsWindow::State {
         community_form.preview(std::move(completed->community_preview));
       community_form.completed(*completed->credential_request, *completed->community_response);
     }
+    if (completed->statistics_response) statistics_form.completed(*completed->statistics_response);
+    if (completed->statistics_upload_response) statistics_form.upload_completed(*completed->statistics_upload_response, completed->statistics_upload_changed);
     appearance_form.game_profile(completed->game_profile_enabled);
     enable(snapshot.has_value());
     layout_body();
@@ -1433,6 +1489,14 @@ struct SettingsWindow::State {
     SetWindowTextW(status, completed->notice.empty() ? message : completed->notice.c_str());
   }
 
+  void poll_statistics() {
+    if (busy || !worker || surface != Surface::statistics) return;
+    Job job;
+    job.reload = false; job.action = Job::Action::statistics;
+    job.credential = Json{{"operation", "load"}};
+    submit(std::move(job));
+  }
+
   void command(WPARAM command) {
     const int id = LOWORD(command);
     if (id == page_selector && HIWORD(command) == CBN_SELCHANGE) {
@@ -1451,7 +1515,7 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
@@ -1463,6 +1527,7 @@ struct SettingsWindow::State {
         job.action = Job::Action::helpcode_sources;
         submit(std::move(job));
       }
+      if (selected == 10) poll_statistics();
       if (selected == 9 && !busy) {
         Job job;
         job.reload = false;
@@ -1486,7 +1551,7 @@ struct SettingsWindow::State {
       return;
     }
     if (busy) return;
-    if (id == reload_settings && HIWORD(command) == BN_CLICKED) { submit(Job{}); return; }
+    if (id == reload_settings && HIWORD(command) == BN_CLICKED) { if (surface == Surface::statistics) poll_statistics(); else submit(Job{}); return; }
     if (HIWORD(command) == BN_CLICKED &&
         (id == restart_service || id == open_data_directory || id == open_logs_directory)) {
       Job job;
@@ -1496,6 +1561,19 @@ struct SettingsWindow::State {
       return;
     }
     if (!snapshot) return;
+    auto statistics_change = statistics_form.command(command);
+    if (statistics_change.handled) {
+      if (!statistics_change.action) return;
+      if (!statistics_change.confirmation.empty()) {
+        const bool allowed = confirmation ? confirmation(window, L"打字统计", statistics_change.confirmation.c_str()) :
+            MessageBoxW(window, statistics_change.confirmation.c_str(), L"打字统计", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+        if (!allowed) { statistics_form.restore(); return; }
+      }
+      Job job;
+      job.reload = false; job.action = Job::Action::statistics;
+      job.credential = std::move(statistics_change.action); job.statistics_upload = statistics_change.upload;
+      submit(std::move(job)); return;
+    }
     auto community_change = community_form.command(command);
     if (community_change.handled) {
       if (!community_change.message.empty()) { SetWindowTextW(status, community_change.message.c_str()); return; }
@@ -1790,7 +1868,7 @@ struct SettingsWindow::State {
     }
     if (message == WM_DRAWITEM) {
       const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
-      if (draw && (self->theme_form.draw(*draw) || self->community_form.draw(*draw))) return TRUE;
+      if (draw && (self->theme_form.draw(*draw) || self->community_form.draw(*draw) || self->statistics_form.draw(*draw))) return TRUE;
       if (draw && draw->CtlID == appearance_preview) {
         RECT rect = draw->rcItem;
         const auto background = CreateSolidBrush(RGB(248, 248, 248));
@@ -1841,6 +1919,8 @@ struct SettingsWindow::State {
     if (!self) return DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
     case WM_CREATE: return self->controls() ? 0 : -1;
+    case WM_TIMER: if (wparam == 72) self->poll_statistics(); return 0;
+    case WM_ACTIVATE: if (LOWORD(wparam) != WA_INACTIVE) self->poll_statistics(); break;
     case WM_SIZE: self->layout(); return 0;
     case WM_GETMINMAXINFO: {
       auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
@@ -1873,7 +1953,7 @@ struct SettingsWindow::State {
       return 0;
     }
     case completed_message: self->complete(); return 0;
-    case WM_DESTROY: self->worker.reset(); PostQuitMessage(0); return 0;
+    case WM_DESTROY: KillTimer(hwnd, 72); self->worker.reset(); PostQuitMessage(0); return 0;
     case WM_NCDESTROY:
       SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
       self->window = nullptr;
@@ -1883,11 +1963,12 @@ struct SettingsWindow::State {
   }
 };
 
-SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker, CommunityTransport community_transport) : state_(std::make_unique<State>()) {
+SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker, CommunityTransport community_transport, CommunityTransport statistics_upload_transport) : state_(std::make_unique<State>()) {
   state_->file_picker = std::move(file_picker);
   state_->confirmation = std::move(confirmation);
   state_->folder_picker = std::move(folder_picker);
   state_->community_transport = std::move(community_transport);
+  state_->statistics_upload_transport = std::move(statistics_upload_transport);
 }
 
 SettingsWindow::~SettingsWindow() {
@@ -1919,7 +2000,8 @@ bool SettingsWindow::create(HINSTANCE instance) {
       WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
       state_->dip(900), state_->dip(720), nullptr, nullptr, instance, state_.get());
   if (!window) return false;
-  state_->worker = std::make_unique<Worker>(window, state_->community_transport);
+  state_->worker = std::make_unique<Worker>(window, state_->community_transport, state_->statistics_upload_transport);
+  SetTimer(window, 72, 5000, nullptr);
   return true;
 }
 

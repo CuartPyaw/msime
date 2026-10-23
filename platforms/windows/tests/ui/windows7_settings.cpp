@@ -3,6 +3,7 @@
 #include "../../settings/win7/ThemeData.h"
 #include "../../settings/win7/CommunitySkinData.h"
 #include "../../settings/win7/ControlText.h"
+#include "../../settings/win7/StatisticsData.h"
 #include "../../settings/InputSettingsModel.h"
 #include "../../../../shared/contracts/msime_edition.h"
 
@@ -189,6 +190,9 @@ int main() {
   unsigned installs = 0;
   const DWORD ui_thread = GetCurrentThreadId();
   std::vector<Json> community_calls;
+  bool allow_statistics = false, statistics_upload_enabled = false, fail_statistics_upload = false;
+  unsigned statistics_confirmations = 0;
+  std::vector<Json> statistics_upload_calls;
   const std::string synthetic_id = "00000000-0000-4000-8000-000000000001";
   const std::string other_id = "00000000-0000-4000-8000-000000000002";
   Json community_item{{"id", synthetic_id}, {"package_id", "synthetic-light"}, {"name", "合成社区皮肤"},
@@ -213,6 +217,9 @@ int main() {
     return file;
   }, [&](HWND owner, const wchar_t* title, const wchar_t* text) {
     assert(IsWindow(owner));
+    if (std::wstring_view(title) == L"打字统计") {
+      assert(text && *text); ++statistics_confirmations; return allow_statistics;
+    }
     if (std::wstring_view(title) == L"社区皮肤") {
       assert(text && *text); ++community_confirmations; return allow_community;
     }
@@ -267,6 +274,19 @@ int main() {
       assert(action.at("id").get<std::string>().size() == 36); value = community_item;
     } else { assert(false); }
     return Json{{"ok", true}, {"value", value}}.dump();
+  }, [&](const std::string& body) {
+    assert(GetCurrentThreadId() != ui_thread);
+    const auto request = Json::parse(body);
+    const auto action = request.at("action");
+    assert(action.at("statistics_directory") == temporary.path.u8string());
+    statistics_upload_calls.push_back(action);
+    const auto operation = action.at("operation").get<std::string>();
+    assert(operation == "typing_upload" || operation == "typing_upload_set" || operation == "typing_upload_status");
+    if (operation == "typing_upload_set") {
+      statistics_upload_enabled = action.at("enabled").get<bool>();
+      if (fail_statistics_upload) return Json{{"ok", false}, {"error", "account_unavailable"}}.dump();
+    }
+    return Json{{"ok", true}, {"value", {{"enabled", statistics_upload_enabled}, {"signed_in", true}, {"last_upload_ms", nullptr}}}}.dump();
   });
   assert(window.create(GetModuleHandleW(nullptr)));
   const HWND host = window.handle();
@@ -1504,7 +1524,134 @@ int main() {
   assert(store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
   community_click(community_local);
   assert(SendMessageW(GetDlgItem(host, page_selector), CB_GETCURSEL, 0, 0) == 8);
+  // 统计由正式共享接口读写合成状态；云端只注入合成响应，不访问账号。
+  const auto statistics_revision = store.load().snapshot->revision();
+  const auto statistics_call = [&](const Json& action) {
+    return theme_data::call(msime_client_typing_statistics, {{"directory", temporary.path.u8string()}, {"action", action}});
+  };
+  const auto statistics_value = [&] { return theme_data::value(statistics_call({{"operation", "load"}})).value(); };
+  select_page(10);
+  assert(statistics_upload_calls.size() == 1);
+  assert(SendMessageW(GetDlgItem(body, statistics_enabled), BM_GETCHECK, 0, 0) == BST_UNCHECKED);
+  const auto statistics_click = [&](int id) {
+    SendMessageW(GetDlgItem(body, id), BM_CLICK, 0, 0);
+    pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+  };
+  statistics_click(statistics_enabled);
+  assert(statistics_value().at("enabled") == true);
+  const auto today = statistics_data::model::day_key(statistics_data::local_day());
+  const auto old_day = statistics_data::model::day_key(statistics_data::model::shift(statistics_data::local_day(), -400));
+  assert(theme_data::value(statistics_call({{"operation", "record"}, {"text", "合成abcdef123!"}, {"source", "quanpin"}, {"day", today}, {"hour", 10}})));
+  assert(theme_data::value(statistics_call({{"operation", "record"}, {"text", "合成旧日"}, {"source", "quanpin"}, {"day", old_day}})));
+  assert(theme_data::value(statistics_call({{"operation", "record_keys"}, {"day", today}, {"keys", {{"KeyA", 4}, {"Space", 2}}}})));
+  {
+    // 活跃时长由输入会话采样；合成磁盘快照继续经正式读取校验与页面派生。
+    const auto file_path = temporary.path / L"typing-statistics.json";
+    std::ifstream input(file_path, std::ios::binary);
+    auto fixture = Json::parse(input); input.close();
+    fixture["dailyActiveMs"][today] = 120000;
+    std::ofstream output(file_path, std::ios::binary | std::ios::trunc); output << fixture.dump(); assert(output.good());
+  }
+  SendMessageW(host, WM_TIMER, 72, 0);
+  pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+  assert(control_text::read(GetDlgItem(body, statistics_chart_text))->find("4") != std::string::npos);
+  assert(SendMessageW(GetDlgItem(body, statistics_days), LB_GETCOUNT, 0, 0) == 2);
+  const auto statistics_dc = CreateCompatibleDC(nullptr);
+  void* statistics_bits = nullptr;
+  const auto statistics_bitmap = CreateDIBSection(statistics_dc, &preview_info, DIB_RGB_COLORS, &statistics_bits, nullptr, 0);
+  assert(statistics_dc && statistics_bitmap && statistics_bits);
+  const auto old_statistics_bitmap = SelectObject(statistics_dc, statistics_bitmap);
+  const auto statistics_pixels = [&](int control = statistics_chart) {
+    DRAWITEMSTRUCT drawing{};
+    drawing.CtlType = ODT_STATIC; drawing.CtlID = control; drawing.hwndItem = GetDlgItem(body, control);
+    drawing.hDC = statistics_dc; drawing.rcItem = RECT{0,0,600,228};
+    assert(SendMessageW(body, WM_DRAWITEM, control, reinterpret_cast<LPARAM>(&drawing)));
+    unsigned colored = 0;
+    for (int y = 0; y < 228; ++y) for (int x = 0; x < 600; ++x)
+      if (GetPixel(statistics_dc, x, y) == RGB(25,167,141)) ++colored;
+    return colored;
+  };
+  assert(statistics_pixels() > 100);
+  assert(statistics_pixels(statistics_calendar) > 100);
+  assert(statistics_pixels(statistics_speed) > 100);
+  SendMessageW(GetDlgItem(body, statistics_chart_kind), CB_SETCURSEL, 1, 0);
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(statistics_chart_kind, CBN_SELCHANGE), reinterpret_cast<LPARAM>(GetDlgItem(body, statistics_chart_kind)));
+  assert(statistics_pixels() > 100);
+  SelectObject(statistics_dc, old_statistics_bitmap); DeleteObject(statistics_bitmap); DeleteDC(statistics_dc);
+  const auto stats_count_before_view = statistics_value().at("total").get<uint64_t>();
+  const auto upload_count_before_view = statistics_upload_calls.size();
+  for (int chart = 0; chart < 6; ++chart) {
+    const auto combo = GetDlgItem(body, statistics_chart_kind);
+    SendMessageW(combo, CB_SETCURSEL, chart, 0);
+    SendMessageW(body, WM_COMMAND, MAKEWPARAM(statistics_chart_kind, CBN_SELCHANGE), reinterpret_cast<LPARAM>(combo));
+    assert(IsWindowEnabled(language));
+  }
+  assert(statistics_upload_calls.size() == upload_count_before_view && statistics_value().at("total") == stats_count_before_view);
+  SendMessageW(GetDlgItem(body, statistics_days), LB_SETCURSEL, 0, 0);
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(statistics_days, LBN_SELCHANGE), reinterpret_cast<LPARAM>(GetDlgItem(body, statistics_days)));
+  assert(control_text::read(GetDlgItem(body, statistics_day_detail))->find(today) != std::string::npos);
+  const auto retention = GetDlgItem(body, statistics_retention);
+  SendMessageW(retention, CB_SETCURSEL, 1, 0);
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(statistics_retention, CBN_SELCHANGE), reinterpret_cast<LPARAM>(retention));
+  assert(statistics_value().at("days").contains(old_day));
+  assert(SendMessageW(retention, CB_GETCURSEL, 0, 0) == 0);
+  allow_statistics = true;
+  SendMessageW(retention, CB_SETCURSEL, 1, 0);
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(statistics_retention, CBN_SELCHANGE), reinterpret_cast<LPARAM>(retention));
+  pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+  assert(!statistics_value().at("days").contains(old_day) && statistics_value().at("days").contains(today));
+  assert(statistics_value().at("retention") == "30d");
+  const auto confirmations_before_extending = statistics_confirmations;
+  SendMessageW(retention, CB_SETCURSEL, 2, 0);
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(statistics_retention, CBN_SELCHANGE), reinterpret_cast<LPARAM>(retention));
+  pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+  assert(statistics_value().at("retention") == "90d" && statistics_confirmations == confirmations_before_extending);
+  allow_statistics = false;
+  auto upload_count = statistics_upload_calls.size();
+  statistics_click(statistics_upload);
+  assert(statistics_upload_calls.size() == upload_count && SendMessageW(GetDlgItem(body, statistics_upload), BM_GETCHECK, 0, 0) == BST_UNCHECKED);
+  allow_statistics = true;
+  fail_statistics_upload = true;
+  statistics_click(statistics_upload);
+  assert(statistics_upload_enabled);
+  assert(statistics_upload_calls.back().at("operation") == "typing_upload_status");
+  assert(SendMessageW(GetDlgItem(body, statistics_upload), BM_GETCHECK, 0, 0) == BST_CHECKED);
+  assert(control_text::read(GetDlgItem(body, statistics_upload_notice))->find("已打开上传") != std::string::npos);
+  fail_statistics_upload = false;
+  statistics_click(statistics_upload);
+  assert(!statistics_upload_enabled);
+  allow_statistics = false;
+  statistics_click(statistics_reset);
+  assert(statistics_value().at("total") == stats_count_before_view - 4);
+  allow_statistics = true;
+  statistics_click(statistics_reset);
+  assert(statistics_value().at("total") == 0 && statistics_value().at("days").empty());
+  assert(statistics_confirmations >= 6);
+  statistics_click(statistics_enabled);
+  assert(statistics_value().at("enabled") == false);
+  const auto statistics_file = temporary.path / L"typing-statistics.json";
+  std::string statistics_document;
+  {
+    std::ifstream input(statistics_file, std::ios::binary);
+    statistics_document.assign(std::istreambuf_iterator<char>(input), {});
+    assert(statistics_document.find("合成abcdef123!") == std::string::npos);
+    std::ofstream broken(statistics_file, std::ios::binary | std::ios::trunc); broken << "{synthetic-broken"; assert(broken.good());
+  }
+  SendMessageW(host, WM_TIMER, 72, 0);
+  pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+  assert(control_text::read(GetDlgItem(body, statistics_notice))->find("不会被自动重置") != std::string::npos);
+  {
+    std::ifstream input(statistics_file, std::ios::binary);
+    assert(std::string(std::istreambuf_iterator<char>(input), {}) == "{synthetic-broken");
+    input.close();
+    std::ofstream restore(statistics_file, std::ios::binary | std::ios::trunc); restore << statistics_document; assert(restore.good());
+  }
+  assert(store.load().snapshot->revision() == statistics_revision);
+  assert(store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
   select_page(0);
+  upload_count = statistics_upload_calls.size();
+  SendMessageW(host, WM_TIMER, 72, 0);
+  assert(statistics_upload_calls.size() == upload_count);
   TabCtrl_SetCurSel(tabs, 0);
   SendMessageW(host, WM_NOTIFY, page_tabs, reinterpret_cast<LPARAM>(&notification));
   SendMessageW(language, CB_SETCURSEL, 1, 0);

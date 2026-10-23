@@ -66,6 +66,10 @@ enum ControlId {
   community_publish_name, community_publish_description, community_publish_visibility,
   community_publish_category, community_publish_license, community_license_save,
   community_preview_add, community_pack_check, community_publish_agree, community_publish,
+  statistics_enabled = 1800, statistics_privacy, statistics_retention, statistics_upload,
+  statistics_upload_notice, statistics_overview, statistics_scope, statistics_chart_kind,
+  statistics_chart, statistics_chart_text, statistics_days, statistics_day_detail,
+  statistics_notice, statistics_reset, statistics_calendar, statistics_speed,
 };
 
 class SettingsWindow {
@@ -77,7 +81,7 @@ public:
   // 可注入社区传输以验证真实窗口与 worker；默认仍调用共享 Rust 服务。
   using CommunityTransport = std::function<std::string(const std::string&)>;
   explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {}, FolderPicker folder_picker = {},
-      CommunityTransport community_transport = {});
+      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;
