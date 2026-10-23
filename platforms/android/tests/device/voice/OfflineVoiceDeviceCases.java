@@ -27,6 +27,7 @@ final class OfflineVoiceDeviceCases {
     private final String scenario;
     private volatile Activity activity;
     private volatile Throwable failure;
+    private final java.util.List<String> stages = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     OfflineVoiceDeviceCases(Instrumentation instrumentation, String scenario) {
         this.instrumentation = instrumentation;
@@ -36,6 +37,18 @@ final class OfflineVoiceDeviceCases {
     void onCreated(Activity created) {
         if (!created.getClass().getName().equals("app.msime.android.OfflineVoiceRecognitionActivity")) return;
         activity = created;
+        if (scenario.equals("offline-asr")) {
+            try {
+                var field = created.getClass().getDeclaredField("recognizer");
+                field.setAccessible(true);
+                Object recognizer = field.get(created);
+                java.util.function.Consumer<Object> diagnostics = kind -> stages.add(kind.toString());
+                recognizer.getClass().getMethod("diagnostics", java.util.function.Consumer.class)
+                    .invoke(recognizer, diagnostics);
+            } catch (ReflectiveOperationException error) {
+                failure = error;
+            }
+        }
         if (!scenario.equals("offline-result") && !scenario.equals("offline-cancel")) return;
         try {
             var deliver = created.getClass().getDeclaredMethod("returnResult", String.class);
@@ -120,6 +133,12 @@ final class OfflineVoiceDeviceCases {
                 android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             throw new AssertionError("Revoke RECORD_AUDIO before testing permission-stage Home");
         }
+        if (scenario.equals("offline-permission-home")) {
+            var automation = instrumentation.getUiAutomation();
+            var info = automation.getServiceInfo();
+            info.flags |= android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+            automation.setServiceInfo(info);
+        }
         AtomicInteger deliveries = new AtomicInteger();
         AtomicReference<Intent> returned = new AtomicReference<>();
         AtomicInteger code = new AtomicInteger();
@@ -172,7 +191,12 @@ final class OfflineVoiceDeviceCases {
             } else if (!scenario.equals("offline-result") && !scenario.equals("offline-cancel")) {
                 throw new AssertionError("Unknown offline scenario");
             }
-            await(() -> deliveries.get() > 0, "No PendingIntent result");
+            try {
+                await(() -> deliveries.get() > 0, "No PendingIntent result");
+            } catch (AssertionError timeout) {
+                if (!scenario.equals("offline-asr")) throw timeout;
+                throw new AssertionError(timeout.getMessage() + "; active methods=" + asrWorkerMethods());
+            }
             instrumentation.waitForIdleSync();
             if (failure != null) throw new AssertionError("Activity callback failed", failure);
             if (deliveries.get() != 1) throw new AssertionError("Result delivered more than once");
@@ -211,12 +235,16 @@ final class OfflineVoiceDeviceCases {
         level.setAccessible(true);
         var status = activity.getClass().getDeclaredField("status");
         status.setAccessible(true);
+        var failed = activity.getClass().getDeclaredField("failed");
+        failed.setAccessible(true);
         AtomicBoolean audible = new AtomicBoolean();
         AtomicBoolean greeting = new AtomicBoolean();
+        AtomicBoolean refused = new AtomicBoolean();
         long deadline = SystemClock.uptimeMillis() + 50000;
-        while (!greeting.get() && SystemClock.uptimeMillis() < deadline && !finished()) {
+        while (!greeting.get() && !refused.get() && SystemClock.uptimeMillis() < deadline && !finished()) {
             instrumentation.runOnMainSync(() -> {
                 try {
+                    refused.set(failed.getBoolean(activity));
                     if (level.getFloat(view) > .02f) audible.set(true);
                     String text = ((android.widget.TextView) status.get(activity)).getText().toString();
                     if (text.toLowerCase(java.util.Locale.ROOT).contains("hello")) greeting.set(true);
@@ -226,7 +254,9 @@ final class OfflineVoiceDeviceCases {
             });
             SystemClock.sleep(25);
         }
-        if (!audible.get()) throw new AssertionError("Synthetic microphone audio did not drive the listening signal");
+        if (failure != null) throw new AssertionError("ASR diagnostics unavailable", failure);
+        if (refused.get()) throw new AssertionError("Product rejected local ASR at stages " + stages);
+        if (!audible.get()) throw new AssertionError("Synthetic microphone audio did not drive the listening signal; stages " + stages);
         if (!greeting.get()) throw new AssertionError("Real model did not produce the synthetic partial greeting");
         var done = activity.getClass().getDeclaredField("done");
         done.setAccessible(true);
@@ -245,9 +275,37 @@ final class OfflineVoiceDeviceCases {
         return activity != null && (activity.isFinishing() || activity.isDestroyed());
     }
 
+    /** 仅记录固定类的方法名，区分录音阻塞与原生解码，不记录线程名或运行时参数。 */
+    private static java.util.Set<String> asrWorkerMethods() {
+        var methods = new java.util.TreeSet<String>();
+        for (StackTraceElement[] trace : Thread.getAllStackTraces().values()) {
+            for (StackTraceElement frame : trace) {
+                if (java.util.Set.of("app.msime.android.LocalAsrRecognizer", "app.msime.android.NativeClient",
+                        "android.media.AudioRecord").contains(frame.getClassName())) {
+                    methods.add(frame.getClassName() + "." + frame.getMethodName());
+                }
+            }
+        }
+        return methods;
+    }
+
     @SuppressWarnings("deprecation") // API 28 的辅助功能节点仍需显式回收。
     private boolean permissionVisible() {
-        var root = instrumentation.getUiAutomation().getRootInActiveWindow();
+        var automation = instrumentation.getUiAutomation();
+        boolean visible = false;
+        // 权限弹窗不一定成为辅助功能的活动窗口，按实际可交互窗口检查系统包。
+        for (var window : automation.getWindows()) {
+            try {
+                visible |= permissionRoot(window.getRoot());
+            } finally {
+                window.recycle();
+            }
+        }
+        return visible || permissionRoot(automation.getRootInActiveWindow());
+    }
+
+    @SuppressWarnings("deprecation") // API 28 的辅助功能节点仍需显式回收。
+    private static boolean permissionRoot(android.view.accessibility.AccessibilityNodeInfo root) {
         if (root == null) return false;
         try {
             String owner = String.valueOf(root.getPackageName());
