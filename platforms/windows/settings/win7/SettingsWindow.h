@@ -119,12 +119,13 @@ public:
     CommunityTransport relay;
   };
   explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {}, FolderPicker folder_picker = {},
-      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {}, ClipboardServices clipboard = {}, CloudClipboardServices cloud_clipboard = {}, CommunityTransport dictionary_transport = {});
+      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {}, ClipboardServices clipboard = {}, CloudClipboardServices cloud_clipboard = {}, CommunityTransport dictionary_transport = {}, CommunityTransport update_transport = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;
   bool create(HINSTANCE instance);
   int run(int show);
+  bool open_route(std::string_view route);
   HWND handle() const;
 
 private:

@@ -494,3 +494,102 @@ fn a_request_document_takes_only_the_known_fields() {
     }))
     .is_err());
 }
+
+#[test]
+fn windows7_only_offers_its_own_edition_and_compatible_installer() {
+    let compatible = release(
+        "windows7-v1.2.0",
+        json!([
+            { "name": "MetasequoiaIME-Full_Windows7_Setup_v1.2.0.exe", "digest": digest('a') },
+            { "name": "MetasequoiaIME-Wubi_Windows7_Setup_v1.2.0.exe", "digest": digest('b') },
+            { "name": "MetasequoiaIME-Full_Setup_v1.2.0.exe", "digest": digest('c') },
+            { "name": "MetasequoiaIME-Full_Windows7_Setup_v1.2.0.exe.sha256" }
+        ]),
+    );
+    let releases = [windows_release(), compatible.clone()];
+    for architecture in [Some("x86"), Some("x86_64"), None] {
+        assert_eq!(
+            pick(&releases, "windows7", None, architecture),
+            chosen(
+                "MetasequoiaIME-Full_Windows7_Setup_v1.2.0.exe",
+                Some(hex('a'))
+            )
+        );
+    }
+    assert_eq!(
+        pick(&releases, "windows7", Some("wubi"), None),
+        chosen(
+            "MetasequoiaIME-Wubi_Windows7_Setup_v1.2.0.exe",
+            Some(hex('b'))
+        )
+    );
+    assert_eq!(pick(&releases, "windows7", Some("pinyin"), None), None);
+    assert_eq!(pick(&[windows_release()], "windows7", None, None), None);
+    assert_eq!(pick(&[compatible], "windows", None, None), None);
+    assert_eq!(
+        pick(&releases, "windows", None, None),
+        chosen("MetasequoiaIME-Full_Setup_v1.2.0.exe", Some(hex('a')))
+    );
+}
+
+#[test]
+fn windows7_skips_missing_ambiguous_and_unpublished_installers() {
+    let name = "MetasequoiaIME-Full_Windows7_Setup_v1.2.0.exe";
+    let valid = release("windows7-v1.2.0", json!([{ "name": name }]));
+    let missing = release(
+        "windows7-v9.0.0",
+        json!([{ "name": "MetasequoiaIME-Full_Setup_v9.0.0.exe" }]),
+    );
+    let duplicate_name = "MetasequoiaIME-Full_Windows7_Setup_v8.0.0.exe";
+    let duplicate = release(
+        "windows7-v8.0.0",
+        json!([{ "name": duplicate_name }, { "name": duplicate_name }]),
+    );
+    let mut prerelease = valid.clone();
+    prerelease["prerelease"] = json!(true);
+    let mut draft = valid.clone();
+    draft["draft"] = json!(true);
+    assert_eq!(
+        pick(
+            &[missing.clone(), duplicate.clone(), prerelease, draft],
+            "windows7",
+            None,
+            None
+        ),
+        None
+    );
+    assert_eq!(
+        pick(&[missing, duplicate, valid.clone()], "windows7", None, None),
+        chosen(name, None)
+    );
+    let request = UpdateCheckRequest {
+        platform: "windows7".into(),
+        current_version: "1.0.0".into(),
+        edition: None,
+        arch: None,
+    };
+    assert!(matches!(
+        evaluate_update(
+            serde_json::to_vec(&vec![valid]).unwrap().as_slice(),
+            &request
+        ),
+        Ok(UpdateCheck::Available(_))
+    ));
+}
+
+#[test]
+fn windows7_rejects_mismatched_release_pages_and_installer_versions() {
+    let wrong_version = release(
+        "windows7-v2.0.0",
+        json!([{ "name": "MetasequoiaIME-Full_Windows7_Setup_v1.0.0.exe" }]),
+    );
+    let mut wrong_page = release(
+        "windows7-v2.0.0",
+        json!([{ "name": "MetasequoiaIME-Full_Windows7_Setup_v2.0.0.exe" }]),
+    );
+    wrong_page["html_url"] = json!(format!("{PAGE}/tag/windows-v2.0.0"));
+    assert_eq!(
+        pick(&[wrong_version, wrong_page], "windows7", None, None),
+        None
+    );
+}
