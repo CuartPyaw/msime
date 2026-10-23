@@ -109,7 +109,8 @@ final class OfflineVoiceDeviceCases {
             "app.msime.android.test.OfflineVoiceCallerActivity")
             .putExtra(OfflineVoiceCallerActivity.REPORT, report)
             .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
-        try {
+        try (StorageBoundary storage = new StorageBoundary(context)) {
+            storage.prepare();
             instrumentation.runOnMainSync(() -> context.startActivity(launch));
             await(() -> activity != null, "External activity was not called by the fixture");
             await(() -> reports.get() > 0, "Standard Activity result did not reach the separate caller");
@@ -128,6 +129,7 @@ final class OfflineVoiceDeviceCases {
                 throw new AssertionError("Cancelled Activity result contains text");
             }
             if (!finished()) throw new AssertionError("Completed request is still visible");
+            storage.verify();
         } finally {
             context.unregisterReceiver(receiver);
             report.cancel();
@@ -139,6 +141,107 @@ final class OfflineVoiceDeviceCases {
                     while (stream.read(discard) != -1) { }
                 }
             }
+        }
+    }
+
+    /** 用同一 UID 的前台窗口观察剪贴板，并保护已有的语音待插入值。 */
+    private final class StorageBoundary implements java.io.Closeable {
+        private static final String SENTINEL = "synthetic offline boundary sentinel";
+        private final Context context;
+        private final java.util.List<Activity> homes = new java.util.ArrayList<>();
+        private Object store;
+        private Object saved;
+        private Class<?> storeType;
+        private android.content.ClipData originalClipboard;
+        private boolean clipboardSeeded;
+
+        StorageBoundary(Context context) { this.context = context; }
+
+        private void foreground() {
+            homes.add(instrumentation.startActivitySync(new Intent().setClassName(context,
+                "app.msime.android.home.HomeActivity")
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_MULTIPLE_TASK)));
+            instrumentation.waitForIdleSync();
+            await(() -> {
+                AtomicBoolean focus = new AtomicBoolean();
+                instrumentation.runOnMainSync(() -> focus.set(homes.get(homes.size() - 1).hasWindowFocus()));
+                return focus.get();
+            }, "Storage observer did not receive foreground focus");
+        }
+
+        void prepare() throws Exception {
+            foreground();
+            storeType = context.getClassLoader().loadClass("app.msime.android.VoiceResultStore");
+            store = storeType.getConstructor(java.nio.file.Path.class)
+                .newInstance(context.getFilesDir().toPath().resolve("voice-handoff"));
+            Object existing = storeType.getMethod("read", long.class).invoke(store, System.currentTimeMillis());
+            if (existing != null) {
+                // 中断的本用例可留下同一合成值；其它队列内容一律不覆盖。
+                Object text = existing.getClass().getMethod("text").invoke(existing);
+                if (!SENTINEL.equals(text)) throw new AssertionError("Dedicated device voice queue is not empty");
+                saved = existing;
+            } else {
+                saved = storeType.getMethod("save", String.class, long.class)
+                    .invoke(store, SENTINEL, System.currentTimeMillis());
+            }
+            instrumentation.runOnMainSync(() -> {
+                var clipboard = context.getSystemService(android.content.ClipboardManager.class);
+                originalClipboard = clipboard.getPrimaryClip();
+                clipboard.setPrimaryClip(android.content.ClipData.newPlainText("synthetic boundary", SENTINEL));
+                clipboardSeeded = true;
+                assertClipboard(clipboard);
+            });
+        }
+
+        void verify() throws Exception {
+            foreground();
+            Object observed = storeType.getMethod("read", long.class).invoke(store, System.currentTimeMillis());
+            if (!saved.equals(observed)) throw new AssertionError("External voice changed the IME result queue");
+            instrumentation.runOnMainSync(() -> assertClipboard(
+                context.getSystemService(android.content.ClipboardManager.class)));
+        }
+
+        private void assertClipboard(android.content.ClipboardManager clipboard) {
+            var clip = clipboard.getPrimaryClip();
+            if (clip == null || clip.getItemCount() != 1 || !SENTINEL.contentEquals(clip.getItemAt(0).getText()))
+                throw new AssertionError("External voice changed the system clipboard");
+        }
+
+        @Override public void close() throws java.io.IOException {
+            Throwable failure = null;
+            try {
+                if (clipboardSeeded) {
+                    foreground();
+                    instrumentation.runOnMainSync(() -> {
+                        var clipboard = context.getSystemService(android.content.ClipboardManager.class);
+                        if (originalClipboard == null) clipboard.clearPrimaryClip();
+                        else clipboard.setPrimaryClip(originalClipboard);
+                    });
+                }
+            } catch (Exception | AssertionError error) {
+                failure = error;
+            }
+            try {
+                if (saved != null) {
+                    java.util.UUID id = (java.util.UUID) saved.getClass().getMethod("id").invoke(saved);
+                    Object consumed = storeType.getMethod("consume", java.util.UUID.class, long.class)
+                        .invoke(store, id, System.currentTimeMillis());
+                    if (!SENTINEL.equals(consumed)) throw new AssertionError("Synthetic queue cleanup failed");
+                }
+            } catch (Exception | AssertionError error) {
+                if (failure == null) failure = error;
+                else failure.addSuppressed(error);
+            }
+            for (Activity home : homes) {
+                try {
+                    instrumentation.runOnMainSync(home::finish);
+                } catch (RuntimeException | AssertionError error) {
+                    if (failure == null) failure = error;
+                    else failure.addSuppressed(error);
+                }
+            }
+            if (failure instanceof AssertionError error) throw error;
+            if (failure != null) throw new java.io.IOException("Synthetic storage cleanup failed", failure);
         }
     }
 
