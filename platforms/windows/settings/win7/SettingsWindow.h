@@ -98,6 +98,8 @@ enum ControlId {
   dictionary_entry_source, dictionary_key, dictionary_value, dictionary_weight,
   dictionary_new, dictionary_save, dictionary_delete, dictionary_format,
   dictionary_import, dictionary_export, dictionary_reset, dictionary_notice,
+  dictionary_updates_enabled = 2250, dictionary_updates_version, dictionary_updates_refresh,
+  dictionary_updates_check, dictionary_updates_rollback, dictionary_updates_notice,
 };
 
 class SettingsWindow {

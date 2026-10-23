@@ -4,6 +4,8 @@
 #include "../../settings/win7/ControlText.h"
 #include "../../settings/win7/DictionaryData.h"
 #include <cassert>
+#include <atomic>
+#include <mutex>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -67,10 +69,32 @@ int main(int argc, char** argv) {
   bool allow = false, cancel_picker = false, reject = false, corrupt_list = false;
   unsigned picks = 0;
   std::vector<Json> calls;
+  std::mutex calls_mutex;
+  std::optional<Json> synthetic_updates;
+  bool bad_updates = false, scheduler_test = false;
+  unsigned automatic_calls = 0;
+  HWND scheduler_host = nullptr;
+  std::atomic<bool> block_updates{false}, update_entered{false};
+  HANDLE update_gate = CreateEventW(nullptr, TRUE, FALSE, nullptr); assert(update_gate);
   const DWORD ui_thread = GetCurrentThreadId();
   const auto backend = [&](const std::string& body) {
     assert(GetCurrentThreadId() != ui_thread);
-    auto request = Json::parse(body); calls.push_back(request.at("action"));
+    auto request = Json::parse(body);
+    { std::lock_guard<std::mutex> lock(calls_mutex); calls.push_back(request.at("action")); }
+    if (request.at("action").at("operation") == "updates") {
+      if (request.at("action").at("command") == "automatic") {
+        assert(scheduler_test && scheduler_host); ++automatic_calls;
+        assert(PostMessageW(scheduler_host, WM_CLOSE, 0, 0));
+      }
+      if (block_updates) { update_entered = true; assert(WaitForSingleObject(update_gate, 10000) == WAIT_OBJECT_0); }
+      if (bad_updates) return Json{{"ok", true}, {"value", {{"enabled", "invalid"}}}}.dump();
+      if (synthetic_updates) {
+        const auto command = request.at("action").at("command");
+        if (command == "check") (*synthetic_updates)["phase"] = "checking";
+        if (command == "rollback") { (*synthetic_updates)["enabled"] = false; (*synthetic_updates)["pending_restart"] = true; }
+        return Json{{"ok", true}, {"value", *synthetic_updates}}.dump();
+      }
+    }
     assert(request.at("options") == options);
     if (reject) return dictionary_data::failure("dictionary_busy").dump();
     if (corrupt_list && (request.at("action").at("operation") == "list" || request.at("action").at("operation") == "browse"))
@@ -88,6 +112,8 @@ int main(int argc, char** argv) {
   const auto selector = GetDlgItem(host, page_selector);
   SendMessageW(selector, CB_SETCURSEL, 13, 0);
   SendMessageW(host, WM_COMMAND, MAKEWPARAM(page_selector, CBN_SELCHANGE), reinterpret_cast<LPARAM>(selector)); wait();
+  const auto wait_updates = [&] { pump([&] { return IsWindowEnabled(GetDlgItem(body, dictionary_updates_refresh)) != FALSE; }); };
+  wait_updates();
   const auto click = [&](int id) { SendMessageW(GetDlgItem(body, id), BM_CLICK, 0, 0); wait(); };
   const auto set = [&](int id, const wchar_t* value) { assert(SetWindowTextW(GetDlgItem(body, id), value)); };
   const auto text = [&](int id) { return control_text::read(GetDlgItem(body, id)).value(); };
@@ -154,8 +180,50 @@ int main(int argc, char** argv) {
   click(dictionary_delete); assert(SendMessageW(GetDlgItem(body, dictionary_entries), LB_GETCOUNT, 0, 0) == 0);
   click(dictionary_reset); assert(SendMessageW(GetDlgItem(body, dictionary_entries), LB_GETCOUNT, 0, 0) == 1);
   select(0); assert(text(dictionary_weight) == "321");
+  // 配置开关走真实隔离共享存储；检查与回滚只注入状态，测试不下载真实资源。
+  const auto update_click = [&](int id) { SendMessageW(GetDlgItem(body, id), BM_CLICK, 0, 0); wait_updates(); };
+  assert(SendMessageW(GetDlgItem(body, dictionary_updates_enabled), BM_GETCHECK, 0, 0) == BST_CHECKED);
+  update_click(dictionary_updates_enabled);
+  assert(SendMessageW(GetDlgItem(body, dictionary_updates_enabled), BM_GETCHECK, 0, 0) == BST_UNCHECKED);
+  update_click(dictionary_updates_refresh);
+  assert(SendMessageW(GetDlgItem(body, dictionary_updates_enabled), BM_GETCHECK, 0, 0) == BST_UNCHECKED);
+  synthetic_updates = Json{{"enabled", false}, {"version", "synthetic-v1"}, {"phase", "current"}, {"checked_at", 0},
+      {"downloaded_bytes", 0}, {"total_bytes", 0}, {"error", nullptr}, {"can_rollback", true}, {"pending_restart", false}};
+  update_click(dictionary_updates_refresh);
+  assert(text(dictionary_updates_version).find("synthetic-v1") != std::string::npos);
+  update_click(dictionary_updates_check);
+  assert(!IsWindowEnabled(GetDlgItem(body, dictionary_updates_check)) && text(dictionary_updates_notice).find("正在检查") != std::string::npos);
+  (*synthetic_updates)["phase"] = "downloading"; (*synthetic_updates)["downloaded_bytes"] = 1048577; (*synthetic_updates)["total_bytes"] = 2097153;
+  update_click(dictionary_updates_refresh); assert(text(dictionary_updates_notice).find("1 / 3 MiB") != std::string::npos);
+  (*synthetic_updates)["phase"] = "current"; (*synthetic_updates)["pending_restart"] = true;
+  update_click(dictionary_updates_refresh); assert(text(dictionary_updates_notice).find("下次启动") != std::string::npos);
+  (*synthetic_updates)["phase"] = "failed"; (*synthetic_updates)["error"] = "synthetic_failure";
+  update_click(dictionary_updates_refresh); assert(text(dictionary_updates_notice).find("继续使用原词库") != std::string::npos);
+  (*synthetic_updates)["phase"] = "current"; (*synthetic_updates)["error"] = nullptr; (*synthetic_updates)["pending_restart"] = false;
+  update_click(dictionary_updates_refresh);
+  allow = false; count = calls.size(); update_click(dictionary_updates_rollback); assert(calls.size() == count);
+  allow = true; update_click(dictionary_updates_rollback);
+  assert(calls.back().at("command") == "rollback" && text(dictionary_updates_notice).find("下次启动") != std::string::npos);
+  bad_updates = true; update_click(dictionary_updates_refresh);
+  assert(!IsWindowEnabled(GetDlgItem(body, dictionary_updates_enabled)) && !IsWindowEnabled(GetDlgItem(body, dictionary_updates_check)));
+  bad_updates = false; SendMessageW(host, WM_TIMER, 74, 0); wait_updates();
+  assert(calls.back().at("command") == "status");
+  // 更新查询阻塞时，词条草稿、焦点与真正保存都不能被进度轮询打断。
+  choose(dictionary_kind, 4); click(dictionary_new);
+  set(dictionary_key, L"parallel"); set(dictionary_value, L"合成并行草稿");
+  block_updates = true;
+  SendMessageW(GetDlgItem(body, dictionary_updates_refresh), BM_CLICK, 0, 0);
+  pump([&] { return update_entered.load(); });
+  assert(IsWindowEnabled(GetDlgItem(body, dictionary_save)) && text(dictionary_value) == "合成并行草稿");
+  click(dictionary_save);
+  assert(text(dictionary_notice).find("操作已完成") != std::string::npos);
+  assert(SetEvent(update_gate)); wait_updates(); block_updates = false;
+  set(dictionary_query, L"parallel"); click(dictionary_search);
+  select(0); assert(text(dictionary_value) == "合成并行草稿");
+  assert(CloseHandle(update_gate));
   // 退出前校验测试全过程没有改变偏好默认值。
   assert(store.load().snapshot->revision() == snapshot.snapshot->revision());
-  DestroyWindow(host);
+  scheduler_test = true; scheduler_host = host;
+  assert(window.run(SW_HIDE) == 0 && automatic_calls == 1);
   std::puts("Windows 7 dictionary: actual shared store, HWND edits, imports, export, receipts and read-only resources passed");
 }

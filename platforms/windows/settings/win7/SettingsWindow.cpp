@@ -13,6 +13,7 @@
 #include "CloudClipboardForm.h"
 #include "CloudClipboardWorker.h"
 #include "DictionaryForm.h"
+#include "DictionaryUpdatesForm.h"
 #include "ThemeForm.h"
 #include "CommunitySkinForm.h"
 #include "StatisticsForm.h"
@@ -334,8 +335,8 @@ struct Completion {
 class Worker {
 public:
   explicit Worker(HWND window, SettingsWindow::CommunityTransport transport, SettingsWindow::CommunityTransport statistics_upload_transport,
-      SettingsWindow::CommunityTransport account_transport, SettingsWindow::CommunityTransport clipboard_transport, SettingsWindow::CloudClipboardServices cloud_clipboard_services, SettingsWindow::CommunityTransport dictionary_transport) : window_(window), community_transport_(std::move(transport)),
-      statistics_upload_transport_(std::move(statistics_upload_transport)), account_transport_(std::move(account_transport)), clipboard_transport_(std::move(clipboard_transport)), cloud_clipboard_services_(std::move(cloud_clipboard_services)), dictionary_transport_(std::move(dictionary_transport)), thread_([this] { run(); }) {}
+      SettingsWindow::CommunityTransport account_transport, SettingsWindow::CommunityTransport clipboard_transport, SettingsWindow::CloudClipboardServices cloud_clipboard_services, SettingsWindow::CommunityTransport dictionary_transport, bool wait_for_work = false) : window_(window), community_transport_(std::move(transport)),
+      statistics_upload_transport_(std::move(statistics_upload_transport)), account_transport_(std::move(account_transport)), clipboard_transport_(std::move(clipboard_transport)), cloud_clipboard_services_(std::move(cloud_clipboard_services)), dictionary_transport_(std::move(dictionary_transport)), wait_for_work_(wait_for_work), thread_([this] { run(); }) {}
   ~Worker() {
     {
       std::lock_guard<std::mutex> guard(lock_);
@@ -666,8 +667,14 @@ private:
   }
 
   void run() {
-    const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     Job job;
+    if (wait_for_work_) {
+      std::unique_lock<std::mutex> guard(lock_);
+      ready_.wait(guard, [this] { return stopping_ || pending_.has_value(); });
+      if (stopping_) return;
+      job = std::move(*pending_); pending_.reset();
+    }
+    const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     for (;;) {
       Result result;
       // 文件系统、JSON 与线程边界统一转换为可见失败，异常不能越过线程入口。
@@ -761,6 +768,7 @@ private:
   SettingsWindow::CommunityTransport dictionary_transport_;
   std::optional<Json> statistics_response_;
   std::optional<Json> statistics_upload_response_;
+  bool wait_for_work_ = false;
   std::thread thread_;
 };
 
@@ -816,6 +824,8 @@ struct SettingsWindow::State {
   bool com_initialized = false;
   std::vector<Item> items;
   std::unique_ptr<Worker> worker;
+  std::unique_ptr<Worker> updates_worker;
+  bool updates_busy = false;
   std::optional<Snapshot> snapshot;
   FilePicker file_picker;
   CloudCandidateForm cloud_form;
@@ -830,6 +840,9 @@ struct SettingsWindow::State {
   ClipboardForm clipboard_form;
   CloudClipboardForm cloud_clipboard_form;
   DictionaryForm dictionary_form;
+  DictionaryUpdatesForm dictionary_updates_form;
+  bool automatic_updates = false, automatic_updates_pending = false;
+  ULONGLONG next_automatic_update = 0;
   ThemeForm theme_form;
   CommunitySkinForm community_form;
   CommunityTransport community_transport;
@@ -965,6 +978,9 @@ struct SettingsWindow::State {
     dictionary_height = dictionary_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) {
       return surface_row(Surface::dictionary, type, text, style, id, top, height);
     });
+    dictionary_height = dictionary_updates_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) {
+      return surface_row(Surface::dictionary, type, text, style, id, top, height);
+    }, dictionary_height);
     enable(false);
     layout();
     return !failed;
@@ -1294,6 +1310,7 @@ struct SettingsWindow::State {
     clipboard_form.enable(enabled);
     cloud_clipboard_form.enable(enabled);
     dictionary_form.enable(enabled);
+    dictionary_updates_form.enable(enabled && !updates_busy);
     theme_form.enable(enabled);
     community_form.enable(enabled);
     statistics_form.enable(enabled);
@@ -1613,6 +1630,13 @@ struct SettingsWindow::State {
   }
 
   void complete() {
+    if (auto update = updates_worker->take()) {
+      updates_busy = false;
+      if (update->dictionary_response) dictionary_updates_form.completed(update->dictionary_response->at("response"));
+      else dictionary_updates_form.completed(Json());
+      dictionary_updates_form.enable(snapshot.has_value() && !busy);
+      if (automatic_updates_pending) poll_dictionary_updates(true);
+    }
     auto completed = worker->take();
     if (!completed) return;
     auto result = std::make_optional(std::move(completed->result));
@@ -1692,7 +1716,8 @@ struct SettingsWindow::State {
       cloud_clipboard_form.completed(*completed->credential_request, *completed->cloud_clipboard_response);
     if (completed->dictionary_response && completed->credential_request) {
       const auto& value = *completed->dictionary_response;
-      dictionary_form.completed(*completed->credential_request, value.at("response"));
+      if (completed->credential_request->value("operation", std::string{}) == "updates") dictionary_updates_form.completed(value.at("response"));
+      else dictionary_form.completed(*completed->credential_request, value.at("response"));
       if (value.contains("listing")) dictionary_form.completed(value.at("list_request"), value.at("listing"), true);
     }
     if (completed->statistics_upload_response) statistics_form.upload_completed(*completed->statistics_upload_response, completed->statistics_upload_changed);
@@ -1724,6 +1749,7 @@ struct SettingsWindow::State {
       Job job; job.reload = false; job.action = Job::Action::account; job.credential = std::move(account_followup);
       submit(std::move(job));
     }
+    if (automatic_updates_pending) poll_dictionary_updates(true);
   }
 
   void poll_statistics() {
@@ -1732,6 +1758,22 @@ struct SettingsWindow::State {
     job.reload = false; job.action = Job::Action::statistics;
     job.credential = Json{{"operation", "load"}};
     submit(std::move(job));
+  }
+
+  void submit_dictionary_update(Json request) {
+    if (updates_busy || !updates_worker) return;
+    updates_busy = true;
+    dictionary_updates_form.enable(false);
+    Job job; job.reload = false; job.action = Job::Action::dictionary; job.credential = std::move(request);
+    updates_worker->submit(std::move(job));
+  }
+
+  void poll_dictionary_updates(bool automatic = false) {
+    if (automatic && automatic_updates) automatic_updates_pending = true;
+    if (updates_busy || !updates_worker || (automatic && !automatic_updates) || (!automatic && surface != Surface::dictionary)) return;
+    auto request = DictionaryUpdatesForm::status_request();
+    if (automatic) { request["command"] = "automatic"; automatic_updates_pending = false; }
+    submit_dictionary_update(std::move(request));
   }
 
   void poll_dictionary() {
@@ -1783,7 +1825,7 @@ struct SettingsWindow::State {
       layout();
       if (selected == 11) poll_clipboard();
       if (selected == 12) poll_cloud_clipboard();
-      if (selected == 13) poll_dictionary();
+      if (selected == 13) { poll_dictionary(); poll_dictionary_updates(); }
       if (selected == 3 && !busy && HelpcodeForm::offered()) {
         Job job;
         job.reload = false;
@@ -1913,6 +1955,18 @@ struct SettingsWindow::State {
           job.ai_models = ai_change.models;
         }
         submit(std::move(job));
+      }
+      return;
+    }
+    auto update_change = dictionary_updates_form.command(command);
+    if (update_change.handled) {
+      if (!update_change.confirmation.empty()) {
+        const bool allowed = confirmation ? confirmation(window, L"词库", update_change.confirmation.c_str()) :
+            MessageBoxW(window, update_change.confirmation.c_str(), L"词库", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+        if (!allowed) return;
+      }
+      if (update_change.request) {
+        submit_dictionary_update(std::move(*update_change.request));
       }
       return;
     }
@@ -2263,10 +2317,18 @@ struct SettingsWindow::State {
     case WM_TIMER:
       if (wparam == 72) self->poll_statistics();
       else if (wparam == 73) self->account_form.tick();
+      else if (wparam == 74) {
+        if (self->automatic_updates && GetTickCount64() >= self->next_automatic_update) {
+          self->next_automatic_update = GetTickCount64() + 3600000;
+          self->automatic_updates_pending = true;
+        }
+        if (self->automatic_updates_pending) self->poll_dictionary_updates(true);
+        else self->poll_dictionary_updates();
+      }
       return 0;
     // 激活可发生在按钮的按下与通知之间；延后刷新，不能在第一次点击中途禁用控件。
     case WM_ACTIVATE: if (LOWORD(wparam) != WA_INACTIVE) PostMessageW(hwnd, activated_message, 0, 0); break;
-    case activated_message: self->poll_statistics(); self->poll_clipboard(); return 0;
+    case activated_message: self->poll_statistics(); self->poll_clipboard(); self->poll_dictionary_updates(true); return 0;
     case WM_SIZE: self->layout(); return 0;
     case WM_GETMINMAXINFO: {
       auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
@@ -2299,7 +2361,7 @@ struct SettingsWindow::State {
       return 0;
     }
     case completed_message: self->complete(); return 0;
-    case WM_DESTROY: KillTimer(hwnd, 72); KillTimer(hwnd, 73); self->worker.reset(); PostQuitMessage(0); return 0;
+    case WM_DESTROY: KillTimer(hwnd, 72); KillTimer(hwnd, 73); KillTimer(hwnd, 74); self->updates_worker.reset(); self->worker.reset(); PostQuitMessage(0); return 0;
     case WM_NCDESTROY:
       SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
       self->window = nullptr;
@@ -2323,6 +2385,7 @@ SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation
 
 SettingsWindow::~SettingsWindow() {
   if (state_->window) DestroyWindow(state_->window);
+  state_->updates_worker.reset();
   state_->worker.reset();
   if (state_->font) DeleteObject(state_->font);
   if (state_->com_initialized) CoUninitialize();
@@ -2351,6 +2414,7 @@ bool SettingsWindow::create(HINSTANCE instance) {
       state_->dip(900), state_->dip(720), nullptr, nullptr, instance, state_.get());
   if (!window) return false;
   state_->worker = std::make_unique<Worker>(window, state_->community_transport, state_->statistics_upload_transport, state_->account_transport, state_->clipboard_services.transport, state_->cloud_clipboard_services, state_->dictionary_transport);
+  state_->updates_worker = std::make_unique<Worker>(window, CommunityTransport{}, CommunityTransport{}, CommunityTransport{}, CommunityTransport{}, CloudClipboardServices{}, state_->dictionary_transport, true);
   SetTimer(window, 72, 5000, nullptr);
   SetTimer(window, 73, 1000, nullptr);
   return true;
@@ -2359,6 +2423,10 @@ bool SettingsWindow::create(HINSTANCE instance) {
 HWND SettingsWindow::handle() const { return state_->window; }
 
 int SettingsWindow::run(int show) {
+  SetTimer(state_->window, 74, 2000, nullptr);
+  state_->automatic_updates = true;
+  state_->next_automatic_update = GetTickCount64() + 3600000;
+  state_->poll_dictionary_updates(true);
   ShowWindow(state_->window, show);
   MSG message{};
   BOOL result;
