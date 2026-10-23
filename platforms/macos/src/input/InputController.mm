@@ -1468,6 +1468,8 @@ static NSImage *MSIMECandidateLogoImage() {
     NSUInteger _expandedVisibleRows;
     CGFloat _expandedScrollOffset;
     CGFloat _expandedPendingScrollDelta;
+    // 视口高度在一次展开会话内固定，避免不同候选行的自然高度让窗口随滚动上下抖动。
+    CGFloat _expandedViewportRowsHeight;
     BOOL _focusPending;
     // Dedicated English lives in the Engine session, so a session released for dictionary maintenance takes it along; the reopen puts it back.
     BOOL _resumeDedicatedEnglish;
@@ -2272,6 +2274,7 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
     _expandedFirstRow = 0;
     _expandedScrollOffset = 0;
     _expandedPendingScrollDelta = 0;
+    _expandedViewportRowsHeight = 0;
 }
 
 // 收起网格时把高亮交回普通候选窗；只导航，不选词或提交组字。
@@ -2334,6 +2337,7 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
     _expandedCursor = cursor;
     _expandedScrollOffset = 0;
     _expandedPendingScrollDelta = 0;
+    _expandedViewportRowsHeight = 0;
     // 当前高亮所在页是网格的第一行，末页减少显示行数，不向前补行。
     _expandedFirstRow = cursor / columns;
     _expandedVisibleRows = msime::candidate::kExpandedGridVisibleRows;
@@ -2363,6 +2367,7 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
     _expandedCursor = cursor;
     _expandedScrollOffset = 0;
     _expandedPendingScrollDelta = 0;
+    _expandedViewportRowsHeight = 0;
     return YES;
 }
 
@@ -3829,6 +3834,7 @@ static const NSTimeInterval kSettledRerankPoll = 1.0 / 60.0;
         traditionalChineseOutputEnabled:_appearance.traditionalOutput];
 }
 - (void)appearanceChanged:(NSNotification *)notification {
+    _expandedViewportRowsHeight = 0;
     _preferenceLoadState.reset(); // Local edits invalidate older disk reads.
     if (!_appearance.cloudCandidatesEnabled) [self cancelCloudCandidates];
     if (_appearance) _glossEnabled = @(_appearance.candidateTranslations);
@@ -5934,6 +5940,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
 // 选中的皮肤包被同名替换（MCP 的 `create_candidate_skin` 带 replace、皮肤编辑器、图库重装）时选择没变，偏好文档的 revision 也不变，-completePreferenceLoad: 不会重新应用，旧的配色和装饰图会一直画到进程重启。这里问外观设置包是否换过（几次 stat），换过就让工具栏取新的调色板；候选窗的皮肤和装饰图在下一次绘制时从外观设置读。
 - (BOOL)applyReplacedSkinPackages {
     if (!_appearance || ![_appearance reloadReplacedSkinPackages]) return NO;
+    _expandedViewportRowsHeight = 0;
     [_toolbar reloadToolbarImages];
     [_toolbar applyLightSkin:[_appearance resolvedSkinForDark:NO].tokens darkSkin:[_appearance resolvedSkinForDark:YES].tokens];
     [_toolbar applyLightToolbarSkin:[_appearance toolbarSkinForDark:NO]
@@ -8409,17 +8416,24 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     const NSUInteger paintedRows = visibleRows + (paintsTrailingRow ? 1 : 0);
     NSMutableArray<NSArray<NSDictionary *> *> *rowCandidates = [NSMutableArray arrayWithCapacity:paintedRows];
     CGFloat width = headerWidth;
-    CGFloat rowsHeight = 0;
+    CGFloat measuredRowsHeight = 0;
     for (NSUInteger row = _expandedFirstRow; row < _expandedFirstRow + paintedRows; ++row) {
         const NSUInteger start = row * columns;
         NSArray<NSDictionary *> *slice = [_expandedCandidates subarrayWithRange:NSMakeRange(start, MIN(columns, count - start))];
         layouts.push_back(geometryForRow(row));
         [rowCandidates addObject:slice];
         width = MAX(width, layouts.back().width);
-        if (row < _expandedFirstRow + visibleRows) rowsHeight += layouts.back().rowsHeight;
+        if (row < _expandedFirstRow + visibleRows) measuredRowsHeight += layouts.back().rowsHeight;
     }
     width = ceil(width);
-    if (visibleRows > 1) rowsHeight += (visibleRows - 1) * rowGap;
+    if (visibleRows > 1) measuredRowsHeight += (visibleRows - 1) * rowGap;
+    // 滚动期间固定候选区域的高度。不同候选行可能因字形回退、换行或释义高度而不同；
+    // 每帧按当前几行重算会让面板大小和锚点一起跳动，像是滚动被打断。一次展开会话
+    // 以首次布局的视口高度为准，候选按钮仍在内容视图内按各自的实际行高排布并裁切。
+    if (_expandedViewportRowsHeight <= 0) {
+        _expandedViewportRowsHeight = measuredRowsHeight;
+    }
+    const CGFloat rowsHeight = _expandedViewportRowsHeight;
 
     if (!candidatePanel.wheelPaging) [candidatePanel resetWheelAccumulator];
     // 网格滚轮由 scrollHandler 保留像素偏移，与「滚轮翻页」开关无关；该开关仍只管普通候选窗。
@@ -8539,6 +8553,8 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         if ([self expandedCandidatesStillApply] && [self renderExpandedCandidates]) return;
         [self discardExpandedCandidates];
     }
+    // 普通候选页结束上一轮展开布局，不能把旧字号或皮肤的视口带到下一次展开。
+    _expandedViewportRowsHeight = 0;
     if (_appearance.englishMode && !_managedEnglishComposition) { _renderedCandidateView = nil; [self resetCandidateAnchor]; [self hideCandidatePanel:"english_mode"]; return; }
     NSArray *candidates = MSIMEReorderedPinnedCandidates(_view[@"candidates"], MSIMECandidatePinCode(_view));
     if (![candidates isKindOfClass:NSArray.class] || candidates.count == 0) {
@@ -9000,11 +9016,12 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     const auto previousExtra = content.shadowOuterInsets;
     const BOOL shadowGeometryChanged = extra.top != previousExtra.top || extra.right != previousExtra.right ||
         extra.bottom != previousExtra.bottom || extra.left != previousExtra.left;
-    if (tokens.showSelectedBar != _skinShowsSelectedBar) { [self renderCandidates]; return; }
+    if (tokens.showSelectedBar != _skinShowsSelectedBar) { _expandedViewportRowsHeight = 0; [self renderCandidates]; return; }
     // 明暗切换后画的是另一个槽位的包（或者这种明暗不画包）：装饰、最小宽度和圆角都跟着变，只换颜色不够，整页重排一次。重排结束时还会回到这里，那时包已经对上，不会再重排。面板没在屏幕上时不重排：重排会把它重新显示出来，下一次显示候选时本来就按当时的明暗排版。
     if ((skin.candidateSkin != _renderedCandidateSkin || shadowGeometryChanged) &&
         _panel.isVisible && !_rerenderingForCandidateSkin) {
         _rerenderingForCandidateSkin = YES;
+        _expandedViewportRowsHeight = 0;
         [self renderCandidates];
         _rerenderingForCandidateSkin = NO;
         return;
