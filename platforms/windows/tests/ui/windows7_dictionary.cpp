@@ -3,6 +3,7 @@
 #include "../../settings/win7/ThemeData.h"
 #include "../../settings/win7/ControlText.h"
 #include "../../settings/win7/DictionaryData.h"
+#include "../../settings/win7/DictionaryPersonalExport.h"
 #include <cassert>
 #include <atomic>
 #include <mutex>
@@ -180,6 +181,21 @@ int main(int argc, char** argv) {
   click(dictionary_delete); assert(SendMessageW(GetDlgItem(body, dictionary_entries), LB_GETCOUNT, 0, 0) == 0);
   click(dictionary_reset); assert(SendMessageW(GetDlgItem(body, dictionary_entries), LB_GETCOUNT, 0, 0) == 1);
   select(0); assert(text(dictionary_weight) == "321");
+  choose(dictionary_kind, 3); click(dictionary_new);
+  set(dictionary_key, L"syntheticword"); set(dictionary_value, L"SyntheticWord"); click(dictionary_save);
+  choose(dictionary_kind, 4); click(dictionary_new);
+  set(dictionary_key, L"allwords"); set(dictionary_value, L"合成全部导出🙂"); click(dictionary_save);
+  click(dictionary_export_all);
+  const auto all_export = msime::settings::read_settings_document(export_path).value();
+  assert(all_export.find("# 类别\t编码\t词条\t权重\n") == 0);
+  assert(all_export.find("英文\tsyntheticword\tSyntheticWord\t10000") != std::string::npos);
+  assert(all_export.find("快捷短语\tallwords\t合成全部导出🙂\t10000") != std::string::npos);
+  assert(all_export.find("合成\t321") == std::string::npos);
+  dictionary_data::Requests export_requests;
+  const auto malformed = [&](const std::string&) { return Json{{"ok", true}, {"value", {{"entries", Json::array()}, {"has_more", true}}}}.dump(); };
+  assert(dictionary_data::export_all_file(export_requests, options, export_path, malformed).at("ok") == false);
+  assert(msime::settings::read_settings_document(export_path).value() == all_export);
+  click(dictionary_reset);
   // 配置开关走真实隔离共享存储；检查与回滚只注入状态，测试不下载真实资源。
   const auto update_click = [&](int id) { SendMessageW(GetDlgItem(body, id), BM_CLICK, 0, 0); wait_updates(); };
   assert(SendMessageW(GetDlgItem(body, dictionary_updates_enabled), BM_GETCHECK, 0, 0) == BST_CHECKED);

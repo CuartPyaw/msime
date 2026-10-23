@@ -66,6 +66,7 @@ public:
     formats();
     add(dictionary_import, L"BUTTON", L"导入词库文件…", WS_TABSTOP | BS_PUSHBUTTON, 32);
     add(dictionary_export, L"BUTTON", L"导出当前类型…", WS_TABSTOP | BS_PUSHBUTTON, 32);
+    add(dictionary_export_all, L"BUTTON", L"导出全部个人词库…", WS_TABSTOP | BS_PUSHBUTTON, 32);
     add(dictionary_reset, L"BUTTON", L"清除全部学习数据…", WS_TABSTOP | BS_PUSHBUTTON, 32);
     add(dictionary_notice, L"STATIC", L"", SS_LEFT, 140);
     return top;
@@ -108,6 +109,8 @@ public:
     } else if (id == dictionary_import || id == dictionary_export) {
       result.file = true; result.save = id == dictionary_export;
       result.request = Json{{"operation", result.save ? "export_file" : "import_file"}, {"kind", kind()}, {"format", format()}};
+    } else if (id == dictionary_export_all) {
+      result.file = true; result.save = true; result.request = Json{{"operation", "export_all_file"}};
     } else if (id == dictionary_reset) {
       result.request = Json{{"operation", "reset"}};
       result.confirmation = L"清除全部学习数据并恢复内置词库？个人词条、调权、删除记录和固定位置等数据将被清除。此操作无法撤销，建议先导出备份。";
@@ -136,8 +139,8 @@ public:
       } else {
         if ((operation == "edit" && (!boolean(*response, "applied") || response->at("applied") != true)) ||
             (operation == "reset" && (!boolean(*response, "reset") || response->at("reset") != true)) ||
-            (operation == "export_file" && (!count(*response, "rows") || !response->contains("path") || !response->at("path").is_string()))) { invalid(); return; }
-        notice(operation == "export_file" ? L"词库已导出。" : L"操作已完成。请刷新查看当前词条。");
+            ((operation == "export_file" || operation == "export_all_file") && (!count(*response, "rows") || !response->contains("path") || !response->at("path").is_string()))) { invalid(); return; }
+        notice(operation == "export_file" || operation == "export_all_file" ? L"词库已导出。" : L"操作已完成。请刷新查看当前词条。");
       }
       if (operation == "edit" || operation == "reset") clear_editor();
       update(); return;

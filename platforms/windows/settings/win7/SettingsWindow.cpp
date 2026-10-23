@@ -13,6 +13,7 @@
 #include "CloudClipboardForm.h"
 #include "CloudClipboardWorker.h"
 #include "DictionaryForm.h"
+#include "DictionaryPersonalExport.h"
 #include "DictionaryUpdatesForm.h"
 #include "ThemeForm.h"
 #include "CommunitySkinForm.h"
@@ -435,10 +436,11 @@ private:
       Json response;
       if (!options.is_object()) response = dictionary_data::failure("dictionary_not_prepared");
       else if (operation == "import_file") response = dictionary_data::import_file(dictionary_requests_, options, action, job.file, dictionary_transport_);
+      else if (operation == "export_all_file") response = dictionary_data::export_all_file(dictionary_requests_, options, job.file, dictionary_transport_);
       else if (operation == "export_file") response = dictionary_data::export_file(dictionary_requests_, options, action, job.file, dictionary_transport_);
       else response = dictionary_requests_.call(options, action, dictionary_transport_);
       dictionary_response_ = Json{{"response", response}};
-      if (theme_data::value(response) && job.dictionary_list && operation != "export_file") {
+      if (theme_data::value(response) && job.dictionary_list && operation != "export_file" && operation != "export_all_file") {
         (*dictionary_response_)["list_request"] = *job.dictionary_list;
         (*dictionary_response_)["listing"] = dictionary_requests_.call(options, *job.dictionary_list, dictionary_transport_);
       }
