@@ -71,7 +71,6 @@ int main() {
         NSMutableDictionary *preferences = [reply[@"value"] mutableCopy];
         preferences[@"default_ime_mode"] = @"chinese";
         preferences[@"cross_commit_spacing"] = @YES;
-        preferences[@"candidate_preedit_style"] = @"raw";
         preferences[@"learning"] = @NO;
         NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
         NSMutableDictionary *options = [@{@"api_version": @1, @"preferences": preferences} mutableCopy];
@@ -83,8 +82,10 @@ int main() {
         assert(sqlite3_open([[options[@"dictionaries"] stringByAppendingPathComponent:@"msime-pinyin.db"] fileSystemRepresentation], &database) == SQLITE_OK);
         assert(sqlite3_exec(database, "CREATE TABLE tbl_1_j(key TEXT,jp TEXT,value TEXT,weight INTEGER); INSERT INTO tbl_1_j VALUES('jia','j','甲',100);", nullptr, nullptr, nullptr) == SQLITE_OK);
         assert(sqlite3_close(database) == SQLITE_OK);
-        MSIMEClientSession *session = [[MSIMEClientSession alloc] initWithOptions:options error:nil];
-        assert(session && [session setFocused:YES error:nil]);
+        NSError *error = nil;
+        MSIMEClientSession *session = [[MSIMEClientSession alloc] initWithOptions:options error:&error];
+        assert(session && !error);
+        assert([session setFocused:YES error:&error] && !error);
         NSString *suite = [@"msime.cross-commit-spacing." stringByAppendingString:NSUUID.UUID.UUIDString];
         NSUserDefaults *defaultsSuite = [[NSUserDefaults alloc] initWithSuiteName:suite];
         MSIMEAppearancePreferences *appearance = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaultsSuite];
