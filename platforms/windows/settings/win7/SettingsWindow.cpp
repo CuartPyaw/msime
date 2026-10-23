@@ -17,6 +17,10 @@
 #include "DictionaryUpdatesForm.h"
 #include "VocabularyForm.h"
 #include "VocabularyData.h"
+#include "PluginEffectsForm.h"
+#include "PluginLibraryForm.h"
+#include "PluginScriptsForm.h"
+#include "PluginMentionsForm.h"
 #include "ThemeForm.h"
 #include "CommunitySkinForm.h"
 #include "StatisticsForm.h"
@@ -70,7 +74,7 @@ bool copy_clipboard(HWND owner, std::wstring_view text) {
 }
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary };
+  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary, plugins };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -288,7 +292,7 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary, plugins };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
@@ -333,6 +337,7 @@ struct Completion {
   std::optional<Json> cloud_clipboard_response;
   std::optional<Json> dictionary_response;
   std::optional<Json> vocabulary_response;
+  std::optional<Json> plugins_response;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
@@ -421,6 +426,7 @@ private:
     cloud_clipboard_response_.reset();
     dictionary_response_.reset();
     vocabulary_response_.reset();
+    plugins_response_.reset();
     fonts_.reset();
     community_response_.reset();
     community_preview_ = {};
@@ -433,6 +439,33 @@ private:
     }
     if (job.reload || job.action == Job::Action::helpcode_sources) helpcodes_ = helpcode_sources(directory_);
     Result result;
+    if (job.action == Job::Action::plugins && job.credential) {
+      const auto options = runtime_options();
+      auto action = *job.credential;
+      if (!job.file.empty()) action["source"] = job.file.u8string();
+      const auto operation = action.value("operation", std::string{});
+      const auto response = plugin_data::call(directory_, options, action);
+      const bool succeeded = theme_data::value(response).has_value();
+      plugins_response_ = Json{{"response", response}};
+      if (succeeded && !job.changes.empty()) {
+        result = snapshot_ ? store_->save(*snapshot_, job.changes) : Result{};
+        if (!result.snapshot) result.snapshot = store_->load().snapshot;
+        snapshot_ = result.snapshot;
+        if (result.outcome != Outcome::saved)
+          notice_ = L"插件已删除，但引用清理未保存；已重新读取设置，请在缺失插件列表中处理。";
+      } else {
+        result = store_->load(); snapshot_ = result.snapshot;
+      }
+      if (operation == "load_mentions" || operation == "save_mentions") return result;
+      (*plugins_response_)["grants"] = plugin_data::call(directory_, options, {{"operation", "script_grants"}});
+      if (operation == "catalog") (*plugins_response_)["mentions"] = plugin_data::call(directory_, options, PluginMentionsForm::load_request());
+      (*plugins_response_)["catalog"] = operation == "catalog" ? response : plugin_data::call(directory_, options, PluginLibraryForm::catalog_request());
+      const auto statistics = theme_data::call(msime_client_typing_statistics,
+          {{"directory", directory_.u8string()}, {"status", true}, {"action", {{"operation", "load"}}}});
+      const auto status = statistics_data::parse(statistics);
+      (*plugins_response_)["statistics_enabled"] = status ? Json(status->statistics.enabled) : Json();
+      return result;
+    }
     if (job.action == Job::Action::vocabulary && job.credential) {
       vocabulary_response_ = vocabulary_data::call(directory_, runtime_options(), *job.credential, job.file);
       return {Outcome::loaded, snapshot_};
@@ -729,7 +762,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_), std::move(community_response_), std::move(community_preview_), std::move(statistics_response_), std::move(statistics_upload_response_), job.statistics_upload, std::move(account_avatar_), std::move(clipboard_response_), std::move(cloud_clipboard_response_), std::move(dictionary_response_), std::move(vocabulary_response_)};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_), std::move(community_response_), std::move(community_preview_), std::move(statistics_response_), std::move(statistics_upload_response_), job.statistics_upload, std::move(account_avatar_), std::move(clipboard_response_), std::move(cloud_clipboard_response_), std::move(dictionary_response_), std::move(vocabulary_response_), std::move(plugins_response_)};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -765,6 +798,7 @@ private:
   std::optional<Json> cloud_clipboard_response_;
   std::optional<Json> dictionary_response_;
   std::optional<Json> vocabulary_response_;
+  std::optional<Json> plugins_response_;
   dictionary_data::Requests dictionary_requests_;
   std::optional<Json> fonts_;
   std::optional<ThemeCompletion> theme_;
@@ -823,6 +857,8 @@ struct SettingsWindow::State {
   int cloud_clipboard_height = 0;
   int dictionary_height = 0;
   int vocabulary_height = 0;
+  int plugins_height = 0;
+  bool plugins_created = false;
   int shortcut_tab = 0;
   int input_tab = 0;
   int expression_tab = 0;
@@ -853,6 +889,11 @@ struct SettingsWindow::State {
   CloudClipboardForm cloud_clipboard_form;
   DictionaryForm dictionary_form;
   VocabularyForm vocabulary_form;
+  PluginEffectsForm plugin_effects_form;
+  PluginLibraryForm plugin_library_form;
+  PluginScriptsForm plugin_scripts_form;
+  PluginMentionsForm plugin_mentions_form;
+  bool plugin_mentions_initialized = false;
   DictionaryUpdatesForm dictionary_updates_form;
   bool automatic_updates = false, automatic_updates_pending = false;
   ULONGLONG next_automatic_update = 0;
@@ -892,7 +933,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板", L"词库", L"背单词"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板", L"词库", L"背单词", L"插件"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -1002,6 +1043,29 @@ struct SettingsWindow::State {
     return !failed;
   }
 
+  void plugin_controls() {
+    if (plugins_created) return;
+    const auto row = [this](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) {
+      return surface_row(Surface::plugins, type, text, style, id, top, height);
+    };
+    plugins_height = plugin_effects_form.create(row);
+    plugins_height = plugin_library_form.create(row, plugins_height + 24);
+    plugins_height = plugin_scripts_form.create(row, plugins_height + 24);
+    plugins_height = plugin_mentions_form.create(row, plugins_height + 24);
+    plugins_created = true;
+    refresh_plugins();
+    plugin_effects_form.enable(snapshot.has_value() && !busy);
+    plugin_library_form.enable(snapshot.has_value() && !busy);
+    plugin_scripts_form.enable(snapshot.has_value() && !busy);
+    plugin_mentions_form.enable(snapshot.has_value() && !busy);
+  }
+
+  void refresh_plugins() {
+    if (!plugins_created) return;
+    plugin_effects_form.refresh(snapshot ? snapshot->preferences() : Json{{"plugins", nullptr}});
+    plugin_library_form.preferences(plugin_effects_form.preferences());
+  }
+
   void toolbar_controls() {
     int top = 0;
     const auto toolbar_row = [this](const wchar_t* type, const wchar_t* caption, DWORD style,
@@ -1072,16 +1136,16 @@ struct SettingsWindow::State {
     developer_height = 906;
   }
 
-  std::optional<std::filesystem::path> pick_dictionary_file(bool save, bool vocabulary = false) const {
+  std::optional<std::filesystem::path> pick_dictionary_file(bool save, bool vocabulary = false, bool plugin = false) const {
     if (file_picker) return file_picker(window, save);
     IFileDialog* dialog = nullptr;
     const auto clsid = save ? CLSID_FileSaveDialog : CLSID_FileOpenDialog;
     if (FAILED(CoCreateInstance(clsid, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) return std::nullopt;
     const auto finish = [&] { dialog->Release(); return std::optional<std::filesystem::path>{}; };
-    const COMDLG_FILTERSPEC filter{vocabulary ? L"词表" : save ? L"词库文本" : L"词库文件", vocabulary ? L"*.csv;*.txt" : save ? L"*.txt;*.tsv" : L"*.txt;*.tsv;*.yaml;*.yml;*.scel"};
+    const COMDLG_FILTERSPEC filter{plugin ? L"插件文件" : vocabulary ? L"词表" : save ? L"词库文本" : L"词库文件", plugin ? L"*.zip" : vocabulary ? L"*.csv;*.txt" : save ? L"*.txt;*.tsv" : L"*.txt;*.tsv;*.yaml;*.yml;*.scel"};
     DWORD options = 0;
     if (FAILED(dialog->GetOptions(&options)) || FAILED(dialog->SetOptions(options | FOS_FORCEFILESYSTEM | FOS_PATHMUSTEXIST | (save ? FOS_OVERWRITEPROMPT : FOS_FILEMUSTEXIST))) ||
-        FAILED(dialog->SetFileTypes(1, &filter)) || FAILED(dialog->SetTitle(vocabulary ? L"导入词表" : save ? L"导出词库" : L"导入词库")) ||
+        FAILED(dialog->SetFileTypes(1, &filter)) || FAILED(dialog->SetTitle(plugin ? L"导入插件文件" : vocabulary ? L"导入词表" : save ? L"导出词库" : L"导入词库")) ||
         (save && FAILED(dialog->SetFileName(L"水杉用户词库.txt"))) || FAILED(dialog->Show(window))) return finish();
     IShellItem* item = nullptr; PWSTR path = nullptr;
     if (FAILED(dialog->GetResult(&item))) return finish();
@@ -1125,17 +1189,17 @@ struct SettingsWindow::State {
     return result;
   }
 
-  std::optional<std::filesystem::path> pick_skin_folder() const {
+  std::optional<std::filesystem::path> pick_skin_folder(bool plugin = false) const {
     if (folder_picker) return folder_picker(window);
     IFileOpenDialog* dialog = nullptr;
     if (FAILED(CoCreateInstance(CLSID_FileOpenDialog, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&dialog)))) {
-      SetWindowTextW(status, L"无法打开皮肤文件夹选择窗口。"); return std::nullopt;
+      SetWindowTextW(status, plugin ? L"无法打开插件文件夹选择窗口。" : L"无法打开皮肤文件夹选择窗口。"); return std::nullopt;
     }
     FILEOPENDIALOGOPTIONS options = 0;
     std::optional<std::filesystem::path> result;
     HRESULT status_code = dialog->GetOptions(&options);
     if (SUCCEEDED(status_code)) status_code = dialog->SetOptions(options | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM | FOS_DONTADDTORECENT | FOS_PATHMUSTEXIST);
-    if (SUCCEEDED(status_code)) status_code = dialog->SetTitle(L"导入皮肤文件夹");
+    if (SUCCEEDED(status_code)) status_code = dialog->SetTitle(plugin ? L"导入插件文件夹" : L"导入皮肤文件夹");
     if (SUCCEEDED(status_code)) status_code = dialog->Show(window);
     if (SUCCEEDED(status_code)) {
       IShellItem* selected = nullptr;
@@ -1149,7 +1213,7 @@ struct SettingsWindow::State {
     }
     dialog->Release();
     if (FAILED(status_code) && status_code != HRESULT_FROM_WIN32(ERROR_CANCELLED))
-      SetWindowTextW(status, L"无法读取所选皮肤文件夹。");
+      SetWindowTextW(status, plugin ? L"无法读取所选插件文件夹。" : L"无法读取所选皮肤文件夹。");
     return result;
   }
 
@@ -1327,6 +1391,7 @@ struct SettingsWindow::State {
     cloud_clipboard_form.enable(enabled);
     dictionary_form.enable(enabled);
     vocabulary_form.enable(enabled);
+    if (plugins_created) { plugin_effects_form.enable(enabled); plugin_library_form.enable(enabled); plugin_scripts_form.enable(enabled); plugin_mentions_form.enable(enabled); }
     dictionary_updates_form.enable(enabled && !updates_busy);
     theme_form.enable(enabled);
     community_form.enable(enabled);
@@ -1363,7 +1428,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::vocabulary ? vocabulary_height : surface == Surface::dictionary ? dictionary_height : surface == Surface::cloud_clipboard ? cloud_clipboard_height : surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::plugins ? plugins_height : surface == Surface::vocabulary ? vocabulary_height : surface == Surface::dictionary ? dictionary_height : surface == Surface::cloud_clipboard ? cloud_clipboard_height : surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -1428,6 +1493,7 @@ struct SettingsWindow::State {
     case Job::Action::credential_test: message = L"正在测试服务配置…"; break;
     case Job::Action::ai_models: message = L"正在获取模型列表…"; break;
     case Job::Action::account: message = L"正在读取账号…"; break;
+    case Job::Action::plugins: message = L"正在处理插件操作…"; break;
     case Job::Action::vocabulary: message = L"正在处理词书与复习进度…"; break;
     case Job::Action::dictionary: message = L"正在处理词库操作…"; break;
     case Job::Action::cloud_clipboard: message = L"正在更新云剪贴板…"; break;
@@ -1691,6 +1757,7 @@ struct SettingsWindow::State {
       account_form.refresh();
       clipboard_form.refresh(snapshot->preferences());
       cloud_clipboard_form.refresh(*snapshot);
+      refresh_plugins();
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1732,6 +1799,24 @@ struct SettingsWindow::State {
     if (completed->clipboard_response) clipboard_form.completed(*completed->clipboard_response);
     if (completed->cloud_clipboard_response && completed->credential_request)
       cloud_clipboard_form.completed(*completed->credential_request, *completed->cloud_clipboard_response);
+    if (completed->plugins_response && plugins_created && completed->credential_request) {
+      const auto& value = *completed->plugins_response;
+      const auto operation = completed->credential_request->value("operation", std::string{});
+      if (operation == "load_mentions" || operation == "save_mentions") plugin_mentions_form.completed(value.at("response"), operation);
+      if (value.contains("mentions") && !plugin_mentions_initialized) {
+        plugin_mentions_initialized = true; plugin_mentions_form.completed(value.at("mentions"), "load_mentions");
+      }
+      if (value.contains("catalog")) {
+        plugin_library_form.completed(value.at("catalog"));
+        if (!theme_data::value(value.at("response"))) plugin_library_form.failure();
+        plugin_effects_form.catalog(plugin_library_form.packages(), plugin_library_form.loaded());
+        plugin_scripts_form.completed(value.at("catalog"), value.at("grants"), value.at("response"));
+      }
+      if (value.contains("statistics_enabled")) {
+        const auto& enabled = value.at("statistics_enabled");
+        plugin_effects_form.statistics(enabled.is_boolean() ? std::make_optional(enabled.get<bool>()) : std::nullopt);
+      }
+    }
     if (completed->vocabulary_response && completed->credential_request)
       vocabulary_form.completed(*completed->vocabulary_response, completed->credential_request->value("operation", std::string{}));
     if (completed->dictionary_response && completed->credential_request) {
@@ -1796,6 +1881,12 @@ struct SettingsWindow::State {
     submit_dictionary_update(std::move(request));
   }
 
+  void poll_plugins() {
+    if (busy || !worker || surface != Surface::plugins) return;
+    Job job; job.reload = false; job.action = Job::Action::plugins;
+    job.credential = PluginLibraryForm::catalog_request(); submit(std::move(job));
+  }
+
   void poll_vocabulary() {
     if (busy || !worker || surface != Surface::vocabulary) return;
     Job job; job.reload = false; job.action = Job::Action::vocabulary;
@@ -1843,15 +1934,17 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 14 ? Surface::vocabulary : selected == 13 ? Surface::dictionary : selected == 12 ? Surface::cloud_clipboard : selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 15 ? Surface::plugins : selected == 14 ? Surface::vocabulary : selected == 13 ? Surface::dictionary : selected == 12 ? Surface::cloud_clipboard : selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
+      if (selected == 15) plugin_controls();
       scroll = 0;
       layout();
       if (selected == 11) poll_clipboard();
       if (selected == 12) poll_cloud_clipboard();
       if (selected == 14) poll_vocabulary();
+      if (selected == 15) poll_plugins();
       if (selected == 13) { poll_dictionary(); poll_dictionary_updates(); }
       if (selected == 3 && !busy && HelpcodeForm::offered()) {
         Job job;
@@ -1883,7 +1976,7 @@ struct SettingsWindow::State {
       return;
     }
     if (busy) return;
-    if (id == reload_settings && HIWORD(command) == BN_CLICKED) { if (surface == Surface::statistics) poll_statistics(); else if (surface == Surface::clipboard) poll_clipboard(); else if (surface == Surface::cloud_clipboard) poll_cloud_clipboard(); else if (surface == Surface::dictionary) poll_dictionary(); else if (surface == Surface::vocabulary) poll_vocabulary(); else submit(Job{}); return; }
+    if (id == reload_settings && HIWORD(command) == BN_CLICKED) { if (surface == Surface::statistics) poll_statistics(); else if (surface == Surface::clipboard) poll_clipboard(); else if (surface == Surface::cloud_clipboard) poll_cloud_clipboard(); else if (surface == Surface::dictionary) poll_dictionary(); else if (surface == Surface::vocabulary) poll_vocabulary(); else if (surface == Surface::plugins) poll_plugins(); else submit(Job{}); return; }
     if (id == toolbar_theme && HIWORD(command) == BN_CLICKED) {
       SendMessageW(selector, CB_SETCURSEL, 8, 0);
       this->command(MAKEWPARAM(page_selector, CBN_SELCHANGE));
@@ -1980,6 +2073,44 @@ struct SettingsWindow::State {
           job.credential = std::move(ai_change.request);
           job.action = ai_change.models ? Job::Action::ai_models : Job::Action::credential_test;
           job.ai_models = ai_change.models;
+        }
+        submit(std::move(job));
+      }
+      return;
+    }
+    auto script_change = plugin_scripts_form.command(command);
+    auto mentions_change = plugin_mentions_form.command(command);
+    if (script_change.handled || mentions_change.handled) {
+      const auto& confirmation_text = script_change.handled ? script_change.confirmation : mentions_change.confirmation;
+      if (!confirmation_text.empty()) {
+        const bool allowed = confirmation ? confirmation(window, L"插件", confirmation_text.c_str()) :
+            MessageBoxW(window, confirmation_text.c_str(), L"插件", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+        if (!allowed) return;
+      }
+      auto request = script_change.handled ? std::move(script_change.request) : std::move(mentions_change.request);
+      if (request) { Job job; job.reload = false; job.action = Job::Action::plugins; job.credential = std::move(request); submit(std::move(job)); }
+      return;
+    }
+    auto plugin_effects_change = plugin_effects_form.command(command);
+    if (plugin_effects_change.handled) {
+      if (!plugin_effects_change.changes.empty()) {
+        Job job; job.reload = false; job.changes = std::move(plugin_effects_change.changes); submit(std::move(job));
+      }
+      return;
+    }
+    auto plugin_change = plugin_library_form.command(command);
+    if (plugin_change.handled) {
+      if (!plugin_change.confirmation.empty()) {
+        const bool allowed = confirmation ? confirmation(window, L"插件", plugin_change.confirmation.c_str()) :
+            MessageBoxW(window, plugin_change.confirmation.c_str(), L"插件", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+        if (!allowed) return;
+      }
+      if (plugin_change.request || !plugin_change.changes.empty()) {
+        Job job; job.reload = false; job.changes = std::move(plugin_change.changes);
+        if (plugin_change.request) { job.action = Job::Action::plugins; job.credential = std::move(plugin_change.request); }
+        if (plugin_change.file || plugin_change.folder) {
+          const auto path = plugin_change.folder ? pick_skin_folder(true) : pick_dictionary_file(false, false, true);
+          if (!path) return; job.file = *path;
         }
         submit(std::move(job));
       }

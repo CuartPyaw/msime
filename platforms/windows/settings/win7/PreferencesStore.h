@@ -5,6 +5,7 @@
 
 #include <nlohmann/json.hpp>
 #include <cstdint>
+#include <algorithm>
 #include <optional>
 #include <string>
 #include <utility>
@@ -77,14 +78,16 @@ public:
            change.path == std::vector<std::string>{"cloud_clipboard_relay"} ||
            change.path == std::vector<std::string>{"game_compatibility"} ||
            change.path == std::vector<std::string>{"wubi_candidate_selection"});
+      // 插件默认组会被共享序列化省略；只允许页面已知字段补齐其路径。
+      const bool optional_plugin = plugin_field(change);
       for (size_t index = 0; index < change.path.size(); ++index) {
         const auto& segment = change.path[index];
         if (!parent->is_object()) return {Outcome::invalid_change, std::nullopt};
         auto child = parent->find(segment);
         if (child == parent->end()) {
-          if ((!optional_boolean && !optional_style && !optional_font && !optional_radius && !optional_count && !optional_language && !optional_object) || index + 1 != change.path.size())
+          if (!optional_plugin && ((!optional_boolean && !optional_style && !optional_font && !optional_radius && !optional_count && !optional_language && !optional_object) || index + 1 != change.path.size()))
             return {Outcome::invalid_change, std::nullopt};
-          child = parent->emplace(segment, change.value).first;
+          child = parent->emplace(segment, index + 1 == change.path.size() ? change.value : Json::object()).first;
         }
         parent = &*child;
       }
@@ -114,6 +117,25 @@ public:
   }
 
 private:
+  static bool plugin_field(const Change& change) {
+    if (change.path.size() < 2 || change.path.front() != "plugins") return false;
+    const auto& path = change.path;
+    const auto& value = change.value;
+    if (path.size() == 2) {
+      const auto& field = path[1];
+      if (field == "combo_counter" || field == "combo_tier_sound") return value.is_boolean();
+      if (field == "effect_intensity") return value.is_number_integer();
+      if (field == "effect_style" || field == "effect_pack" || field == "helpcode_pack_quanpin" || field == "helpcode_pack_shuangpin") return value.is_string();
+      if (field == "command_tables" || field == "phrase_tables") return value.is_array() && std::all_of(value.begin(), value.end(), [](const Json& item) { return item.is_string(); });
+      return false;
+    }
+    if (path.size() != 3) return false;
+    const auto& group = path[1]; const auto& field = path[2];
+    if (field == "enabled" && (group == "key_sound" || group == "commit_sound" || group == "music" || group == "achievements")) return value.is_boolean();
+    if (field == "pack" && (group == "key_sound" || group == "melody" || group == "music")) return value.is_string();
+    if (group == "key_sound" && field == "mode") return value.is_string();
+    return field == "volume" && (group == "key_sound" || group == "music") && value.is_number_integer();
+  }
   static const uint8_t* bytes(const std::string& value) {
     return reinterpret_cast<const uint8_t*>(value.data());
   }
