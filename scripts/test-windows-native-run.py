@@ -53,6 +53,7 @@ HOST_DIFFERENCES = {
 
 # Sources whose `main` takes an argument the build system supplies.
 ARGUMENTS = {
+    "input/wubi_auto_commit.cpp": ["platforms/windows/tests/input/fixtures/msime-wubi-commit.db"],
     "input/backspace_selected_phrase.cpp": ["platforms/windows/tests/input/fixtures/msime-phrase-backspace.db"],
     "input/host_online_candidates.cpp": ["platforms/windows/tests/input/fixtures/msime-pinyin-online.db"],
     "core/installer_launch.cpp": ["platforms/windows/installer/msime_setup.iss"],
@@ -69,6 +70,12 @@ ARGUMENTS = {
 # other source that needs more than itself.
 # Values are (sources relative to platforms/windows, whether they need the shared host library).
 COMPANIONS: dict[str, tuple[list[str], bool]] = {
+    # 五笔自动提交：TIP 真实写入结果与 Server 的回复投影共同验证。
+    "input/wubi_auto_commit.cpp": (
+        ["src/ipc/ReplyComposer.cpp", "src/ipc/ReplyCodec.cpp", "src/ipc/ServerSession.cpp",
+         "src/input/ChineseTextConversion.cpp", "tsf/EngineSessionAdapter.cpp", "tsf/EngineResponse.cpp"],
+        True,
+    ),
     # Windows 的两份真实会话共同验证部分选词、普通退格与实时设置。
     "input/backspace_selected_phrase.cpp": (
         ["src/ipc/ReplyComposer.cpp", "src/ipc/ReplyCodec.cpp", "src/ipc/ServerSession.cpp",

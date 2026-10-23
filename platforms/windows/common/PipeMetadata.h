@@ -1,6 +1,7 @@
 #pragma once
 
 #include "../../../shared/contracts/windows_ipc.h"
+#include "../../../shared/contracts/ipc_negotiation.h"
 
 namespace msime::windows::PipeMetadata {
 // TSF 在候选列表开着时设这一位，和键盘修饰键无关：通配转换的候选列表（CANDIDATE_ORIGINAL）里每个键都带；普通组字的增量候选只给释义列、Ctrl+Enter 和释义页认的键带（tsf/Global/CandidateActiveKeyPolicy.h），日语转换开始之后的回车也带；其余的裸回车、以词定字和 Ctrl+Backspace 靠没有这一位走组字原文的路。
@@ -14,6 +15,17 @@ inline constexpr std::uint32_t GameHost = 0x10000000u;
 inline constexpr std::uint32_t key_modifiers(std::uint32_t value) {
   return value &
          ~(FanyImePipeFlags::UiLess | FanyImePipeFlags::ServerUiLessCandidates |
+           FanyImePipeFlags::LocalCharacterCommit |
            CandidateActive | AutoRepeat | GameHost);
+}
+
+// 在最终发送边界重新判定，重试、旧 Server 或无本地会话时不能带上过期的归属。
+inline constexpr std::uint32_t local_character_commit_modifiers(
+    const FanyImeNamedpipeData &packet, std::uint32_t capabilities, bool has_local_session) {
+  const auto modifiers = packet.modifiers_down & ~FanyImePipeFlags::LocalCharacterCommit;
+  return packet.event_type == FanyImePipeEventType::KeyEvent && has_local_session &&
+                 (capabilities & FanyImeProtocol::LocalCharacterCommit)
+             ? modifiers | FanyImePipeFlags::LocalCharacterCommit
+             : modifiers;
 }
 } // namespace msime::windows::PipeMetadata

@@ -1155,6 +1155,17 @@ else()
 endif()
 add_test(NAME windows-host-candidate-continuation COMMAND windows-host-candidate-continuation)
 set_tests_properties(windows-host-candidate-continuation PROPERTIES TIMEOUT 10)
+# 两份真实会话验证五笔自动上屏只有 TIP 写入，Server 只观察并继续组字。
+add_executable(windows-wubi-auto-commit tests/input/wubi_auto_commit.cpp
+               tsf/EngineSessionAdapter.cpp tsf/EngineResponse.cpp)
+target_link_libraries(windows-wubi-auto-commit PRIVATE msime-windows-composer)
+if(MSVC)
+  target_compile_options(windows-wubi-auto-commit PRIVATE /W4 /WX /UNDEBUG /utf-8)
+else()
+  target_compile_options(windows-wubi-auto-commit PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+endif()
+add_test(NAME windows-wubi-auto-commit COMMAND windows-wubi-auto-commit ${CMAKE_CURRENT_SOURCE_DIR}/tests/input/fixtures/msime-wubi-commit.db)
+set_tests_properties(windows-wubi-auto-commit PROPERTIES TIMEOUT 30)
 add_executable(windows-backspace-selected-phrase tests/input/backspace_selected_phrase.cpp
                tsf/EngineSessionAdapter.cpp tsf/EngineResponse.cpp)
 target_link_libraries(windows-backspace-selected-phrase PRIVATE msime-windows-composer)
