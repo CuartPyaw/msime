@@ -56,6 +56,20 @@ public:
                static_cast<UINT>(inputs.size());
     }
 
+    // 可编辑的面板只在自身仍为前台时恢复原编辑器；切到第三个窗口后不能抢回焦点。
+    bool InsertFromPanel(std::wstring_view text, HWND panel,
+                         ULONG_PTR extraInfo = static_cast<ULONG_PTR>(GetMessageExtraInfo())) const
+    {
+        if (!target_ || !panel || !IsWindow(target_) || text.empty() || text.size() > 4000)
+            return false;
+        const HWND foreground = GetForegroundWindow();
+        if (foreground && SameRoot(foreground, panel)) {
+            if (!SetForegroundWindow(target_))
+                return false;
+        }
+        return Insert(text, panel, extraInfo);
+    }
+
     bool valid() const noexcept { return target_ != nullptr; }
 
 private:

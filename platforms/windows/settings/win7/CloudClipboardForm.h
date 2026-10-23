@@ -94,6 +94,18 @@ public:
   Json refresh_request() const {
     return Json{{"action", {{"operation", "list"}, {"search", control_text::read(get(cloud_clipboard_search), 1024).value_or("")}}}};
   }
+  // 独立面板在传输前重读同一来源，并核对同一条目的标识与正文。
+  std::optional<Json> transfer_request() const {
+    const auto* item = selected(cloud_clipboard_items, items_);
+    if (!ready_ || !item || !binding_) return std::nullopt;
+    auto request = bound({{"operation", "list"}, {"search", control_text::read(get(cloud_clipboard_search), 1024).value_or("")}});
+    request["selected"] = {{"id", item->at("id")}, {"text", item->at("text")}};
+    return request;
+  }
+  bool contains_transfer(const Json& selected) const {
+    if (!ready_ || !selected.is_object() || !selected.contains("id") || !selected.contains("text")) return false;
+    return std::any_of(items_.begin(), items_.end(), [&](const Json& item) { return item.at("id") == selected.at("id") && item.at("text") == selected.at("text"); });
+  }
   Command command(WPARAM event) {
     const int id = LOWORD(event), notification = HIWORD(event);
     if (!controls_.count(id)) return {};
