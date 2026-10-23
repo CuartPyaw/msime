@@ -796,6 +796,9 @@ char *msime_client_punctuation(uint64_t session, uint8_t ascii);
  * inspected and no document text is retained. */
 char *msime_client_punctuation_with_context(uint64_t session, uint8_t ascii,
                                             uint32_t preceding);
+
+/* 无会话、无 I/O 的跨次空格策略。请求含 config（enabled/excluded_apps）、application、context（scheme/local_mode），可带 text、preceding Unicode 标量、secure、full_width。返回 {enabled,text}；先询问 enabled，再读取必要的前文。最多 65536 字节；结果按通常的 ok/value 信封返回，由 msime_client_string_free 释放。 */
+char *msime_client_cross_commit_spacing(const uint8_t *request, size_t length);
 /* Balance Engine nesting after the host emitted a paired closing mark. Only
  * the ASCII book-title opening '<' is accepted. */
 char *msime_client_balance_paired_punctuation_after_auto_close(uint64_t session,

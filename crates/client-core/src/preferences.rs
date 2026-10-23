@@ -710,6 +710,33 @@ fn valid_vim_mode_apps(apps: &[String]) -> bool {
             .all(|id| valid_app_list_identifier(id) && seen.insert(id.to_ascii_lowercase()))
 }
 
+/// 跨次上屏空格：只补新输入与前文的接缝。默认关，应用排除采用共享应用标识口径。
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct CrossCommitSpacing {
+    pub enabled: bool,
+    pub excluded_apps: Vec<String>,
+}
+
+impl CrossCommitSpacing {
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
+    pub fn validate(&self) -> bool {
+        valid_vim_mode_apps(&self.excluded_apps)
+    }
+
+    pub fn enabled_for_application(&self, application: &str) -> bool {
+        self.enabled
+            && valid_app_list_identifier(application)
+            && !self
+                .excluded_apps
+                .iter()
+                .any(|entry| entry.eq_ignore_ascii_case(application))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChineseScheme {
@@ -1313,6 +1340,9 @@ pub struct Preferences {
     /// 中英文之间加空格：一次上屏的文本里，汉字与 ASCII 字母、数字相邻处插入一个半角空格（host-api 在全角转换之后做，见 `crates/host-api/src/chinese_english_spacing.rs`）。两次上屏之间不加，候选窗显示不变。默认关；关着时不写进文档，没有这个键的旧版本照样能读。
     #[serde(default, skip_serializing_if = "is_false")]
     pub chinese_english_spacing: bool,
+    /// 跨次上屏接缝的独立开关及应用排除。当前仅 macOS 宿主消费。
+    #[serde(default, skip_serializing_if = "CrossCommitSpacing::is_default")]
+    pub cross_commit_spacing: CrossCommitSpacing,
     pub chinese_punctuation: bool,
     #[serde(default = "smart_punctuation_default")]
     pub smart_punctuation: bool,
@@ -3173,6 +3203,7 @@ impl Default for Preferences {
             traditional_chinese_output: false,
             traditional_chinese_variant: TraditionalVariant::default(),
             chinese_english_spacing: false,
+            cross_commit_spacing: CrossCommitSpacing::default(),
             chinese_punctuation: true,
             smart_punctuation: smart_punctuation_default(),
             smart_punctuation_repeat: smart_punctuation_default(),
@@ -3963,6 +3994,9 @@ impl Preferences {
         if !valid_app_input_mode_rules(&self.app_input_mode_rules) {
             return Err(PreferencesError::InvalidAppInputModeRules);
         }
+        if !self.cross_commit_spacing.validate() {
+            return Err(PreferencesError::InvalidCrossCommitSpacing);
+        }
         if !valid_vim_mode_apps(&self.vim_mode_apps) {
             return Err(PreferencesError::InvalidVimModeApps);
         }
@@ -4193,6 +4227,8 @@ pub enum PreferencesError {
     InvalidAppInputModeRules,
     #[error("vim mode app identifiers must be distinct of at most 64 bytes without control characters or path separators, at most 32 in total")]
     InvalidVimModeApps,
+    #[error("跨次空格应用排除名单无效")]
+    InvalidCrossCommitSpacing,
     #[error("cloud clipboard relay needs an https address (http only for loopback) without query, fragment or credentials, and a token of 16-256 printable ASCII characters")]
     InvalidCloudClipboardRelay,
     #[error(

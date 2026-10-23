@@ -7283,3 +7283,30 @@ fn sentence_collocation_tuning_rejects_non_finite_values() {
         );
     }
 }
+
+#[test]
+fn cross_commit_spacing_is_optional_and_validates_app_exclusions() {
+    let mut value = serde_json::to_value(Preferences::default()).unwrap();
+    assert!(value.get("cross_commit_spacing").is_none());
+    value["cross_commit_spacing"] =
+        serde_json::json!({"enabled": true, "excluded_apps": ["com.example.Editor"]});
+    let preferences: Preferences = serde_json::from_value(value.clone()).unwrap();
+    assert_eq!(
+        serde_json::to_value(&preferences).unwrap()["cross_commit_spacing"],
+        value["cross_commit_spacing"]
+    );
+    assert!(preferences.validate().is_ok());
+    for apps in [
+        serde_json::json!(["com.example.Editor", "COM.EXAMPLE.EDITOR"]),
+        serde_json::json!(["../Editor"]),
+        serde_json::json!([""]),
+        serde_json::json!(["a".repeat(65)]),
+        serde_json::json!((0..33)
+            .map(|i| format!("com.example.App{i}"))
+            .collect::<Vec<_>>()),
+    ] {
+        value["cross_commit_spacing"]["excluded_apps"] = apps;
+        let parsed = serde_json::from_value::<Preferences>(value.clone());
+        assert!(parsed.is_err() || parsed.unwrap().validate().is_err());
+    }
+}

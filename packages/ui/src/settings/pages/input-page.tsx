@@ -360,6 +360,11 @@ export function InputSettingsPage() {
         foldIntoMore={harmonyPhone}
         traditionalChineseVariants={host?.traditional_chinese_variants === true}
         preferences={draft}
+        crossCommitSpacingApps={
+          macosPlatform
+            ? { pickApplication: client.pickApplication, applicationNames: client.applicationNames }
+            : undefined
+        }
         wordCharacter={wordCharacter}
         navigation={navigation}
         frequency={frequency}
