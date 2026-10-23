@@ -31,6 +31,11 @@ enum ControlId {
   shift_letter_modes = 900, local_mode_first = 910, fuzzy_enabled = 930, fuzzy_reset,
   fuzzy_rule_first = 940, frequency_mode = 960, frequency_trigger, frequency_step,
   helpcode_first = 980,
+  scheme_language = 1000, scheme_chinese, scheme_description, scheme_shuangpin_profile,
+  scheme_shuangpin_hint, scheme_shuangpin_preedit, scheme_wubi_profile, scheme_wubi_mixed,
+  scheme_wubi_hint, scheme_wubi_unique, scheme_wubi_selection, scheme_wubi_second,
+  scheme_wubi_third, scheme_wubi_save, scheme_vietnamese_method, scheme_vietnamese_tone,
+  scheme_wubi_lookup_text, scheme_wubi_lookup, scheme_wubi_result,
 };
 
 class SettingsWindow {

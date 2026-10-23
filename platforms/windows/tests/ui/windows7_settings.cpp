@@ -148,7 +148,10 @@ int main() {
     std::ofstream table(plugin_directory / L"table.txt", std::ios::binary);
     table << "字=cd\n";
     std::ofstream options(temporary.path / L"runtime-options.json", std::ios::binary);
-    options << Json{{"resources", resources.u8string()}}.dump();
+    options << Json{{"api_version", 1}, {"resources", resources.u8string()},
+        {"user_data", (temporary.path / L"user").u8string()}, {"cache", (temporary.path / L"cache").u8string()},
+        {"dictionaries", (temporary.path / L"dictionaries").u8string()},
+        {"preferences_directory", temporary.path.u8string()}, {"preferences", restored.snapshot->preferences()}}.dump();
     assert(custom.good() && manifest.good() && table.good() && options.good());
   }
   InjectedDirectory host_options(temporary.path / L"runtime-options.json", L"MSIME_CLIENT_HOST_OPTIONS");
@@ -642,6 +645,8 @@ int main() {
     assert(find_option(L"custom/synthetic-missing") >= 0);
     assert(find_option(L"合成辅助码 (Synthetic helper)") >= 0);
     assert(find_option(L"合成插件（插件）") >= 0);
+    SendMessageW(body, WM_COMMAND, MAKEWPARAM(helpcode_first + 1, CBN_SETFOCUS), reinterpret_cast<LPARAM>(schema));
+    assert(GetScrollPos(body, SB_VERT) > 0);
     assert(store.load().snapshot->revision() == before_helpcode.snapshot->revision());
     select_value(helpcode_first + 1, find_option(L"小鹤"));
     saved = store.load();
@@ -674,6 +679,121 @@ int main() {
     assert(store.load().snapshot->revision() == revision);
     assert(store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
   }
+  select_tab(L"输入方案");
+  const auto find_combo = [&](int id, const wchar_t* title) {
+    return static_cast<int>(SendMessageW(GetDlgItem(body, id), CB_FINDSTRINGEXACT,
+        static_cast<WPARAM>(-1), reinterpret_cast<LPARAM>(title)));
+  };
+  const auto offered = [](std::string_view value) {
+    for (std::string_view scheme : {MSIME_EDITION_INPUT_SCHEMES}) if (scheme == value) return true;
+    return false;
+  };
+  assert((GetDlgItem(body, scheme_wubi_profile) != nullptr) == offered("wubi"));
+  assert((GetDlgItem(body, scheme_shuangpin_profile) != nullptr) == offered("shuangpin"));
+  const auto scheme_revision = store.load().snapshot->revision();
+  select_tab(L"高级选项");
+  select_tab(L"输入方案");
+  assert(store.load().snapshot->revision() == scheme_revision);
+  if (offered("quanpin") && offered("japanese")) {
+    select_value(scheme_chinese, find_combo(scheme_chinese, L"双拼"));
+    assert((GetWindowLongPtrW(GetDlgItem(body, scheme_wubi_profile), GWL_STYLE) & WS_VISIBLE) == 0);
+    const auto before_japanese = store.load().snapshot->revision();
+    select_value(scheme_language, find_combo(scheme_language, L"日文"));
+    saved = store.load();
+    assert(saved.snapshot->revision() == before_japanese + 1);
+    assert(saved.snapshot->preferences().at("scheme") == "japanese");
+    assert(saved.snapshot->preferences().at("last_chinese_scheme") == "shuangpin");
+    assert(!IsWindowEnabled(GetDlgItem(body, scheme_chinese)));
+    assert(!IsWindowEnabled(GetDlgItem(body, scheme_shuangpin_profile)));
+    select_value(scheme_language, find_combo(scheme_language, L"中文"));
+    assert(store.load().snapshot->preferences().at("scheme") == "shuangpin");
+    select_value(scheme_shuangpin_profile, 1);
+    assert(store.load().snapshot->preferences().at("shuangpin_profile") == "ziranma");
+    click(scheme_shuangpin_hint);
+    assert(store.load().snapshot->preferences().at("shuangpin_keymap_hint") == true);
+    select_value(scheme_shuangpin_preedit, 1);
+    assert(store.load().snapshot->preferences().at("shuangpin_preedit_uses_raw") == false);
+    // 已有自定义表只读展示；选择内置方案保留自定义表本身。
+    saved = store.load();
+    auto custom_profile = store.save(*saved.snapshot, {{{"shuangpin_profile"}, "custom"}});
+    assert(custom_profile.outcome == Outcome::saved);
+    SendMessageW(host, WM_COMMAND, MAKEWPARAM(reload_settings, BN_CLICKED), 0);
+    pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+    assert(find_combo(scheme_shuangpin_profile, L"自定义双拼（当前值）") == 5);
+    assert(SendMessageW(GetDlgItem(body, scheme_shuangpin_profile), CB_GETCURSEL, 0, 0) == 5);
+    assert(store.load().snapshot->revision() == custom_profile.snapshot->revision());
+    const auto custom_map = store.load().snapshot->preferences().value("shuangpin_custom_profile", Json());
+    select_value(scheme_shuangpin_profile, 0);
+    assert(store.load().snapshot->preferences().value("shuangpin_custom_profile", Json()) == custom_map);
+  }
+  if (offered("wubi")) {
+    if (IsWindowEnabled(GetDlgItem(body, scheme_chinese))) select_value(scheme_chinese, find_combo(scheme_chinese, L"五笔"));
+    assert(store.load().snapshot->preferences().at("scheme") == "wubi");
+    assert((GetWindowLongPtrW(GetDlgItem(body, scheme_wubi_profile), GWL_STYLE) & WS_VISIBLE) != 0);
+    if (GetDlgItem(body, scheme_shuangpin_profile))
+      assert((GetWindowLongPtrW(GetDlgItem(body, scheme_shuangpin_profile), GWL_STYLE) & WS_VISIBLE) == 0);
+    select_value(scheme_wubi_profile, 1);
+    assert(store.load().snapshot->preferences().at("wubi_profile") == "wubi98");
+    const bool mixed_before = store.load().snapshot->preferences().at("wubi_mixed_pinyin").get<bool>();
+    click(scheme_wubi_mixed);
+    assert(store.load().snapshot->preferences().at("wubi_mixed_pinyin").get<bool>() != mixed_before);
+    const bool hint_before = store.load().snapshot->preferences().at("wubi_code_hint").get<bool>();
+    click(scheme_wubi_hint);
+    assert(store.load().snapshot->preferences().at("wubi_code_hint").get<bool>() != hint_before);
+    const bool unique_before = store.load().snapshot->preferences().at("wubi_auto_commit_unique").get<bool>();
+    click(scheme_wubi_unique);
+    assert(store.load().snapshot->preferences().at("wubi_auto_commit_unique").get<bool>() != unique_before);
+    saved = store.load();
+    const auto conflict_setup = store.save(*saved.snapshot, {{{"navigation", "minus_equal"}, true}, {{"word_character", "enabled"}, false}});
+    assert(conflict_setup.outcome == Outcome::saved);
+    SendMessageW(host, WM_COMMAND, MAKEWPARAM(reload_settings, BN_CLICKED), 0);
+    pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+    assert(!IsWindowEnabled(GetDlgItem(body, scheme_wubi_second)));
+    click(scheme_wubi_selection);
+    assert(IsWindowEnabled(GetDlgItem(body, scheme_wubi_second)));
+    SetWindowTextW(GetDlgItem(body, scheme_wubi_second), L"'");
+    assert(!IsWindowEnabled(GetDlgItem(body, scheme_wubi_save)));
+    SetWindowTextW(GetDlgItem(body, scheme_wubi_third), L";");
+    assert(IsWindowEnabled(GetDlgItem(body, scheme_wubi_save)));
+    const auto before_pair = store.load().snapshot->revision();
+    click(scheme_wubi_save);
+    saved = store.load();
+    assert(saved.snapshot->revision() == before_pair + 1);
+    assert(saved.snapshot->preferences().at("wubi_candidate_selection").at("second_key") == "'");
+    assert(saved.snapshot->preferences().at("wubi_candidate_selection").at("third_key") == ";");
+    assert(!IsWindowEnabled(GetDlgItem(body, scheme_wubi_save)));
+    // 翻页冲突交给 Rust 拒绝，表单草稿保留；无关偏好修改也不能把草稿抹掉。
+    const auto before_invalid = saved.snapshot->revision();
+    SetWindowTextW(GetDlgItem(body, scheme_wubi_second), L"-");
+    click(scheme_wubi_save);
+    assert(store.load().snapshot->revision() == before_invalid);
+    assert(caption(GetDlgItem(body, scheme_wubi_second)) == L"-");
+    click(scheme_wubi_hint);
+    assert(caption(GetDlgItem(body, scheme_wubi_second)) == L"-");
+    SetWindowTextW(GetDlgItem(body, scheme_wubi_second), L"'");
+    assert(!IsWindowEnabled(GetDlgItem(body, scheme_wubi_save)));
+    const auto before_lookup = store.load().snapshot->revision();
+    SetWindowTextW(GetDlgItem(body, scheme_wubi_lookup_text), L"字\r\n文");
+    click(scheme_wubi_lookup);
+    const auto lookup_text = caption(GetDlgItem(body, scheme_wubi_result));
+    assert(lookup_text.find(L"字") != std::wstring::npos && lookup_text.find(L"文") != std::wstring::npos);
+    assert(lookup_text.find(L"86 五笔") != std::wstring::npos && lookup_text.find(L"98 五笔") != std::wstring::npos);
+    assert(lookup_text.find(L"失败") == std::wstring::npos);
+    assert(store.load().snapshot->revision() == before_lookup);
+    click(scheme_wubi_selection);
+    assert(!IsWindowEnabled(GetDlgItem(body, scheme_wubi_second)));
+    assert(store.load().snapshot->preferences().at("wubi_candidate_selection").at("second_key") == "'");
+  }
+  if (offered("vietnamese")) {
+    if (IsWindowEnabled(GetDlgItem(body, scheme_language))) select_value(scheme_language, find_combo(scheme_language, L"越南文"));
+    select_value(scheme_vietnamese_method, 1);
+    select_value(scheme_vietnamese_tone, 1);
+    saved = store.load();
+    assert(saved.snapshot->preferences().at("vietnamese").at("input_method") == "vni");
+    assert(saved.snapshot->preferences().at("vietnamese").at("tone_style") == "classic");
+  }
+  saved = store.load();
+  assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
   // 原有自定义尺寸只在用户选择标准档位后才改变；两个尺寸字段原子保存。
   select_page(1);
   const HWND size = GetDlgItem(body, toolbar_size);

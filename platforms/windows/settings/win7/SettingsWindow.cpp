@@ -3,6 +3,7 @@
 #include "CloudCandidateForm.h"
 #include "InputModeForm.h"
 #include "AdvancedInputForm.h"
+#include "SchemeForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -36,8 +37,9 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced };
-constexpr std::array<std::pair<Surface, const wchar_t*>, 5> input_pages{{
+enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme };
+constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
+    {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
     {Surface::candidates, L"候选与联想"}, {Surface::output, L"输出设置"},
     {Surface::advanced, L"高级选项"},
@@ -146,10 +148,8 @@ std::filesystem::path preferences_directory() {
   return settings_state_directory(injected, root, configured);
 }
 
-// 资源和插件目录仅由工作线程读取；采用与现代窗口相同的宿主选项来源。
-HelpcodeSources helpcode_sources(const std::filesystem::path& directory) {
-  HelpcodeSources sources;
-  if (!HelpcodeForm::offered()) return sources;
+// 宿主选项有明确大小上限，文件读取只在工作线程执行。
+Json runtime_options() {
   auto options_file = std::filesystem::path(environment(L"MSIME_CLIENT_HOST_OPTIONS"));
   std::error_code error;
   if (!options_file.is_absolute() || !std::filesystem::is_regular_file(options_file, error)) {
@@ -164,25 +164,34 @@ HelpcodeSources helpcode_sources(const std::filesystem::path& directory) {
     input.read(content.data(), static_cast<std::streamsize>(content.size()));
     content.resize(static_cast<size_t>(input.gcount()));
     const auto options = content.size() <= limit ? Json::parse(content, nullptr, false) : Json();
-    if (options.is_object() && options.contains("resources") && options.at("resources").is_string()) {
-      const auto resources = options.at("resources").get<std::string>();
-      if (std::filesystem::u8path(resources).is_absolute()) {
-        auto owned = msime::host_api::own_string(msime_client_helpcode_schemas(
-            reinterpret_cast<const uint8_t*>(resources.data()), resources.size()));
-        const auto response = owned ? Json::parse(owned.get(), nullptr, false) : Json();
-        if (response.is_object() && response.value("ok", false) && response.contains("value") && response.at("value").is_array()) {
-          for (const auto& schema : response.at("value")) {
-            if (!schema.is_object()) continue;
-            const auto value = schema.value("schema", std::string{});
-            if (value.compare(0, 7, "custom/") != 0) continue;
-            const auto name = schema.value("name", std::string{});
-            const auto english = schema.value("name_en", std::string{});
-            auto label = name;
-            if (!name.empty() && !english.empty() && name != english) label += " (" + english + ")";
-            if (label.empty()) label = english;
-            if (label.empty()) label = schema.value("file_stem", value);
-            sources.custom.push_back({value, control_text::wide(label)});
-          }
+    if (options.is_object()) return options;
+  }
+  return Json();
+}
+
+// 资源和插件目录仅由工作线程读取；采用与现代窗口相同的宿主选项来源。
+HelpcodeSources helpcode_sources(const std::filesystem::path& directory) {
+  HelpcodeSources sources;
+  if (!HelpcodeForm::offered()) return sources;
+  const auto options = runtime_options();
+  if (options.is_object() && options.contains("resources") && options.at("resources").is_string()) {
+    const auto resources = options.at("resources").get<std::string>();
+    if (std::filesystem::u8path(resources).is_absolute()) {
+      auto owned = msime::host_api::own_string(msime_client_helpcode_schemas(
+          reinterpret_cast<const uint8_t*>(resources.data()), resources.size()));
+      const auto response = owned ? Json::parse(owned.get(), nullptr, false) : Json();
+      if (response.is_object() && response.value("ok", false) && response.contains("value") && response.at("value").is_array()) {
+        for (const auto& schema : response.at("value")) {
+          if (!schema.is_object()) continue;
+          const auto value = schema.value("schema", std::string{});
+          if (value.compare(0, 7, "custom/") != 0) continue;
+          const auto name = schema.value("name", std::string{});
+          const auto english = schema.value("name_en", std::string{});
+          auto label = name;
+          if (!name.empty() && !english.empty() && name != english) label += " (" + english + ")";
+          if (label.empty()) label = english;
+          if (label.empty()) label = schema.value("file_stem", value);
+          sources.custom.push_back({value, control_text::wide(label)});
         }
       }
     }
@@ -215,11 +224,12 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
   std::filesystem::path file{};
+  std::string text;
 };
 
 struct Completion {
@@ -228,6 +238,7 @@ struct Completion {
   std::filesystem::path folder;
   std::filesystem::path directory;
   HelpcodeSources helpcodes;
+  std::optional<Json> lookup;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
@@ -260,6 +271,7 @@ private:
   Result execute(const Job& job) {
     notice_.clear();
     folder_.clear();
+    lookup_.reset();
     if (!store_) {
       directory_ = preferences_directory();
       if (directory_.empty()) return {Outcome::storage, std::nullopt};
@@ -268,6 +280,17 @@ private:
     if (job.reload || job.action == Job::Action::helpcode_sources) helpcodes_ = helpcode_sources(directory_);
     Result result;
     if (job.action == Job::Action::helpcode_sources) return {Outcome::loaded, snapshot_};
+    if (job.action == Job::Action::wubi_lookup) {
+      const auto options = runtime_options();
+      if (!options.is_object()) lookup_ = Json{{"ok", false}};
+      else {
+        const auto request = Json{{"options", options}, {"action", {{"operation", "wubi_codes"}, {"text", job.text}}}}.dump();
+        auto owned = msime::host_api::own_string(msime_client_settings_dictionary(
+            reinterpret_cast<const uint8_t*>(request.data()), request.size()));
+        lookup_ = owned ? Json::parse(owned.get(), nullptr, false) : Json();
+      }
+      return {Outcome::loaded, snapshot_};
+    }
     if (job.action == Job::Action::export_file) {
       const auto document = store_->export_document();
       notice_ = document && write_settings_document(job.file, *document) ?
@@ -323,7 +346,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_)};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -348,6 +371,7 @@ private:
   std::filesystem::path folder_;
   std::wstring notice_;
   HelpcodeSources helpcodes_;
+  std::optional<Json> lookup_;
   std::thread thread_;
 };
 
@@ -386,6 +410,7 @@ struct SettingsWindow::State {
   Surface surface = Surface::shortcuts;
   bool busy = true;
   bool saving_cloud = false;
+  bool saving_wubi_keys = false;
   bool failed = false;
   bool com_initialized = false;
   std::vector<Item> items;
@@ -395,11 +420,13 @@ struct SettingsWindow::State {
   CloudCandidateForm cloud_form;
   InputModeForm mode_form;
   AdvancedInputForm advanced_form;
+  SchemeForm scheme_form;
   Confirmation confirmation;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
 
   HWND add(HWND parent, const wchar_t* type, const wchar_t* caption, DWORD style, int id) {
+    if (lstrcmpiW(type, L"BUTTON") == 0) style |= BS_NOTIFY;
     HWND child = CreateWindowExW(0, type, caption, WS_CHILD | WS_VISIBLE | style,
         0, 0, 1, 1, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance, nullptr);
     if (!child) failed = true;
@@ -472,6 +499,10 @@ struct SettingsWindow::State {
     advanced_height = advanced_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                                  int id, int top, int height) {
       return surface_row(Surface::advanced, type, text, style, id, top, height);
+    });
+    scheme_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+                                              int id, int top, int height) {
+      return surface_row(Surface::scheme, type, text, style, id, top, height);
     });
     enable(false);
     layout();
@@ -739,6 +770,7 @@ struct SettingsWindow::State {
     cloud_form.enable(enabled);
     mode_form.enable(enabled);
     advanced_form.enable(enabled);
+    scheme_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -774,7 +806,8 @@ struct SettingsWindow::State {
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
-        surface == Surface::mode ? mode_height : surface == Surface::advanced ? advanced_height : content_height;
+        surface == Surface::mode ? mode_height : surface == Surface::scheme ? scheme_form.height() :
+        surface == Surface::advanced ? advanced_height : content_height;
     info.nMax = reference ? 0 : dip(total) - 1;
     info.nPage = static_cast<UINT>(std::max(client.bottom, 0L));
     info.nPos = reference ? 0 : scroll;
@@ -784,9 +817,10 @@ struct SettingsWindow::State {
     scroll = info.nPos;
     GetClientRect(body, &client);
     for (const auto& item : items) {
-      ShowWindow(item.handle, surface == item.surface ? SW_SHOW : SW_HIDE);
-      if (surface != item.surface) continue;
-      MoveWindow(item.handle, 0, reference ? 0 : dip(item.top) - scroll,
+      const auto scheme_top = item.surface == Surface::scheme ? scheme_form.position(item.handle) : std::optional<int>(item.top);
+      ShowWindow(item.handle, surface == item.surface && scheme_top ? SW_SHOW : SW_HIDE);
+      if (surface != item.surface || !scheme_top) continue;
+      MoveWindow(item.handle, 0, reference ? 0 : dip(*scheme_top) - scroll,
           std::max(client.right - dip(8), 1L), reference ? client.bottom : dip(item.height), TRUE);
     }
   }
@@ -803,15 +837,9 @@ struct SettingsWindow::State {
     MapWindowPoints(nullptr, body, reinterpret_cast<POINT*>(&rectangle), 2);
     GetClientRect(body, &viewport);
     // 下拉框的窗口高度含弹出列表，收起时只需保证顶部编辑行可见。
-    if (GetDlgCtrlID(control) == language_switch || GetDlgCtrlID(control) == toolbar_size ||
-        GetDlgCtrlID(control) == word_character_keys || GetDlgCtrlID(control) == traditional_output ||
-        GetDlgCtrlID(control) == punctuation_mode || GetDlgCtrlID(control) == quote_style ||
-        GetDlgCtrlID(control) == bracket_style || GetDlgCtrlID(control) == mixed_first_page_count ||
-        GetDlgCtrlID(control) == cloud_source || GetDlgCtrlID(control) == cloud_method ||
-        GetDlgCtrlID(control) == cloud_response_format || GetDlgCtrlID(control) == default_ime_mode ||
-        GetDlgCtrlID(control) == ime_mode_scope || GetDlgCtrlID(control) == app_rule_mode ||
-        GetDlgCtrlID(control) == frequency_mode || GetDlgCtrlID(control) == frequency_trigger ||
-        GetDlgCtrlID(control) == frequency_step)
+    wchar_t type[32]{};
+    GetClassNameW(control, type, 32);
+    if (lstrcmpiW(type, WC_COMBOBOXW) == 0)
       rectangle.bottom = rectangle.top + dip(32);
     if (rectangle.top < 0) scroll_to(scroll + rectangle.top);
     else if (rectangle.bottom > viewport.bottom) scroll_to(scroll + rectangle.bottom - viewport.bottom);
@@ -821,6 +849,8 @@ struct SettingsWindow::State {
     if (busy) return;
     saving_cloud = job.changes.size() == 1 &&
         job.changes.front().path == std::vector<std::string>{"cloud_candidate_provider"};
+    saving_wubi_keys = job.changes.size() == 1 &&
+        job.changes.front().path == std::vector<std::string>{"wubi_candidate_selection"};
     busy = true;
     enable(false);
     const wchar_t* message = job.reload ? L"正在读取设置…" : L"正在保存…";
@@ -830,6 +860,7 @@ struct SettingsWindow::State {
     case Job::Action::restart: message = L"正在请求重启…"; break;
     case Job::Action::data_directory:
     case Job::Action::logs_directory: message = L"正在打开目录…"; break;
+    case Job::Action::wubi_lookup: message = L"正在查询编码…"; break;
     case Job::Action::helpcode_sources: message = L"正在读取辅助码方案…"; break;
     case Job::Action::preferences: break;
     }
@@ -910,7 +941,7 @@ struct SettingsWindow::State {
     if (mixed.value("first_page_count", 1) < 1 || mixed.value("first_page_count", 1) > 3) return false;
     if (!CloudCandidateForm::valid(preferences.at("cloud_candidate_provider"))) return false;
     if (!InputModeForm::valid(preferences)) return false;
-    if (!AdvancedInputForm::valid(preferences)) return false;
+    if (!AdvancedInputForm::valid(preferences) || !SchemeForm::valid(preferences)) return false;
     return true;
   }
 
@@ -1059,6 +1090,7 @@ struct SettingsWindow::State {
       refresh_candidates();
       mode_form.refresh(snapshot->preferences());
       advanced_form.refresh(snapshot->preferences(), completed->helpcodes);
+      scheme_form.refresh(snapshot->preferences());
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1067,7 +1099,9 @@ struct SettingsWindow::State {
     }
     SetWindowTextW(GetDlgItem(body, data_directory_text), completed->directory.empty() ?
         L"未找到数据目录" : completed->directory.c_str());
+    if (completed->lookup) scheme_form.lookup_result(*completed->lookup);
     enable(snapshot.has_value());
+    layout_body();
     const wchar_t* message = L"读取设置失败，请重新读取后重试。";
     switch (result->outcome) {
     case Outcome::loaded: message = L""; break;
@@ -1079,6 +1113,8 @@ struct SettingsWindow::State {
     }
     if (saving_cloud && result->outcome == Outcome::storage)
       message = L"保存云候选服务失败，请检查地址、请求头 JSON、请求体模板、响应路径和超时；未保存的内容已保留。";
+    if (saving_wubi_keys && result->outcome == Outcome::storage)
+      message = L"保存五笔快捷选词失败，请使用两个不同的英文标点，并避开翻页与以词定字的按键；未保存的编辑已保留。";
     if (!completed->folder.empty()) {
       const auto opened = reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"open",
           completed->folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
@@ -1129,6 +1165,23 @@ struct SettingsWindow::State {
       return;
     }
     if (!snapshot) return;
+    auto scheme_change = scheme_form.command(command);
+    if (scheme_change.handled) {
+      if (!scheme_change.message.empty()) SetWindowTextW(status, scheme_change.message.c_str());
+      else if (scheme_change.lookup && !scheme_change.lookup->empty()) {
+        Job job;
+        job.reload = false;
+        job.action = Job::Action::wubi_lookup;
+        job.text = std::move(*scheme_change.lookup);
+        submit(std::move(job));
+      } else if (!scheme_change.changes.empty()) {
+        Job job;
+        job.reload = false;
+        job.changes = std::move(scheme_change.changes);
+        submit(std::move(job));
+      }
+      return;
+    }
     auto mode_change = mode_form.command(command);
     if (mode_change.handled) {
       if (!mode_change.changes.empty()) {
@@ -1278,26 +1331,13 @@ struct SettingsWindow::State {
     }
     if (!self) return DefWindowProcW(hwnd, message, wparam, lparam);
     if (message == WM_COMMAND) {
-      if (((LOWORD(wparam) == language_switch || LOWORD(wparam) == toolbar_size) && HIWORD(wparam) == CBN_SETFOCUS) ||
-          ((LOWORD(wparam) >= caps_lock && LOWORD(wparam) <= fullwidth_toggle) && HIWORD(wparam) == BN_SETFOCUS) ||
-          ((LOWORD(wparam) >= toolbar_enabled && LOWORD(wparam) <= toolbar_settings) && HIWORD(wparam) == BN_SETFOCUS) ||
-          ((LOWORD(wparam) >= diagnostic_server && LOWORD(wparam) <= import_settings) && HIWORD(wparam) == BN_SETFOCUS) ||
-          (LOWORD(wparam) == word_character_keys && HIWORD(wparam) == CBN_SETFOCUS) ||
-          ((LOWORD(wparam) >= backspace_reverts && LOWORD(wparam) <= navigation_left_right) && HIWORD(wparam) == BN_SETFOCUS) ||
-          ((LOWORD(wparam) == traditional_output || LOWORD(wparam) == punctuation_mode ||
-              LOWORD(wparam) == quote_style || LOWORD(wparam) == bracket_style) && HIWORD(wparam) == CBN_SETFOCUS) ||
-          ((LOWORD(wparam) == chinese_english_spacing || LOWORD(wparam) == fullwidth_output ||
-              (LOWORD(wparam) >= paired_punctuation && LOWORD(wparam) <= smart_direct_letter)) && HIWORD(wparam) == BN_SETFOCUS) ||
-          ((LOWORD(wparam) >= cloud_candidates && LOWORD(wparam) <= cloud_save) &&
-              (HIWORD(wparam) == CBN_SETFOCUS || HIWORD(wparam) == EN_SETFOCUS || HIWORD(wparam) == BN_SETFOCUS)) ||
-          ((LOWORD(wparam) >= mixed_enabled && LOWORD(wparam) <= word_lattice) &&
-              (HIWORD(wparam) == BN_SETFOCUS || HIWORD(wparam) == CBN_SETFOCUS)) ||
-          ((LOWORD(wparam) >= default_ime_mode && LOWORD(wparam) <= app_rule_remove) &&
-              (HIWORD(wparam) == CBN_SETFOCUS || HIWORD(wparam) == EN_SETFOCUS || HIWORD(wparam) == BN_SETFOCUS ||
-                  (LOWORD(wparam) == app_rule_list && HIWORD(wparam) == LBN_SETFOCUS))) ||
-          ((LOWORD(wparam) >= shift_letter_modes && LOWORD(wparam) < helpcode_first + 6) &&
-              (HIWORD(wparam) == BN_SETFOCUS || HIWORD(wparam) == CBN_SETFOCUS)) ||
-          (LOWORD(wparam) == data_directory_text && HIWORD(wparam) == EN_SETFOCUS))
+      wchar_t type[32]{};
+      GetClassNameW(reinterpret_cast<HWND>(lparam), type, 32);
+      const int notification = HIWORD(wparam);
+      if ((lstrcmpiW(type, WC_COMBOBOXW) == 0 && notification == CBN_SETFOCUS) ||
+          (lstrcmpiW(type, L"EDIT") == 0 && notification == EN_SETFOCUS) ||
+          (lstrcmpiW(type, L"BUTTON") == 0 && notification == BN_SETFOCUS) ||
+          (lstrcmpiW(type, L"LISTBOX") == 0 && notification == LBN_SETFOCUS))
         self->reveal(reinterpret_cast<HWND>(lparam));
       else self->command(wparam);
       return 0;

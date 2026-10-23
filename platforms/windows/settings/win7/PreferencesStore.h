@@ -53,6 +53,7 @@ public:
           (change.path == std::vector<std::string>{"navigation", "mouse_wheel"} ||
            change.path == std::vector<std::string>{"backspace_reverts_selection"} ||
            change.path == std::vector<std::string>{"chinese_english_spacing"} ||
+           change.path == std::vector<std::string>{"shuangpin_keymap_hint"} ||
            change.path == std::vector<std::string>{"mixed_input", "enabled"} ||
            change.path == std::vector<std::string>{"mixed_input", "symbols"} ||
            change.path == std::vector<std::string>{"mixed_input", "japanese"} ||
@@ -61,12 +62,14 @@ public:
            change.path == std::vector<std::string>{"fuzzy_pinyin", "seeded"});
       const bool optional_style = change.value.is_string() &&
           (change.path == std::vector<std::string>{"quote_style"} ||
-           change.path == std::vector<std::string>{"bracket_style"});
+           change.path == std::vector<std::string>{"bracket_style"} ||
+           change.path == std::vector<std::string>{"last_chinese_scheme"});
       const bool optional_count = change.value.is_number_integer() &&
           change.path == std::vector<std::string>{"mixed_input", "first_page_count"};
       const bool optional_object = change.value.is_object() &&
           (change.path == std::vector<std::string>{"app_input_mode_rules"} ||
-           change.path == std::vector<std::string>{"plugins"});
+           change.path == std::vector<std::string>{"plugins"} ||
+           change.path == std::vector<std::string>{"wubi_candidate_selection"});
       for (size_t index = 0; index < change.path.size(); ++index) {
         const auto& segment = change.path[index];
         if (!parent->is_object()) return {Outcome::invalid_change, std::nullopt};
