@@ -61,12 +61,14 @@ public:
            change.path == std::vector<std::string>{"bracket_style"});
       const bool optional_count = change.value.is_number_integer() &&
           change.path == std::vector<std::string>{"mixed_input", "first_page_count"};
+      const bool optional_rules = change.value.is_object() &&
+          change.path == std::vector<std::string>{"app_input_mode_rules"};
       for (size_t index = 0; index < change.path.size(); ++index) {
         const auto& segment = change.path[index];
         if (!parent->is_object()) return {Outcome::invalid_change, std::nullopt};
         auto child = parent->find(segment);
         if (child == parent->end()) {
-          if ((!optional_boolean && !optional_style && !optional_count) || index + 1 != change.path.size())
+          if ((!optional_boolean && !optional_style && !optional_count && !optional_rules) || index + 1 != change.path.size())
             return {Outcome::invalid_change, std::nullopt};
           child = parent->emplace(segment, change.value).first;
         }

@@ -2,11 +2,11 @@
 
 #include "PreferencesStore.h"
 #include "SettingsWindow.h"
+#include "ControlText.h"
 #include <commctrl.h>
 #include <array>
 #include <charconv>
 #include <functional>
-#include <limits>
 #include <string>
 
 namespace msime::settings::win7 {
@@ -73,7 +73,7 @@ public:
     SendMessageW(control(cloud_response_format), CB_SETCURSEL,
         value.at("response_format") == "json_path" ? 2 : value.at("response_format") == "google" ? 1 : 0, 0);
     for (const auto& field : text_fields)
-      SetWindowTextW(control(field.first), wide(value.at(field.second).get<std::string>()).c_str());
+      SetWindowTextW(control(field.first), control_text::wide(value.at(field.second).get<std::string>()).c_str());
     SetWindowTextW(control(cloud_timeout), std::to_wstring(value.at("timeout_ms").get<uint64_t>()).c_str());
     SendMessageW(control(cloud_cache), BM_SETCHECK, value.at("cache_enabled").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
   }
@@ -99,11 +99,11 @@ public:
     result["method"] = method == 1 ? "POST" : "GET";
     result["response_format"] = format == 2 ? "json_path" : format == 1 ? "google" : "candidates";
     for (const auto& field : text_fields) {
-      const auto value = text(control(field.first));
+      const auto value = control_text::read(control(field.first));
       if (!value) return std::nullopt;
       result[field.second] = *value;
     }
-    const auto timeout = text(control(cloud_timeout));
+    const auto timeout = control_text::read(control(cloud_timeout));
     if (!timeout) return std::nullopt;
     uint64_t number = 0;
     const auto parsed = std::from_chars(timeout->data(), timeout->data() + timeout->size(), number);
@@ -118,31 +118,6 @@ private:
       {cloud_endpoint, "endpoint"}, {cloud_headers, "headers_json"}, {cloud_body, "body_template"},
       {cloud_response_path, "response_path"},
   }};
-
-  static std::wstring wide(const std::string& value) {
-    if (value.empty()) return {};
-    const int length = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), nullptr, 0);
-    if (!length) return {};
-    std::wstring result(static_cast<size_t>(length), L'\0');
-    if (MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()), result.data(), length) != length)
-      return {};
-    return result;
-  }
-
-  static std::optional<std::string> text(HWND control) {
-    const int length = GetWindowTextLengthW(control);
-    if (length < 0 || length > 8192) return std::nullopt;
-    std::wstring value(static_cast<size_t>(length) + 1, L'\0');
-    const int copied = GetWindowTextW(control, value.data(), static_cast<int>(value.size()));
-    if (copied != length) return std::nullopt;
-    if (!length) return std::string{};
-    const int bytes = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), length, nullptr, 0, nullptr, nullptr);
-    if (!bytes) return std::nullopt;
-    std::string result(static_cast<size_t>(bytes), '\0');
-    if (WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS, value.data(), length, result.data(), bytes, nullptr, nullptr) != bytes)
-      return std::nullopt;
-    return result;
-  }
 
   HWND control(int id) const { return controls_[static_cast<size_t>(id - cloud_source)]; }
   std::array<HWND, cloud_save - cloud_source + 1> controls_{};

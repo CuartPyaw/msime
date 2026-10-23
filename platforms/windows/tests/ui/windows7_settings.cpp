@@ -192,6 +192,22 @@ int main() {
   assert(saved.snapshot->preferences().at("keybindings").at("toggle_fullwidth_option_shift_h").get<bool>() != previous_width);
 
   const HWND tabs = GetDlgItem(host, page_tabs);
+  const auto select_tab = [&](const wchar_t* title) {
+    for (int index = 0; index < TabCtrl_GetItemCount(tabs); ++index) {
+      wchar_t text[128]{};
+      TCITEMW item{};
+      item.mask = TCIF_TEXT;
+      item.pszText = text;
+      item.cchTextMax = 128;
+      assert(TabCtrl_GetItem(tabs, index, &item));
+      if (std::wstring_view(text) != title) continue;
+      TabCtrl_SetCurSel(tabs, index);
+      NMHDR changed_tab{tabs, page_tabs, TCN_SELCHANGE};
+      SendMessageW(host, WM_NOTIFY, page_tabs, reinterpret_cast<LPARAM>(&changed_tab));
+      return;
+    }
+    assert(false && "Requested settings tab does not exist");
+  };
   TabCtrl_SetCurSel(tabs, 1);
   NMHDR notification{tabs, page_tabs, TCN_SELCHANGE};
   SendMessageW(host, WM_NOTIFY, page_tabs, reinterpret_cast<LPARAM>(&notification));
@@ -202,6 +218,7 @@ int main() {
   assert(store.load().snapshot->revision() == saved.snapshot->revision());
   // 以词定字与翻页共用键组时，复合修改必须一次落盘，不能先保存出非法中间态。
   select_page(3);
+  select_tab(L"选词与翻页");
   const HWND word = GetDlgItem(body, word_character_keys);
   const HWND brackets = GetDlgItem(body, navigation_brackets);
   const HWND backspace = GetDlgItem(body, backspace_reverts);
@@ -258,10 +275,6 @@ int main() {
   assert(saved.snapshot->preferences().at("navigation").at("tab") == false);
   assert(saved.snapshot->preferences().at("navigation").at("page_up_down") == false);
   assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
-  const auto select_tab = [&](int index) {
-    TabCtrl_SetCurSel(tabs, index);
-    SendMessageW(host, WM_NOTIFY, page_tabs, reinterpret_cast<LPARAM>(&notification));
-  };
   const auto select_value = [&](int id, int index) {
     const HWND control = GetDlgItem(body, id);
     assert(control && IsWindowEnabled(control));
@@ -276,7 +289,7 @@ int main() {
     pump_until([&] { return IsWindowEnabled(GetDlgItem(body, punctuation_mode)) != FALSE; });
   };
   // 输入页的标签切换不落盘；繁简只修改对应开关，不改其他宿主的繁体变体。
-  select_tab(2);
+  select_tab(L"输出设置");
   assert((GetWindowLongPtrW(GetDlgItem(body, traditional_output), GWL_STYLE) & WS_VISIBLE) != 0);
   assert(store.load().snapshot->revision() == saved.snapshot->revision());
   const auto before_output = saved.snapshot->preferences();
@@ -350,7 +363,7 @@ int main() {
   assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
   // 混输总开关仅改变可用状态，保留子项与其他宿主使用的最短触发长度。
   select_page(3);
-  select_tab(1);
+  select_tab(L"候选与联想");
   assert((GetWindowLongPtrW(GetDlgItem(body, mixed_enabled), GWL_STYLE) & WS_VISIBLE) != 0);
   assert(store.load().snapshot->revision() == saved.snapshot->revision());
 #if MSIME_EDITION_TEMPORARY_JAPANESE
@@ -428,6 +441,62 @@ int main() {
   assert(saved.snapshot->preferences().at("cloud_candidate_provider").at("timeout_ms") == 3500);
   assert(caption(GetDlgItem(body, cloud_timeout)) == L"3500");
   assert(caption(GetDlgItem(host, status_text)).find(L"其他窗口") != std::wstring::npos);
+  select_tab(L"中英模式");
+  const auto mode_revision = saved.snapshot->revision();
+  assert(store.load().snapshot->revision() == mode_revision);
+  const auto old_mode = saved.snapshot->preferences().at("default_ime_mode");
+  select_value(default_ime_mode, old_mode == "english" ? 0 : 1);
+  assert(store.load().snapshot->preferences().at("default_ime_mode") != old_mode);
+  select_value(ime_mode_scope, 1);
+  assert(store.load().snapshot->preferences().at("ime_mode_scope") == "global");
+  const bool old_hud = store.load().snapshot->preferences().at("input_mode_hud").get<bool>();
+  click(input_mode_hud);
+  assert(store.load().snapshot->preferences().at("input_mode_hud").get<bool>() != old_hud);
+  saved = store.load();
+  // 同一张规则表里其他平台的标识必须保留，新增 Windows 规则沿用现有路径与大小写规范化。
+  auto rule_seed = store.save(*saved.snapshot, {{{"app_input_mode_rules"}, Json{{"com.synthetic.editor", "english"}}}});
+  assert(rule_seed.outcome == Outcome::saved);
+  SendMessageW(host, WM_COMMAND, MAKEWPARAM(reload_settings, BN_CLICKED), 0);
+  pump_until([&] { return IsWindowEnabled(GetDlgItem(body, app_rule_add)) != FALSE; });
+  assert(!IsWindowEnabled(GetDlgItem(body, app_rule_mode)));
+  SetWindowTextW(GetDlgItem(body, app_rule_name), L"  \"C:\\synthetic\\合成EDITOR.EXE\"  ");
+  click(app_rule_add);
+  saved = store.load();
+  assert(saved.snapshot->revision() == rule_seed.snapshot->revision() + 1);
+  assert(saved.snapshot->preferences().at("app_input_mode_rules").at("合成editor.exe") == "chinese");
+  assert(saved.snapshot->preferences().at("app_input_mode_rules").at("com.synthetic.editor") == "english");
+  assert(saved.snapshot->preferences().at("ime_mode_scope") == "global");
+  SetWindowTextW(GetDlgItem(body, app_rule_name), L"合成Editor.EXE");
+  click(app_rule_add);
+  assert(store.load().snapshot->revision() == saved.snapshot->revision());
+  assert(caption(GetDlgItem(host, status_text)).find(L"已经有例外") != std::wstring::npos);
+  const auto select_rule = [&](const wchar_t* prefix) {
+    const HWND list = GetDlgItem(body, app_rule_list);
+    const auto index = SendMessageW(list, LB_FINDSTRING, static_cast<WPARAM>(-1), reinterpret_cast<LPARAM>(prefix));
+    assert(index != LB_ERR);
+    SendMessageW(list, LB_SETCURSEL, index, 0);
+    SendMessageW(body, WM_COMMAND, MAKEWPARAM(app_rule_list, LBN_SELCHANGE), reinterpret_cast<LPARAM>(list));
+  };
+  select_rule(L"合成editor.exe");
+  select_value(app_rule_mode, 1);
+  saved = store.load();
+  assert(saved.snapshot->preferences().at("app_input_mode_rules").at("合成editor.exe") == "english");
+  assert(saved.snapshot->preferences().at("app_input_mode_rules").at("com.synthetic.editor") == "english");
+  SetWindowTextW(GetDlgItem(body, app_rule_name), L"synthetic.txt");
+  click(app_rule_add);
+  assert(store.load().snapshot->revision() == saved.snapshot->revision());
+  assert(caption(GetDlgItem(host, status_text)).find(L".exe") != std::wstring::npos);
+  click(app_rule_remove);
+  saved = store.load();
+  assert(!saved.snapshot->preferences().at("app_input_mode_rules").contains("合成editor.exe"));
+  assert(saved.snapshot->preferences().at("app_input_mode_rules").at("com.synthetic.editor") == "english");
+  select_rule(L"com.synthetic.editor");
+  click(app_rule_remove);
+  saved = store.load();
+  assert(!saved.snapshot->preferences().contains("app_input_mode_rules"));
+  assert(!IsWindowEnabled(GetDlgItem(body, app_rule_remove)));
+  assert(!IsWindowEnabled(GetDlgItem(body, app_rule_mode)));
+  assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
   // 原有自定义尺寸只在用户选择标准档位后才改变；两个尺寸字段原子保存。
   select_page(1);
   const HWND size = GetDlgItem(body, toolbar_size);

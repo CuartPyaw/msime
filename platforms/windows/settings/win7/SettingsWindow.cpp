@@ -1,6 +1,7 @@
 #include "SettingsWindow.h"
 #include "PreferencesStore.h"
 #include "CloudCandidateForm.h"
+#include "InputModeForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -34,7 +35,11 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates };
+enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode };
+constexpr std::array<std::pair<Surface, const wchar_t*>, 4> input_pages{{
+    {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
+    {Surface::candidates, L"候选与联想"}, {Surface::output, L"输出设置"},
+}};
 struct ToolbarCheck { int id; const char* field; const wchar_t* label; };
 constexpr std::array<ToolbarCheck, 11> toolbar_checks{{
     {toolbar_enabled, "enabled", L"在桌面显示悬浮工具栏"},
@@ -310,6 +315,7 @@ struct SettingsWindow::State {
   int output_height = 0;
   int punctuation_height = 0;
   int candidates_height = 0;
+  int mode_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
   std::vector<std::string> word_choices;
@@ -323,6 +329,7 @@ struct SettingsWindow::State {
   std::optional<Snapshot> snapshot;
   FilePicker file_picker;
   CloudCandidateForm cloud_form;
+  InputModeForm mode_form;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
 
@@ -392,6 +399,10 @@ struct SettingsWindow::State {
     output_controls();
     punctuation_controls();
     candidates_controls();
+    mode_height = mode_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+                                         int id, int top, int height) {
+      return surface_row(Surface::mode, type, text, style, id, top, height);
+    });
     enable(false);
     layout();
     return !failed;
@@ -656,6 +667,7 @@ struct SettingsWindow::State {
     EnableWindow(GetDlgItem(body, mixed_first_page_count), enabled && mixed && snapshot &&
         snapshot->preferences().at("mixed_input").at("english").get<bool>());
     cloud_form.enable(enabled);
+    mode_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -670,7 +682,7 @@ struct SettingsWindow::State {
     MoveWindow(selector_label, dip(24), dip(18), dip(80), dip(26), TRUE);
     MoveWindow(selector, dip(112), dip(12), std::max(width - dip(136), 1), dip(160), TRUE);
     const bool has_tabs = surface == Surface::shortcuts || surface == Surface::reference ||
-        surface == Surface::selection || surface == Surface::output || surface == Surface::candidates;
+        std::any_of(input_pages.begin(), input_pages.end(), [this](const auto& page) { return page.first == surface; });
     ShowWindow(tabs, has_tabs ? SW_SHOW : SW_HIDE);
     MoveWindow(tabs, dip(24), dip(52), std::max(width - dip(48), 1), dip(30), TRUE);
     const int body_top = has_tabs ? 94 : 58;
@@ -690,7 +702,8 @@ struct SettingsWindow::State {
     const int total = surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
-        surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height : content_height;
+        surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
+        surface == Surface::mode ? mode_height : content_height;
     info.nMax = reference ? 0 : dip(total) - 1;
     info.nPage = static_cast<UINT>(std::max(client.bottom, 0L));
     info.nPos = reference ? 0 : scroll;
@@ -724,7 +737,8 @@ struct SettingsWindow::State {
         GetDlgCtrlID(control) == punctuation_mode || GetDlgCtrlID(control) == quote_style ||
         GetDlgCtrlID(control) == bracket_style || GetDlgCtrlID(control) == mixed_first_page_count ||
         GetDlgCtrlID(control) == cloud_source || GetDlgCtrlID(control) == cloud_method ||
-        GetDlgCtrlID(control) == cloud_response_format)
+        GetDlgCtrlID(control) == cloud_response_format || GetDlgCtrlID(control) == default_ime_mode ||
+        GetDlgCtrlID(control) == ime_mode_scope || GetDlgCtrlID(control) == app_rule_mode)
       rectangle.bottom = rectangle.top + dip(32);
     if (rectangle.top < 0) scroll_to(scroll + rectangle.top);
     else if (rectangle.bottom > viewport.bottom) scroll_to(scroll + rectangle.bottom - viewport.bottom);
@@ -821,6 +835,7 @@ struct SettingsWindow::State {
     if (mixed.contains("first_page_count") && !mixed.at("first_page_count").is_number_integer()) return false;
     if (mixed.value("first_page_count", 1) < 1 || mixed.value("first_page_count", 1) > 3) return false;
     if (!CloudCandidateForm::valid(preferences.at("cloud_candidate_provider"))) return false;
+    if (!InputModeForm::valid(preferences)) return false;
     return true;
   }
 
@@ -967,6 +982,7 @@ struct SettingsWindow::State {
       refresh_selection();
       refresh_output_and_punctuation();
       refresh_candidates();
+      mode_form.refresh(snapshot->preferences());
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1001,9 +1017,9 @@ struct SettingsWindow::State {
       const auto selected = SendMessageW(selector, CB_GETCURSEL, 0, 0);
       TabCtrl_DeleteAllItems(tabs);
       if (selected == 0 || selected == 3) {
-        const std::vector<const wchar_t*> titles = selected == 0 ?
-            std::vector<const wchar_t*>{L"按键设置", L"按键速查"} :
-            std::vector<const wchar_t*>{L"选词与翻页", L"候选与联想", L"输出设置"};
+        std::vector<const wchar_t*> titles;
+        if (selected == 0) titles = {L"按键设置", L"按键速查"};
+        else for (const auto& page : input_pages) titles.push_back(page.second);
         for (size_t index = 0; index < titles.size(); ++index) {
           TCITEMW tab{};
           tab.mask = TCIF_TEXT;
@@ -1013,7 +1029,7 @@ struct SettingsWindow::State {
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : input_tab);
       }
       surface = selected == 4 ? Surface::punctuation : selected == 3 ?
-          (input_tab == 2 ? Surface::output : input_tab == 1 ? Surface::candidates : Surface::selection) :
+          input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
       scroll = 0;
@@ -1031,6 +1047,16 @@ struct SettingsWindow::State {
       return;
     }
     if (!snapshot) return;
+    auto mode_change = mode_form.command(command);
+    if (mode_change.handled) {
+      if (!mode_change.changes.empty()) {
+        Job job;
+        job.reload = false;
+        job.changes = std::move(mode_change.changes);
+        submit(std::move(job));
+      } else if (!mode_change.message.empty()) SetWindowTextW(status, mode_change.message.c_str());
+      return;
+    }
     if ((id == cloud_source || id == cloud_method || id == cloud_response_format) && HIWORD(command) == CBN_SELCHANGE) {
       cloud_form.enable(true);
       return;
@@ -1167,6 +1193,9 @@ struct SettingsWindow::State {
               (HIWORD(wparam) == CBN_SETFOCUS || HIWORD(wparam) == EN_SETFOCUS || HIWORD(wparam) == BN_SETFOCUS)) ||
           ((LOWORD(wparam) >= mixed_enabled && LOWORD(wparam) <= word_lattice) &&
               (HIWORD(wparam) == BN_SETFOCUS || HIWORD(wparam) == CBN_SETFOCUS)) ||
+          ((LOWORD(wparam) >= default_ime_mode && LOWORD(wparam) <= app_rule_remove) &&
+              (HIWORD(wparam) == CBN_SETFOCUS || HIWORD(wparam) == EN_SETFOCUS || HIWORD(wparam) == BN_SETFOCUS ||
+                  (LOWORD(wparam) == app_rule_list && HIWORD(wparam) == LBN_SETFOCUS))) ||
           (LOWORD(wparam) == data_directory_text && HIWORD(wparam) == EN_SETFOCUS))
         self->reveal(reinterpret_cast<HWND>(lparam));
       else self->command(wparam);
@@ -1225,9 +1254,9 @@ struct SettingsWindow::State {
           self->shortcut_tab = tab;
           self->surface = tab == 1 ? Surface::reference : Surface::shortcuts;
         } else if (page == 3) {
-          if (tab > 2) return 0;
+          if (static_cast<size_t>(tab) >= input_pages.size()) return 0;
           self->input_tab = tab;
-          self->surface = tab == 2 ? Surface::output : tab == 1 ? Surface::candidates : Surface::selection;
+          self->surface = input_pages[static_cast<size_t>(tab)].first;
         } else return 0;
         self->scroll = 0;
         self->layout();
