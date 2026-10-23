@@ -62,6 +62,14 @@ SHA-256 一致。许可声明在 `resources/licenses/rime-baguwen-LGPL-3.0.txt` 
 
 `msime_client_resource_pack_remove` 在公共 `msime_client.h` 声明与 Rust 导出相同的字节缓冲区签名，原生宿主可直接包含头文件调用，响应使用标准 JSON 封装的 `{removed: bool}`。只补充导出而遗漏头文件会使 C/C++ 调用方编译失败；宿主接口一致性回归与 C、C++ 编译检查覆盖这一边界。
 
+## 2026-10-24 补充：Windows 原生设置页模型入口
+
+Windows 原生设置页现在与共享设置页提供同一组能力：桌面神经联想、去重后补充次选、语法模型选择，以及万象 LTS、八股文词级和八股文紧凑模型的按需下载、校验、取消和删除。页面只把 `state_directory()` 作为 `state_root` 交给 `msime_client_resource_packs*`，不复制锁文件、SHA-256 或模型路径规则；下载使用已保存的资源镜像前缀，删除前由 host-api 释放共享映射。白霜仍因许可未确认不列出，默认值不变。
+
+这次没有把旧版任意 `.gram` 文件导入做成入口：共享层只接受锁定资源包，任意导入会绕过许可和内容校验。模型选择只写 `sentence_association.grammar_model`，安装完成后由现有会话在下次聚焦时重新读取，避免设置窗口直接触碰输入线程。
+
+契约测试同时钉住三个偏好键、资源包查询/安装/删除入口和白霜未列出，避免 Windows 设置页以后只保留静态下拉而失去实际管理能力。
+
 ## 2026-10-22 补充：octagram 调参系数进偏好（对应 Windows `sentence_collocation_*`）
 
 Windows v0.11.1 出厂模板的 `[association]` 有七个不进设置页的高级调参键：`sentence_collocation_weight`（1.0）、`sentence_collocation_max_length`（6）、`sentence_collocation_min_length`（2）、`sentence_collocation_penalty`（-14.0）、`sentence_collocation_non_penalty`（-6.0）、`sentence_collocation_weak_penalty`（-100.0）、`sentence_collocation_rear_penalty`（-18.0）。新架构的 `GramConfig` 早已是这些参数的结构体，但值是定值，偏好层不可调。本轮把同名七键加进 `SentenceAssociationPreferences`（键名逐字与 Windows 一致），host-api 的 `engine_sentence_association` 逐字段透传进 `collocation_weight` 与 `collocation_grammar`。
