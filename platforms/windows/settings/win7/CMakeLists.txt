@@ -12,7 +12,7 @@ if(NOT IS_ABSOLUTE "${MSIME_HOST_LIBRARY}" OR NOT EXISTS "${MSIME_HOST_LIBRARY}"
   message(FATAL_ERROR "MSIME_HOST_LIBRARY 必须是同源核心的绝对导入库路径")
 endif()
 add_library(msime-win7-settings-window STATIC SettingsWindow.cpp)
-target_include_directories(msime-win7-settings-window PUBLIC ../../../../crates/host-api/include)
+target_include_directories(msime-win7-settings-window PUBLIC ../../../../crates/host-api/include ../../common)
 target_compile_features(msime-win7-settings-window PUBLIC cxx_std_17)
 target_compile_definitions(msime-win7-settings-window PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
 target_link_libraries(msime-win7-settings-window PUBLIC nlohmann_json::nlohmann_json "${MSIME_HOST_LIBRARY}" comctl32 ole32 uuid shell32 advapi32 user32 gdi32 msimg32 crypt32)

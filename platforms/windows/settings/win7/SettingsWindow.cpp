@@ -12,6 +12,7 @@
 #include "ThemeForm.h"
 #include "CommunitySkinForm.h"
 #include "StatisticsForm.h"
+#include "ToolbarPreview.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -264,6 +265,7 @@ struct ThemeCompletion {
   std::optional<Json> themes;
   std::optional<Json> catalog;
   theme_data::Preview preview;
+  theme_data::Preview toolbar;
 };
 
 struct Completion {
@@ -550,6 +552,7 @@ private:
               completion.catalog = theme_data::catalog(directory_ / L"skins");
             }
             completion.preview = theme_data::preview(result.snapshot->preferences(), directory_ / L"skins", theme_preview_mode_);
+            completion.toolbar = theme_data::toolbar_preview(result.snapshot->preferences(), directory_ / L"skins");
             theme_ = std::move(completion);
           }
         }
@@ -664,6 +667,7 @@ struct SettingsWindow::State {
   CommunityTransport community_transport;
   CommunityTransport statistics_upload_transport;
   StatisticsForm statistics_form;
+  ToolbarPreview toolbar_preview_form;
   FolderPicker folder_picker;
   Confirmation confirmation;
 
@@ -793,6 +797,10 @@ struct SettingsWindow::State {
       items.back().surface = Surface::toolbar;
       return control;
     };
+    toolbar_row(L"STATIC", L"", SS_LEFT, toolbar_preview_description, top, 48);
+    top += 56;
+    toolbar_row(L"STATIC", L"悬浮工具栏预览", SS_OWNERDRAW | WS_BORDER, toolbar_preview, top, 144);
+    top += 156;
     toolbar_row(L"STATIC", L"显示", SS_LEFT, -1, top, 24);
     top += 32;
     for (const auto& field : toolbar_checks) {
@@ -818,7 +826,9 @@ struct SettingsWindow::State {
     toolbar_row(L"STATIC", L"按钮和图标一起放大或缩小，不改变系统显示缩放。颜色与明暗跟随主题设置。", SS_LEFT, -1, top, 42);
     top += 50;
     toolbar_row(L"STATIC", L"", SS_LEFT, toolbar_summary, top, 48);
-    toolbar_height = top + 56;
+    top += 56;
+    toolbar_row(L"BUTTON", L"颜色与明暗：打开主题设置", WS_TABSTOP | BS_PUSHBUTTON, toolbar_theme, top, 32);
+    toolbar_height = top + 44;
   }
 
   void developer_controls() {
@@ -1055,6 +1065,7 @@ struct SettingsWindow::State {
     for (const auto& field : toolbar_checks)
       if (HWND control = GetDlgItem(body, field.id)) EnableWindow(control, enabled);
     EnableWindow(GetDlgItem(body, toolbar_size), enabled);
+    EnableWindow(GetDlgItem(body, toolbar_theme), enabled);
     for (int id : {diagnostic_server, diagnostic_tsf, export_settings, import_settings})
       EnableWindow(GetDlgItem(body, id), enabled);
     for (int id : {word_character_keys, backspace_reverts}) EnableWindow(GetDlgItem(body, id), enabled);
@@ -1333,6 +1344,9 @@ struct SettingsWindow::State {
 
   void refresh_toolbar() {
     if (!snapshot) return;
+    toolbar_preview_form.preferences(snapshot->preferences());
+    SetWindowTextW(GetDlgItem(body, toolbar_preview_description), toolbar_preview_form.description().c_str());
+    InvalidateRect(GetDlgItem(body, toolbar_preview), nullptr, TRUE);
     const auto& toolbar = snapshot->preferences().at("floating_toolbar");
     for (const auto& field : toolbar_checks)
       if (HWND control = GetDlgItem(body, field.id))
@@ -1452,6 +1466,8 @@ struct SettingsWindow::State {
       }
     }
     if (completed->theme) {
+      toolbar_preview_form.theme(std::move(completed->theme->toolbar));
+      InvalidateRect(GetDlgItem(body, toolbar_preview), nullptr, TRUE);
       if (completed->theme->themes && completed->theme->catalog) {
         theme_form.catalogs(*completed->theme->themes, *completed->theme->catalog);
         community_form.catalog(*completed->theme->catalog);
@@ -1552,6 +1568,11 @@ struct SettingsWindow::State {
     }
     if (busy) return;
     if (id == reload_settings && HIWORD(command) == BN_CLICKED) { if (surface == Surface::statistics) poll_statistics(); else submit(Job{}); return; }
+    if (id == toolbar_theme && HIWORD(command) == BN_CLICKED) {
+      SendMessageW(selector, CB_SETCURSEL, 8, 0);
+      this->command(MAKEWPARAM(page_selector, CBN_SELCHANGE));
+      return;
+    }
     if (HIWORD(command) == BN_CLICKED &&
         (id == restart_service || id == open_data_directory || id == open_logs_directory)) {
       Job job;
@@ -1868,7 +1889,7 @@ struct SettingsWindow::State {
     }
     if (message == WM_DRAWITEM) {
       const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
-      if (draw && (self->theme_form.draw(*draw) || self->community_form.draw(*draw) || self->statistics_form.draw(*draw))) return TRUE;
+      if (draw && (self->theme_form.draw(*draw) || self->community_form.draw(*draw) || self->statistics_form.draw(*draw) || self->toolbar_preview_form.draw(*draw))) return TRUE;
       if (draw && draw->CtlID == appearance_preview) {
         RECT rect = draw->rcItem;
         const auto background = CreateSolidBrush(RGB(248, 248, 248));

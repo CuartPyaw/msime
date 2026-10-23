@@ -1,6 +1,8 @@
 #pragma once
 
 #include "PreferencesStore.h"
+#include "../../src/candidate/CandidatePalette.h"
+#include <array>
 #include <filesystem>
 #include <vector>
 
@@ -107,6 +109,39 @@ inline Preview preview(const Json& preferences, const std::filesystem::path& roo
     }
   }
   return result;
+}
+inline Preview toolbar_preview(const Json& preferences, const std::filesystem::path& root) {
+  Preview result;
+  const auto mode = preferences.value("theme", std::string("system"));
+  result.dark = mode == "dark" || (mode == "system" && system_dark());
+  auto custom = preferences.value("custom_theme", Json::object());
+  custom.erase("keyboard");
+  if (custom.contains("candidate_colors") && custom.at("candidate_colors").is_object()) {
+    custom["candidate_colors"].erase("number"); custom["candidate_colors"].erase("border");
+  }
+  const auto resolved = value(call(msime_client_resolve_theme,
+      {{"global_theme", preferences.value("global_theme", std::string("system"))}, {"custom_theme", std::move(custom)},
+       {"dark", result.dark}, {"layout", preferences.value("candidate_layout", std::string("vertical"))}, {"skins_directory", root.u8string()}}));
+  if (resolved && resolved->is_object()) {
+    result.resolved = *resolved;
+    if (resolved->contains("appearance") && resolved->at("appearance").is_string()) result.dark = resolved->at("appearance") == "dark";
+  }
+  return result;
+}
+inline msime::windows::CandidatePalette palette(const Preview& preview) {
+  const auto resolved = preview.resolved.is_object() ? preview.resolved.value("candidate", Json()) : Json();
+  using Overrides = msime::windows::CandidatePaletteOverrides;
+  Overrides overrides;
+  for (const auto& field : std::array<std::pair<const char*, std::optional<std::string> Overrides::*>, 10>{{
+      {"surface", &Overrides::surface}, {"border", &Overrides::border}, {"text", &Overrides::text},
+      {"number", &Overrides::number}, {"secondary", &Overrides::secondary}, {"accent", &Overrides::accent},
+      {"selected", &Overrides::selected}, {"selected_text", &Overrides::selected_text},
+      {"selected_number", &Overrides::selected_number}, {"hover", &Overrides::hover}}})
+    if (resolved.is_object() && resolved.contains(field.first) && resolved.at(field.first).is_string())
+      overrides.*(field.second) = resolved.at(field.first).get<std::string>();
+  if (resolved.is_object() && resolved.contains("show_selected_bar") && resolved.at("show_selected_bar").is_boolean())
+    overrides.show_selected_bar = resolved.at("show_selected_bar").get<bool>();
+  return msime::windows::candidate_palette(overrides, msime::windows::candidate_native_palette(preview.dark));
 }
 } // namespace theme_data
 } // namespace msime::settings::win7

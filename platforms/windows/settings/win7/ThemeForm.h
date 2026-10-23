@@ -342,19 +342,7 @@ inline bool ThemeForm::draw(const DRAWITEMSTRUCT& draw) const {
   }
   const double scale = static_cast<double>(rect.bottom - rect.top) / 228;
   const auto dip = [scale](int value) { return static_cast<int>(value * scale); };
-  const auto resolved = preview_.resolved.value("candidate", Json());
-  using Overrides = msime::windows::CandidatePaletteOverrides;
-  Overrides overrides;
-  for (const auto& field : std::array<std::pair<const char*, std::optional<std::string> Overrides::*>, 10>{{
-      {"surface", &Overrides::surface}, {"border", &Overrides::border}, {"text", &Overrides::text},
-      {"number", &Overrides::number}, {"secondary", &Overrides::secondary}, {"accent", &Overrides::accent},
-      {"selected", &Overrides::selected}, {"selected_text", &Overrides::selected_text},
-      {"selected_number", &Overrides::selected_number}, {"hover", &Overrides::hover}}})
-    if (resolved.is_object() && resolved.contains(field.first) && resolved.at(field.first).is_string())
-      overrides.*(field.second) = resolved.at(field.first).get<std::string>();
-  if (resolved.is_object() && resolved.contains("show_selected_bar") && resolved.at("show_selected_bar").is_boolean())
-    overrides.show_selected_bar = resolved.at("show_selected_bar").get<bool>();
-  const auto palette = msime::windows::candidate_palette(overrides, msime::windows::candidate_native_palette(preview_.dark));
+  const auto palette = theme_data::palette(preview_);
   const auto flatten = [&](const msime::windows::CandidateColor& value, COLORREF background) {
     return mix(RGB(static_cast<int>(value.r * 255 + 0.5f), static_cast<int>(value.g * 255 + 0.5f), static_cast<int>(value.b * 255 + 0.5f)),
         background, static_cast<int>(value.a * 255 + 0.5f));

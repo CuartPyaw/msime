@@ -1327,6 +1327,8 @@ int main() {
   assert(SendMessageW(size, CB_GETCOUNT, 0, 0) == 6);
   assert(SendMessageW(size, CB_GETCURSEL, 0, 0) == 5);
   assert(store.load().snapshot->revision() == custom.snapshot->revision());
+  const auto custom_toolbar_dimensions = caption(GetDlgItem(body, toolbar_preview_description));
+  assert(custom_toolbar_dimensions.find(L"DIP") != std::wstring::npos);
   SendMessageW(size, CB_SETCURSEL, 4, 0);
   SendMessageW(body, WM_COMMAND, MAKEWPARAM(toolbar_size, CBN_SELCHANGE), reinterpret_cast<LPARAM>(size));
   pump_until([&] { return IsWindowEnabled(size) != FALSE; });
@@ -1335,6 +1337,8 @@ int main() {
   assert(saved.snapshot->preferences().at("floating_toolbar").at("scale_percent") == 150);
   assert(saved.snapshot->preferences().at("floating_toolbar").at("font_size") == 28);
   assert(SendMessageW(size, CB_GETCOUNT, 0, 0) == 5);
+  const auto standard_toolbar_dimensions = caption(GetDlgItem(body, toolbar_preview_description));
+  assert(standard_toolbar_dimensions != custom_toolbar_dimensions);
   const HWND emoji = GetDlgItem(body, toolbar_emoji);
   const bool previous_emoji = saved.snapshot->preferences().at("floating_toolbar").at("emoji").get<bool>();
   SendMessageW(emoji, BM_CLICK, 0, 0);
@@ -1342,6 +1346,25 @@ int main() {
   saved = store.load();
   assert(saved.snapshot->preferences().at("floating_toolbar").at("emoji").get<bool>() != previous_emoji);
   assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  assert(caption(GetDlgItem(body, toolbar_preview_description)) != standard_toolbar_dimensions);
+  {
+    const auto toolbar_dc = CreateCompatibleDC(nullptr);
+    void* bits = nullptr;
+    const auto bitmap = CreateDIBSection(toolbar_dc, &preview_info, DIB_RGB_COLORS, &bits, nullptr, 0);
+    assert(toolbar_dc && bitmap && bits);
+    const auto previous = SelectObject(toolbar_dc, bitmap);
+    DRAWITEMSTRUCT drawing{};
+    drawing.CtlType = ODT_STATIC; drawing.CtlID = toolbar_preview; drawing.hwndItem = GetDlgItem(body, toolbar_preview);
+    drawing.hDC = toolbar_dc; drawing.rcItem = RECT{0,0,600,228};
+    assert(SendMessageW(body, WM_DRAWITEM, toolbar_preview, reinterpret_cast<LPARAM>(&drawing)));
+    assert(GetPixel(toolbar_dc, 100, 20) != GetSysColor(COLOR_BTNFACE));
+    SelectObject(toolbar_dc, previous); DeleteObject(bitmap); DeleteDC(toolbar_dc);
+  }
+  const auto before_toolbar_jump = saved.snapshot->revision();
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(toolbar_theme, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(body, toolbar_theme)));
+  pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+  assert(SendMessageW(GetDlgItem(host, page_selector), CB_GETCURSEL, 0, 0) == 8);
+  assert(store.load().snapshot->revision() == before_toolbar_jump);
   select_page(2);
   const HWND server_log = GetDlgItem(body, diagnostic_server);
   const HWND tsf_log = GetDlgItem(body, diagnostic_tsf);

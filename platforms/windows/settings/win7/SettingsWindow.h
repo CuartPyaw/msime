@@ -16,6 +16,7 @@ enum ControlId {
   toolbar_enabled = 200, toolbar_language, toolbar_scheme, toolbar_fullwidth,
   toolbar_punctuation, toolbar_character_set, toolbar_emoji, toolbar_handwriting,
   toolbar_keyboard, toolbar_voice, toolbar_settings, toolbar_size, toolbar_summary,
+  toolbar_preview, toolbar_preview_description, toolbar_theme,
   diagnostic_server = 300, diagnostic_tsf, restart_service, open_data_directory,
   open_logs_directory, export_settings, import_settings, data_directory_text,
   word_character_keys = 400, backspace_reverts, navigation_minus_equal, navigation_comma_period,
