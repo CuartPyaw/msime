@@ -331,18 +331,11 @@ xcodebuild -workspace platforms/ios/MSIMEClient.xcworkspace -scheme MSIMEClientU
 
 设备须解锁，并已启用水杉系统键盘。用例在独立测试编辑器中只输入合成拼音，不使用设备上的浏览器或备忘录。
 
-**在 iOS 27 模拟器上，键盘能装上但切不过去。** 启用和切换是两件事，要分开看：
+iOS 27 模拟器可以通过系统设置登记并激活水杉键盘。系统入口验收必须使用模拟器 ad-hoc 签名（`CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual DEVELOPMENT_TEAM=`），并在「设置 → 通用 → 键盘 → 键盘」添加水杉、允许完全访问；`addKeyboardInSettingsIfNeeded` 走这条设置路径。`CODE_SIGNING_ALLOWED=NO` 的扩展缺少 App Group 权限，不适用于该验收。模拟器权限由 Xcode 的 `Entitlements-Simulated.plist` 注入可执行文件，不能只凭 `codesign` 打印的空字典判断。仅写 `AppleKeyboards`、调用 `pluginkit` 或使用 `App-prefs` 深链不能替代设置界面的登记。
 
-- **启用是成功的。** 往 `.GlobalPreferences` 写 `AppleKeyboards`（加上扩展 bundle id `app.msime.ios.keyboard`）并重启模拟器之后，设置 → 通用 → 键盘 → 键盘 里确实列着「水杉输入法 · 中文」。要确认这一点得走 Settings 把每一层的单元格文案打出来看，只凭「键盘环里没有它」会误判成写入无效。
-- **切换是失败的。** XCUITest 到不了它。`app.buttons["Next keyboard"]` 点下去落在 shift 上（键面在 Q/q 之间来回，始终是同一个 `UIKeyboardLayoutStar`），长按它弹出的是单手键盘的「默认/右手/左手」菜单，里面一个键盘名字都没有——连已启用的简体拼音和英语都没有。`app.keyboards.buttons` 只有 `shift` / `emoji` / `Return` 三个。
+原有整套 UI 基线为 **39 执行、2 跳过、0 失败**（917 秒），两项系统键盘用例当时跳过；新增或单项验收的结果单独记录，不据此更新整套 UI 的通过与跳过数量。
 
-把扩展排到 `AppleKeyboards` 数组第一位也不会让它成为默认键盘：新编辑框打开的仍是第一个**系统**键盘（实测是简体拼音），iOS 不会为第三方键盘做默认。所以模拟器上到不了「真实编辑器」这一级，差的就是那一下人手切换。
-
-另外两条与启用无关，试过也无效，不必再走：`pluginkit -e use -i app.msime.ios.keyboard`（扩展本来就注册为 `com.apple.keyboard-service`，置 `+` 能跨重装保持，但和键盘环无关），以及 `App-prefs:General&path=Keyboard` 深链（命令返回成功，界面停在设置首页不跳转）。
-
-真机上就是正常在 设置 → 键盘 里添加一次，之后这组用例会自己跑起来。
-
-**当前结果为 39 执行、2 跳过、0 失败**（917 秒）。两条跳过是上面那组键盘用例，等键盘在设置里启用后才会真正执行。
+`testCandidatePanelAfterHostSchemeChanges` 于 2026-10-24 在 iOS 27 arm64 模拟器的真实系统扩展入口通过（410.216 秒，1 通过、0 失败、0 跳过）。它保留独立编辑器与未完成组字，经产品设置切换双拼、全拼、九键和十四键，三轮共 12 次；每次展开、收起、再次展开并精确追加选中的候选。24 张展开与上屏截图已查看。此结果不覆盖报告人实体 iPhone 的低概率现场，细节见[候选列表与隐藏布局笔记](../../.agents/notes/implemented/bug-fix/2026-10-19-ios-large-candidate-panel.md)。
 
 写这组用例时踩过三类坑，都不是产品坏了，记在这里因为很容易再踩：
 
