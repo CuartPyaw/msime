@@ -19,6 +19,9 @@ enum ControlId {
   open_logs_directory, export_settings, import_settings, data_directory_text,
   word_character_keys = 400, backspace_reverts, navigation_minus_equal, navigation_comma_period,
   navigation_brackets, navigation_mouse_wheel, navigation_arrows, navigation_left_right,
+  traditional_output = 500, output_description, chinese_english_spacing, fullwidth_output,
+  punctuation_mode = 600, quote_style, bracket_style, paired_punctuation, smart_punctuation,
+  smart_description, smart_repeat, smart_space_convert, smart_direct_digit, smart_direct_letter,
 };
 
 class SettingsWindow {

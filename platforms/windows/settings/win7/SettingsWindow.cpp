@@ -1,6 +1,7 @@
 #include "SettingsWindow.h"
 #include "PreferencesStore.h"
 #include "../InputSettingsModel.h"
+#include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
 #include "../SettingsStateDirectory.h"
 #include "../SettingsDocumentFile.h"
@@ -31,7 +32,8 @@ constexpr UINT completed_message = WM_APP + 71;
 constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_SUFFIX;
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
-enum class Surface { shortcuts, reference, toolbar, developer, selection };
+namespace ps = msime::settings::punctuation;
+enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation };
 struct ToolbarCheck { int id; const char* field; const wchar_t* label; };
 constexpr std::array<ToolbarCheck, 11> toolbar_checks{{
     {toolbar_enabled, "enabled", L"在桌面显示悬浮工具栏"},
@@ -61,6 +63,25 @@ constexpr std::array<NavigationCheck, 6> navigation_checks{{
     {navigation_arrows, "arrows", L"上 / 下（移动候选项）"},
     {navigation_left_right, "left_right", L"左 / 右（移动候选项）"},
 }};
+constexpr std::array<NavigationCheck, 6> punctuation_checks{{
+    {paired_punctuation, "paired_punctuation", L"成对标点自动补全"},
+    {smart_punctuation, "smart_punctuation", L"智能标点"},
+    {smart_repeat, "smart_punctuation_repeat", L"重复标点转中文"},
+    {smart_space_convert, "smart_punctuation_space_convert", L"中文标点后按空格转换"},
+    {smart_direct_digit, "smart_punctuation_direct_digit", L"数字后直出"},
+    {smart_direct_letter, "smart_punctuation_direct_letter", L"字母后直出"},
+}};
+constexpr std::array<const char*, 3> quote_values{{"curly", "corner", "corner_when_traditional"}};
+constexpr std::array<const char*, 2> bracket_values{{"solid", "hollow"}};
+
+// 这些标识来自共享配置的枚举，不用于转换用户文本。
+std::wstring wide_id(const std::string& value) { return {value.begin(), value.end()}; }
+std::string narrow_id(std::wstring_view value) {
+  std::string result;
+  result.reserve(value.size());
+  for (const wchar_t letter : value) result.push_back(static_cast<char>(letter));
+  return result;
+}
 
 std::wstring environment(const wchar_t* name) {
   const DWORD required = GetEnvironmentVariableW(name, nullptr, 0);
@@ -265,6 +286,10 @@ struct SettingsWindow::State {
   int toolbar_height = 0;
   int developer_height = 0;
   int selection_height = 0;
+  int output_height = 0;
+  int punctuation_height = 0;
+  int shortcut_tab = 0;
+  int input_tab = 0;
   std::vector<std::string> word_choices;
   Surface surface = Surface::shortcuts;
   bool busy = true;
@@ -297,7 +322,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -340,6 +365,8 @@ struct SettingsWindow::State {
     toolbar_controls();
     developer_controls();
     selection_controls();
+    output_controls();
+    punctuation_controls();
     enable(false);
     layout();
     return !failed;
@@ -468,6 +495,77 @@ struct SettingsWindow::State {
     selection_height = top + 16;
   }
 
+  HWND surface_row(Surface target, const wchar_t* type, const wchar_t* text, DWORD style,
+                   int id, int top, int height) {
+    const auto control = row(type, text, style, id, top, height);
+    items.back().surface = target;
+    return control;
+  }
+
+  void output_controls() {
+    const auto item = [this](const wchar_t* type, const wchar_t* text, DWORD style,
+                            int id, int top, int height) {
+      return surface_row(Surface::output, type, text, style, id, top, height);
+    };
+    item(L"STATIC", L"输出设置", SS_LEFT, -1, 0, 28);
+    item(L"STATIC", L"中文输出", SS_LEFT, -1, 42, 24);
+    const auto output = item(WC_COMBOBOXW, L"中文输出", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+        traditional_output, 76, 160);
+    for (const auto* title : {L"简体", L"繁体"})
+      SendMessageW(output, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
+    item(L"STATIC", L"", SS_LEFT, output_description, 120, 62);
+    item(L"BUTTON", L"中英文之间加空格", WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY,
+        chinese_english_spacing, 202, 28);
+    item(L"STATIC", L"一次上屏的文字里，汉字与英文字母、数字相邻处自动加一个空格，如「用Rust写」上屏为「用 Rust 写」。两次上屏之间不加；网址、日期等快捷模式和全角输入不受影响，译文和释义上屏、常用语、剪贴板和语音结果也不加。", SS_LEFT, -1, 240, 96);
+    item(L"BUTTON", L"全角输入", WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY, fullwidth_output, 356, 28);
+    item(L"STATIC", L"将英文字符和空格提交为全角形式，会话开始时生效；工具栏、键盘的更多工具或快捷键可临时切换。", SS_LEFT, -1, 394, 62);
+    output_height = 474;
+  }
+
+  void punctuation_controls() {
+    const auto item = [this](const wchar_t* type, const wchar_t* text, DWORD style,
+                            int id, int top, int height) {
+      return surface_row(Surface::punctuation, type, text, style, id, top, height);
+    };
+    item(L"STATIC", L"标点设置", SS_LEFT, -1, 0, 28);
+    item(L"STATIC", L"标点", SS_LEFT, -1, 42, 24);
+    item(L"STATIC", ps::mode_description.data(), SS_LEFT, -1, 76, 104);
+    const auto mode = item(WC_COMBOBOXW, L"标点", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+        punctuation_mode, 192, 200);
+    for (const auto& choice : ps::mode_choices)
+      SendMessageW(mode, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(choice.label.data()));
+    item(L"STATIC", L"引号样式", SS_LEFT, -1, 242, 24);
+    item(L"STATIC", L"中文标点下 ' 键和 Shift+' 键输出的引号。直角引号：' 出「」，Shift+' 出『』。", SS_LEFT, -1, 276, 48);
+    const auto quotes = item(WC_COMBOBOXW, L"引号样式", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+        quote_style, 336, 180);
+    for (const auto* title : {L"弯引号 “ ” ‘ ’", L"直角引号 「 」『 』", L"繁体输出时用直角引号"})
+      SendMessageW(quotes, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
+    item(L"STATIC", L"方头括号样式", SS_LEFT, -1, 386, 24);
+    item(L"STATIC", L"中文标点下 [ ] 键输出的括号。", SS_LEFT, -1, 420, 28);
+    const auto brackets = item(WC_COMBOBOXW, L"方头括号样式", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+        bracket_style, 460, 160);
+    for (const auto* title : {L"实心 【 】", L"空心 〖 〗"})
+      SendMessageW(brackets, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
+    constexpr std::array<const wchar_t*, 6> descriptions{{
+        L"输入左侧符号时自动补全右侧符号，并将光标置于中间。",
+        L"",
+        L"智能标点输出英文标点后，2 秒内再次输入同一标点时替换为中文标点。",
+        L"刚输入中文标点后按空格，转换为对应英文标点。",
+        L"数字后输入逗号、句点或冒号时保留 ASCII 标点。",
+        L"字母后输入逗号、句点或冒号时保留 ASCII 标点。",
+    }};
+    int top = 514;
+    for (size_t index = 0; index < punctuation_checks.size(); ++index) {
+      const auto& field = punctuation_checks[index];
+      item(L"BUTTON", field.label, WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY, field.id, top, 28);
+      const int height = field.id == smart_punctuation ? 96 : 48;
+      item(L"STATIC", descriptions[index], SS_LEFT, field.id == smart_punctuation ? smart_description : -1,
+          top + 36, height);
+      top += height + 56;
+    }
+    punctuation_height = top + 16;
+  }
+
   void enable(bool enabled) {
     for (int id : {language_switch, caps_lock, japanese_toggle, traditional_toggle, fullwidth_toggle})
       if (HWND control = GetDlgItem(body, id)) EnableWindow(control, enabled);
@@ -478,6 +576,12 @@ struct SettingsWindow::State {
       EnableWindow(GetDlgItem(body, id), enabled);
     for (int id : {word_character_keys, backspace_reverts}) EnableWindow(GetDlgItem(body, id), enabled);
     for (const auto& field : navigation_checks) EnableWindow(GetDlgItem(body, field.id), enabled);
+    for (int id : {traditional_output, chinese_english_spacing, fullwidth_output,
+                   punctuation_mode, quote_style, bracket_style}) EnableWindow(GetDlgItem(body, id), enabled);
+    const bool smart = snapshot && snapshot->preferences().value("smart_punctuation", false);
+    for (const auto& field : punctuation_checks)
+      EnableWindow(GetDlgItem(body, field.id), enabled &&
+          (field.id == paired_punctuation || field.id == smart_punctuation || smart));
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -491,7 +595,8 @@ struct SettingsWindow::State {
     const int height = client.bottom;
     MoveWindow(selector_label, dip(24), dip(18), dip(80), dip(26), TRUE);
     MoveWindow(selector, dip(112), dip(12), std::max(width - dip(136), 1), dip(160), TRUE);
-    const bool has_tabs = surface == Surface::shortcuts || surface == Surface::reference;
+    const bool has_tabs = surface == Surface::shortcuts || surface == Surface::reference ||
+        surface == Surface::selection || surface == Surface::output;
     ShowWindow(tabs, has_tabs ? SW_SHOW : SW_HIDE);
     MoveWindow(tabs, dip(24), dip(52), std::max(width - dip(48), 1), dip(30), TRUE);
     const int body_top = has_tabs ? 94 : 58;
@@ -510,7 +615,8 @@ struct SettingsWindow::State {
     const bool reference = surface == Surface::reference;
     const int total = surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
-        surface == Surface::selection ? selection_height : content_height;
+        surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
+        surface == Surface::punctuation ? punctuation_height : content_height;
     info.nMax = reference ? 0 : dip(total) - 1;
     info.nPage = static_cast<UINT>(std::max(client.bottom, 0L));
     info.nPos = reference ? 0 : scroll;
@@ -540,7 +646,9 @@ struct SettingsWindow::State {
     GetClientRect(body, &viewport);
     // 下拉框的窗口高度含弹出列表，收起时只需保证顶部编辑行可见。
     if (GetDlgCtrlID(control) == language_switch || GetDlgCtrlID(control) == toolbar_size ||
-        GetDlgCtrlID(control) == word_character_keys)
+        GetDlgCtrlID(control) == word_character_keys || GetDlgCtrlID(control) == traditional_output ||
+        GetDlgCtrlID(control) == punctuation_mode || GetDlgCtrlID(control) == quote_style ||
+        GetDlgCtrlID(control) == bracket_style)
       rectangle.bottom = rectangle.top + dip(32);
     if (rectangle.top < 0) scroll_to(scroll + rectangle.top);
     else if (rectangle.bottom > viewport.bottom) scroll_to(scroll + rectangle.bottom - viewport.bottom);
@@ -603,7 +711,57 @@ struct SettingsWindow::State {
     if (word->at("keys") != "brackets" && word->at("keys") != "minus_equal") return false;
     const auto backspace = preferences.find("backspace_reverts_selection");
     if (backspace != preferences.end() && !backspace->is_boolean()) return false;
+    for (const auto* name : {"traditional_chinese_output", "chinese_punctuation"})
+      if (!preferences.contains(name) || !preferences.at(name).is_boolean()) return false;
+    for (const auto& field : punctuation_checks)
+      if (!preferences.contains(field.field) || !preferences.at(field.field).is_boolean()) return false;
+    if (preferences.contains("chinese_english_spacing") && !preferences.at("chinese_english_spacing").is_boolean())
+      return false;
+    for (const auto* name : {"character_width", "punctuation_lock", "scheme"})
+      if (!preferences.contains(name) || !preferences.at(name).is_string()) return false;
+    if (preferences.at("character_width") != "halfwidth" && preferences.at("character_width") != "fullwidth") return false;
+    if (preferences.at("punctuation_lock") != "follow" && preferences.at("punctuation_lock") != "chinese" &&
+        preferences.at("punctuation_lock") != "english") return false;
+    for (const auto* name : {"quote_style", "bracket_style"})
+      if (preferences.contains(name) && !preferences.at(name).is_string()) return false;
+    const auto quote = preferences.value("quote_style", std::string("curly"));
+    if (std::find(quote_values.begin(), quote_values.end(), quote) == quote_values.end()) return false;
+    const auto bracket = preferences.value("bracket_style", std::string("solid"));
+    if (std::find(bracket_values.begin(), bracket_values.end(), bracket) == bracket_values.end()) return false;
     return true;
+  }
+
+  void refresh_output_and_punctuation() {
+    if (!snapshot) return;
+    const auto& preferences = snapshot->preferences();
+    const bool traditional = preferences.at("traditional_chinese_output").get<bool>();
+    SendMessageW(GetDlgItem(body, traditional_output), CB_SETCURSEL, traditional ? 1 : 0, 0);
+    const auto description = input::chinese_output_description(traditional,
+        wide_id(preferences.at("scheme").get<std::string>()));
+    SetWindowTextW(GetDlgItem(body, output_description), description.c_str());
+    SendMessageW(GetDlgItem(body, chinese_english_spacing), BM_SETCHECK,
+        preferences.value("chinese_english_spacing", false) ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(GetDlgItem(body, fullwidth_output), BM_SETCHECK,
+        preferences.at("character_width") == "fullwidth" ? BST_CHECKED : BST_UNCHECKED, 0);
+    const auto mode = ps::mode(preferences.at("chinese_punctuation").get<bool>(),
+        wide_id(preferences.at("punctuation_lock").get<std::string>()));
+    for (size_t index = 0; index < ps::mode_choices.size(); ++index)
+      if (ps::mode_choices[index].value == mode)
+        SendMessageW(GetDlgItem(body, punctuation_mode), CB_SETCURSEL, index, 0);
+    const auto select = [this](int id, const auto& choices, const std::string& value) {
+      for (size_t index = 0; index < choices.size(); ++index)
+        if (choices[index] == value) SendMessageW(GetDlgItem(body, id), CB_SETCURSEL, index, 0);
+    };
+    select(quote_style, quote_values, preferences.value("quote_style", std::string("curly")));
+    select(bracket_style, bracket_values, preferences.value("bracket_style", std::string("solid")));
+    for (const auto& field : punctuation_checks)
+      SendMessageW(GetDlgItem(body, field.id), BM_SETCHECK,
+          preferences.at(field.field).get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
+    const bool inert = ps::smart_punctuation_inert(preferences.at("smart_punctuation").get<bool>(),
+        preferences.at("smart_punctuation_direct_digit").get<bool>(),
+        preferences.at("smart_punctuation_direct_letter").get<bool>());
+    SetWindowTextW(GetDlgItem(body, smart_description), inert ?
+        ps::smart_punctuation_inert_description.data() : ps::smart_punctuation_description.data());
   }
 
   void refresh_selection() {
@@ -714,6 +872,7 @@ struct SettingsWindow::State {
       refresh_reference();
       refresh_toolbar();
       refresh_selection();
+      refresh_output_and_punctuation();
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -744,8 +903,23 @@ struct SettingsWindow::State {
     const int id = LOWORD(command);
     if (id == page_selector && HIWORD(command) == CBN_SELCHANGE) {
       const auto selected = SendMessageW(selector, CB_GETCURSEL, 0, 0);
-      surface = selected == 3 ? Surface::selection : selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
-          TabCtrl_GetCurSel(tabs) == 1 ? Surface::reference : Surface::shortcuts;
+      TabCtrl_DeleteAllItems(tabs);
+      if (selected == 0 || selected == 3) {
+        const std::vector<const wchar_t*> titles = selected == 0 ?
+            std::vector<const wchar_t*>{L"按键设置", L"按键速查"} :
+            std::vector<const wchar_t*>{L"选词与翻页", L"输出设置"};
+        for (size_t index = 0; index < titles.size(); ++index) {
+          TCITEMW tab{};
+          tab.mask = TCIF_TEXT;
+          tab.pszText = const_cast<wchar_t*>(titles[index]);
+          TabCtrl_InsertItem(tabs, static_cast<int>(index), &tab);
+        }
+        TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : input_tab);
+      }
+      surface = selected == 4 ? Surface::punctuation : selected == 3 ?
+          (input_tab == 1 ? Surface::output : Surface::selection) :
+          selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
+          shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
       scroll = 0;
       layout();
       return;
@@ -777,6 +951,24 @@ struct SettingsWindow::State {
       if (selected < 0 || selected > 3) return;
       for (size_t index = 0; index < switch_fields.size(); ++index)
         job.changes.push_back({{"keybindings", switch_fields[index]}, selected == static_cast<LRESULT>(index)});
+    } else if (id == traditional_output && HIWORD(command) == CBN_SELCHANGE) {
+      const auto selected = SendMessageW(GetDlgItem(body, id), CB_GETCURSEL, 0, 0);
+      if (selected < 0 || selected > 1) return;
+      job.changes.push_back({{"traditional_chinese_output"}, selected == 1});
+    } else if (id == punctuation_mode && HIWORD(command) == CBN_SELCHANGE) {
+      const auto selected = SendMessageW(GetDlgItem(body, id), CB_GETCURSEL, 0, 0);
+      if (selected < 0 || static_cast<size_t>(selected) >= ps::mode_choices.size()) return;
+      const auto patch = ps::mode_patch(ps::mode_choices[static_cast<size_t>(selected)].value);
+      if (!patch) return;
+      if (patch->chinese_punctuation)
+        job.changes.push_back({{"chinese_punctuation"}, *patch->chinese_punctuation});
+      job.changes.push_back({{"punctuation_lock"}, narrow_id(patch->punctuation_lock)});
+    } else if ((id == quote_style || id == bracket_style) && HIWORD(command) == CBN_SELCHANGE) {
+      const auto selected = SendMessageW(GetDlgItem(body, id), CB_GETCURSEL, 0, 0);
+      const auto count = id == quote_style ? quote_values.size() : bracket_values.size();
+      if (selected < 0 || static_cast<size_t>(selected) >= count) return;
+      job.changes.push_back({{id == quote_style ? "quote_style" : "bracket_style"},
+          id == quote_style ? quote_values[static_cast<size_t>(selected)] : bracket_values[static_cast<size_t>(selected)]});
     } else if (id == word_character_keys && HIWORD(command) == CBN_SELCHANGE) {
       const auto selected = SendMessageW(GetDlgItem(body, word_character_keys), CB_GETCURSEL, 0, 0);
       if (selected < 0 || static_cast<size_t>(selected) >= word_choices.size()) return;
@@ -790,6 +982,20 @@ struct SettingsWindow::State {
       job.changes.push_back({{"floating_toolbar", "scale_percent"}, choice.scale_percent});
       job.changes.push_back({{"floating_toolbar", "font_size"}, choice.font_size});
     } else if (HIWORD(command) == BN_CLICKED) {
+      if (id == chinese_english_spacing || id == fullwidth_output) {
+        const bool checked = SendMessageW(GetDlgItem(body, id), BM_GETCHECK, 0, 0) == BST_CHECKED;
+        if (id == chinese_english_spacing) job.changes.push_back({{"chinese_english_spacing"}, checked});
+        else job.changes.push_back({{"character_width"}, checked ? "fullwidth" : "halfwidth"});
+      }
+      for (const auto& field : punctuation_checks) {
+        if (id != field.id) continue;
+        const bool checked = SendMessageW(GetDlgItem(body, id), BM_GETCHECK, 0, 0) == BST_CHECKED;
+        if (id == smart_punctuation) {
+          // 与现代窗口使用同一模型，三个字段原子保存，不出现总开关与两半不一致的中间态。
+          for (const auto key : ps::smart_punctuation_keys)
+            job.changes.push_back({{narrow_id(key)}, checked});
+        } else job.changes.push_back({{field.field}, checked});
+      }
       if (id == backspace_reverts)
         job.changes.push_back({{"backspace_reverts_selection"},
             SendMessageW(GetDlgItem(body, id), BM_GETCHECK, 0, 0) == BST_CHECKED});
@@ -830,6 +1036,10 @@ struct SettingsWindow::State {
           ((LOWORD(wparam) >= diagnostic_server && LOWORD(wparam) <= import_settings) && HIWORD(wparam) == BN_SETFOCUS) ||
           (LOWORD(wparam) == word_character_keys && HIWORD(wparam) == CBN_SETFOCUS) ||
           ((LOWORD(wparam) >= backspace_reverts && LOWORD(wparam) <= navigation_left_right) && HIWORD(wparam) == BN_SETFOCUS) ||
+          ((LOWORD(wparam) == traditional_output || LOWORD(wparam) == punctuation_mode ||
+              LOWORD(wparam) == quote_style || LOWORD(wparam) == bracket_style) && HIWORD(wparam) == CBN_SETFOCUS) ||
+          ((LOWORD(wparam) == chinese_english_spacing || LOWORD(wparam) == fullwidth_output ||
+              (LOWORD(wparam) >= paired_punctuation && LOWORD(wparam) <= smart_direct_letter)) && HIWORD(wparam) == BN_SETFOCUS) ||
           (LOWORD(wparam) == data_directory_text && HIWORD(wparam) == EN_SETFOCUS))
         self->reveal(reinterpret_cast<HWND>(lparam));
       else self->command(wparam);
@@ -880,9 +1090,18 @@ struct SettingsWindow::State {
     case WM_NOTIFY: {
       const auto* notification = reinterpret_cast<NMHDR*>(lparam);
       if (notification->idFrom == page_tabs && notification->code == TCN_SELCHANGE) {
-        self->surface = TabCtrl_GetCurSel(self->tabs) == 1 ? Surface::reference : Surface::shortcuts;
+        const auto page = SendMessageW(self->selector, CB_GETCURSEL, 0, 0);
+        const auto tab = TabCtrl_GetCurSel(self->tabs);
+        if (tab < 0 || tab > 1) return 0;
+        if (page == 0) {
+          self->shortcut_tab = tab;
+          self->surface = tab == 1 ? Surface::reference : Surface::shortcuts;
+        } else if (page == 3) {
+          self->input_tab = tab;
+          self->surface = tab == 1 ? Surface::output : Surface::selection;
+        } else return 0;
         self->scroll = 0;
-        self->layout_body();
+        self->layout();
       }
       return 0;
     }
