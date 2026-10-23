@@ -15,6 +15,10 @@
 #include <fstream>
 #include <functional>
 #include <string>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <mutex>
 
 namespace {
 using namespace msime::settings::win7;
@@ -193,6 +197,16 @@ int main() {
   bool allow_statistics = false, statistics_upload_enabled = false, fail_statistics_upload = false;
   unsigned statistics_confirmations = 0;
   std::vector<Json> statistics_upload_calls;
+  std::vector<Json> account_calls;
+  bool account_signed_in = false, allow_account = false, account_status_failed = false;
+  bool malformed_account_status = false, fail_account_apply = false;
+  bool fail_avatar_upload = false, malformed_avatar = false;
+  std::mutex account_transport_lock;
+  std::condition_variable account_google_ready;
+  std::atomic<bool> account_google_started{false}, account_google_cancelled{false};
+  unsigned google_cancellations = 0;
+  unsigned account_confirmations = 0;
+  Json account_user{{"id", "synthetic-account-0001"}, {"displayName", "合成账号"}, {"email", "synthetic@example.invalid"}, {"createdAt", "2026-01-02T03:04:05Z"}};
   const std::string synthetic_id = "00000000-0000-4000-8000-000000000001";
   const std::string other_id = "00000000-0000-4000-8000-000000000002";
   Json community_item{{"id", synthetic_id}, {"package_id", "synthetic-light"}, {"name", "合成社区皮肤"},
@@ -206,6 +220,65 @@ int main() {
     std::ofstream image(preview_file, std::ios::binary);
     image.write(reinterpret_cast<const char*>(png), sizeof(png)); assert(image.good());
   }
+  const SettingsWindow::CommunityTransport account_transport = [&](const std::string& body) {
+    assert(GetCurrentThreadId() != ui_thread);
+    const auto request = Json::parse(body);
+    assert(request.at("directory").is_string() && request.at("legacy_directory").is_string());
+    assert(request.at("client_agent").get<std::string>().find("windows") != std::string::npos);
+    std::unique_lock<std::mutex> transport_guard(account_transport_lock);
+    const auto action = request.at("action");
+    account_calls.push_back(action);
+    const auto operation = action.at("operation").get<std::string>();
+    Json value;
+    if (operation == "providers") value = {{"email", true}, {"phone", true}, {"google", true}};
+    else if (operation == "status") {
+      if (account_status_failed) return Json{{"ok", false}, {"error", "account_storage"}}.dump();
+      if (malformed_account_status) return Json{{"ok", true}, {"value", {{"user", {{"id", 12}}}}}}.dump();
+      value = {{"user", account_signed_in ? account_user : Json()}};
+    } else if (operation == "request_code") {
+      assert(action.at("target") == "synthetic@example.invalid");
+      value = {{"challengeId", "synthetic-challenge"}, {"expiresIn", 3600}};
+    } else if (operation == "google_login") {
+      account_google_cancelled = false;
+      account_google_started = true;
+      assert(account_google_ready.wait_for(transport_guard, std::chrono::seconds(5), [&] { return account_google_cancelled.load(); }));
+      account_google_started = false;
+      return Json{{"ok", false}, {"error", "account_cancelled"}}.dump();
+    } else if (operation == "google_cancel") {
+      // 第一次模拟共享层尚未建立等待标志，第二次才完成取消。
+      if (++google_cancellations >= 2) { account_google_cancelled = true; account_google_ready.notify_one(); }
+    } else if (operation == "login") {
+      assert(action.at("challenge_id") == "synthetic-challenge" && action.at("code") == "123456");
+      account_signed_in = true; value = {{"user", account_user}};
+    } else if (operation == "profile" || operation == "rename") {
+      if (operation == "rename") account_user["displayName"] = action.at("display_name");
+      value = {{"user", account_user}, {"providers", Json::array({"email", "google"})}};
+    } else if (operation == "upload_avatar" || operation == "remove_avatar") {
+      if (operation == "upload_avatar") {
+        assert(action.at("path") == preview_file.u8string());
+        if (fail_avatar_upload) return Json{{"ok", false}, {"error", "account_invalid"}}.dump();
+        account_user["avatarUrl"] = "https://media.msime.app/avatars/synthetic.png";
+        account_user["avatarUploaded"] = true;
+      } else { account_user["avatarUrl"] = nullptr; account_user["avatarUploaded"] = false; }
+      value = {{"user", account_user}, {"providers", Json::array({"email", "google"})}};
+    } else if (operation == "avatar") {
+      value = malformed_avatar ? "https://example.invalid/synthetic-avatar.png" : "data:image/png;base64," + preview_base64;
+    } else if (operation == "preferences_schema") value = Json::object();
+    else if (operation == "preferences_load" || operation == "preferences_upload") {
+      if (operation == "preferences_upload") assert(action.at("preferences_directory") == temporary.path.u8string());
+      value = {{"revision", 2}, {"settings", {{"input.traditional_chinese_output", true}}}};
+    } else if (operation == "preferences_apply") {
+      assert(action.at("preferences_directory") == temporary.path.u8string());
+      assert(action.at("user_id") == account_user.at("id") && action.at("preferences").at("revision") == 2);
+      const auto current = store.load();
+      const auto applied = store.save(*current.snapshot, {{{"traditional_chinese_output"}, !fail_account_apply}});
+      assert(applied.outcome == Outcome::saved); value = applied.snapshot->document;
+      if (fail_account_apply) return Json{{"ok", false}, {"error", "account_storage"}}.dump();
+    } else if (operation == "account_delete") return Json{{"ok", false}, {"error", "account_recent_login_required"}}.dump();
+    else if (operation == "logout" || operation == "forget") { account_signed_in = false; account_status_failed = false; }
+    else { assert(false); }
+    return Json{{"ok", true}, {"value", value}}.dump();
+  };
   SettingsWindow window([&](HWND owner, bool save) -> std::optional<std::filesystem::path> {
     DWORD process = 0;
     GetWindowThreadProcessId(owner, &process);
@@ -217,6 +290,9 @@ int main() {
     return file;
   }, [&](HWND owner, const wchar_t* title, const wchar_t* text) {
     assert(IsWindow(owner));
+    if (std::wstring_view(title) == L"账号与同步") {
+      assert(text && *text); ++account_confirmations; return allow_account;
+    }
     if (std::wstring_view(title) == L"打字统计") {
       assert(text && *text); ++statistics_confirmations; return allow_statistics;
     }
@@ -269,6 +345,7 @@ int main() {
     else if (operation == "candidate_skin_pack_preview" || operation == "candidate_skin_add_license" || operation == "candidate_skin_add_preview") {
       auto local_request = request;
       local_request["directory"] = (temporary.path / L"synthetic-account").u8string();
+      local_request.erase("legacy_directory");
       return theme_data::call(msime_client_community, local_request).dump();
     } else if (operation == "candidate_skin_publish") {
       assert(action.at("id").get<std::string>().size() == 36); value = community_item;
@@ -287,7 +364,7 @@ int main() {
       if (fail_statistics_upload) return Json{{"ok", false}, {"error", "account_unavailable"}}.dump();
     }
     return Json{{"ok", true}, {"value", {{"enabled", statistics_upload_enabled}, {"signed_in", true}, {"last_upload_ms", nullptr}}}}.dump();
-  });
+  }, account_transport);
   assert(window.create(GetModuleHandleW(nullptr)));
   const HWND host = window.handle();
   const HWND body = GetDlgItem(host, page_body);
@@ -1675,6 +1752,117 @@ int main() {
   upload_count = statistics_upload_calls.size();
   SendMessageW(host, WM_TIMER, 72, 0);
   assert(statistics_upload_calls.size() == upload_count);
+  // 账号操作只接合成传输，正式控件与 worker 串起资料和同步；不读取真实会话。
+  const auto account_click = [&](int id) {
+    SendMessageW(body, WM_COMMAND, MAKEWPARAM(id, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(body, id)));
+    pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+  };
+  const auto account_revision = store.load().snapshot->revision();
+  select_page(7);
+  assert(account_calls.size() == 2 && account_calls.back().at("operation") == "status");
+  assert(IsWindowEnabled(GetDlgItem(body, account_email)) && !IsWindowEnabled(GetDlgItem(body, account_sync_upload)));
+  account_click(account_email);
+  assert(SetWindowTextW(GetDlgItem(body, account_target), L"  synthetic@example.invalid  "));
+  account_click(account_request_code);
+  assert(!IsWindowEnabled(GetDlgItem(body, account_request_code)));
+  assert(SetWindowTextW(GetDlgItem(body, account_code), L"12345"));
+  assert(!IsWindowEnabled(GetDlgItem(body, account_login)));
+  assert(SetWindowTextW(GetDlgItem(body, account_code), L"123456"));
+  assert(IsWindowEnabled(GetDlgItem(body, account_login)));
+  assert(SetWindowTextW(GetDlgItem(body, account_target), L"synthetic@example.invalid"));
+  assert(IsWindowEnabled(GetDlgItem(body, account_login)));
+  account_click(account_login);
+  assert(account_signed_in && account_calls.back().at("operation") == "preferences_load");
+  assert(caption(GetDlgItem(body, account_profile_text)).find(L"synthetic-account-0001") != std::wstring::npos);
+  assert(IsWindowEnabled(GetDlgItem(body, account_sync_apply)));
+  assert(SetWindowTextW(GetDlgItem(body, account_name), L"  合成昵称  "));
+  account_click(account_rename);
+  assert(account_user.at("displayName") == "合成昵称");
+  assert(caption(GetDlgItem(body, account_name)) == L"合成昵称");
+  preview_selection = true; cancel_selection = true;
+  auto avatar_count = account_calls.size();
+  account_click(account_avatar_upload);
+  assert(account_calls.size() == avatar_count);
+  cancel_selection = false; fail_avatar_upload = true;
+  account_click(account_avatar_upload);
+  assert(caption(GetDlgItem(body, account_notice)).find(L"1 MiB") != std::wstring::npos);
+  fail_avatar_upload = false;
+  account_click(account_avatar_upload);
+  assert(account_calls.back().at("operation") == "avatar" && IsWindowEnabled(GetDlgItem(body, account_avatar_remove)));
+  preview_selection = false;
+  const auto avatar_dc = CreateCompatibleDC(nullptr);
+  const auto avatar_screen = GetDC(nullptr);
+  const auto avatar_bitmap = CreateCompatibleBitmap(avatar_screen, 16, 16);
+  ReleaseDC(nullptr, avatar_screen);
+  const auto avatar_previous = SelectObject(avatar_dc, avatar_bitmap);
+  DRAWITEMSTRUCT avatar_drawing{};
+  avatar_drawing.CtlType = ODT_STATIC; avatar_drawing.CtlID = account_avatar;
+  avatar_drawing.hwndItem = GetDlgItem(body, account_avatar); avatar_drawing.hDC = avatar_dc;
+  avatar_drawing.rcItem = {0,0,16,16};
+  assert(SendMessageW(body, WM_DRAWITEM, account_avatar, reinterpret_cast<LPARAM>(&avatar_drawing)));
+  assert(GetPixel(avatar_dc, 8, 8) == RGB(255,0,0));
+  malformed_avatar = true;
+  account_click(account_avatar_load);
+  assert(caption(GetDlgItem(body, account_notice)).find(L"PNG") != std::wstring::npos);
+  malformed_avatar = false;
+  account_click(account_avatar_load);
+  assert(SendMessageW(body, WM_DRAWITEM, account_avatar, reinterpret_cast<LPARAM>(&avatar_drawing)));
+  assert(GetPixel(avatar_dc, 8, 8) == RGB(255,0,0));
+  SelectObject(avatar_dc, avatar_previous); DeleteObject(avatar_bitmap); DeleteDC(avatar_dc);
+  avatar_count = account_calls.size();
+  account_click(account_avatar_remove);
+  assert(account_calls.size() == avatar_count && account_user.at("avatarUploaded") == true);
+  allow_account = true;
+  account_click(account_avatar_remove);
+  assert(account_user.at("avatarUploaded") == false && !IsWindowEnabled(GetDlgItem(body, account_avatar_remove)));
+  allow_account = false;
+  assert(store.load().snapshot->revision() == account_revision);
+  auto account_count = account_calls.size();
+  account_click(account_sync_upload);
+  assert(account_calls.size() == account_count && store.load().snapshot->revision() == account_revision);
+  allow_account = true;
+  account_click(account_sync_upload);
+  assert(account_calls.back().at("operation") == "preferences_upload");
+  account_click(account_sync_apply);
+  assert(store.load().snapshot->preferences().at("traditional_chinese_output") == true);
+  assert(SendMessageW(GetDlgItem(body, traditional_output), CB_GETCURSEL, 0, 0) == 1);
+  assert(store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  fail_account_apply = true;
+  account_click(account_sync_apply);
+  assert(store.load().snapshot->preferences().at("traditional_chinese_output") == false);
+  assert(SendMessageW(GetDlgItem(body, traditional_output), CB_GETCURSEL, 0, 0) == 0);
+  assert(caption(GetDlgItem(body, account_sync_notice)).find(L"无法安全读取") != std::wstring::npos);
+  fail_account_apply = false;
+  malformed_account_status = true;
+  account_click(account_refresh);
+  assert(IsWindowEnabled(GetDlgItem(body, account_logout)));
+  assert(caption(GetDlgItem(body, account_status)).find(L"合成昵称") != std::wstring::npos);
+  assert(caption(GetDlgItem(body, account_notice)).find(L"无法读取") != std::wstring::npos);
+  malformed_account_status = false;
+  account_click(account_delete);
+  assert(account_signed_in && IsWindowEnabled(GetDlgItem(body, account_logout)));
+  assert(caption(GetDlgItem(body, account_notice)).find(L"重新登录") != std::wstring::npos);
+  allow_account = false;
+  account_count = account_calls.size();
+  account_click(account_logout_all);
+  assert(account_calls.size() == account_count && account_signed_in);
+  allow_account = true;
+  account_click(account_logout_all);
+  assert(!account_signed_in && account_calls.back().at("all") == true);
+  account_status_failed = true;
+  account_click(account_refresh);
+  assert(IsWindowEnabled(GetDlgItem(body, account_forget)));
+  account_click(account_forget);
+  assert(!account_status_failed && !IsWindowEnabled(GetDlgItem(body, account_forget)));
+  assert(account_confirmations >= 6);
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(account_google, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(body, account_google)));
+  pump_until([&] { return account_google_started.load(); });
+  assert(!IsWindowEnabled(language) && IsWindowEnabled(GetDlgItem(body, account_google_cancel)));
+  account_click(account_google_cancel);
+  assert(google_cancellations >= 2 && !account_signed_in && !account_google_started.load());
+  assert(!IsWindowEnabled(GetDlgItem(body, account_google_cancel)));
+  assert(caption(GetDlgItem(body, account_notice)).find(L"取消") != std::wstring::npos);
+  select_page(0);
   TabCtrl_SetCurSel(tabs, 0);
   SendMessageW(host, WM_NOTIFY, page_tabs, reinterpret_cast<LPARAM>(&notification));
   SendMessageW(language, CB_SETCURSEL, 1, 0);
@@ -1687,5 +1875,44 @@ int main() {
   assert(saved.snapshot->preferences().at("keybindings").at("switch_language_ctrl").get<bool>());
   assert(!saved.snapshot->preferences().at("keybindings").at("switch_language_shift").get<bool>());
   assert(!saved.snapshot->preferences().at("keybindings").at("switch_language_ctrl_alt_space").get<bool>());
+  MSG quit{};
+  assert(PeekMessageW(&quit, nullptr, WM_QUIT, WM_QUIT, PM_REMOVE));
+  // 新窗口真实接收验证码，检查目标/渠道失效；最终在浏览器等待中关闭。
+  SettingsWindow closing_window({}, {}, {}, {}, {}, account_transport);
+  assert(closing_window.create(GetModuleHandleW(nullptr)));
+  const auto closing_host = closing_window.handle();
+  const auto closing_body = GetDlgItem(closing_host, page_body);
+  const auto closing_language = GetDlgItem(closing_body, language_switch);
+  pump_until([&] { return IsWindowEnabled(closing_language) != FALSE; });
+  const auto closing_selector = GetDlgItem(closing_host, page_selector);
+  SendMessageW(closing_selector, CB_SETCURSEL, 7, 0);
+  SendMessageW(closing_host, WM_COMMAND, MAKEWPARAM(page_selector, CBN_SELCHANGE), reinterpret_cast<LPARAM>(closing_selector));
+  pump_until([&] { return IsWindowEnabled(closing_language) != FALSE; });
+  const auto closing_click = [&](int id) {
+    SendMessageW(closing_body, WM_COMMAND, MAKEWPARAM(id, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(closing_body, id)));
+    pump_until([&] { return IsWindowEnabled(closing_language) != FALSE; });
+  };
+  closing_click(account_email);
+  SetWindowTextW(GetDlgItem(closing_body, account_target), L"synthetic@example.invalid");
+  closing_click(account_request_code);
+  SetWindowTextW(GetDlgItem(closing_body, account_code), L"123456");
+  assert(IsWindowEnabled(GetDlgItem(closing_body, account_login)));
+  SetWindowTextW(GetDlgItem(closing_body, account_target), L"other@example.invalid");
+  assert(!IsWindowEnabled(GetDlgItem(closing_body, account_login)) && caption(GetDlgItem(closing_body, account_code)).empty());
+  SetWindowTextW(GetDlgItem(closing_body, account_target), L"synthetic@example.invalid");
+  SetWindowTextW(GetDlgItem(closing_body, account_code), L"123456");
+  assert(!IsWindowEnabled(GetDlgItem(closing_body, account_login)));
+  closing_click(account_phone);
+  closing_click(account_email);
+  assert(!IsWindowEnabled(GetDlgItem(closing_body, account_login)) && caption(GetDlgItem(closing_body, account_code)).empty());
+  account_count = account_calls.size();
+  closing_click(account_login);
+  assert(account_calls.size() == account_count);
+  SendMessageW(closing_body, WM_COMMAND, MAKEWPARAM(account_google, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(closing_body, account_google)));
+  pump_until([&] { return account_google_started.load(); });
+  const auto close_started = GetTickCount64();
+  DestroyWindow(closing_host);
+  assert(GetTickCount64() - close_started < 2000 && !account_google_started.load() && closing_window.handle() == nullptr);
+  assert(!account_signed_in && store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
   std::puts("Windows 7 settings: native controls, CAS, file roundtrip, local state retention and cancellation passed");
 }

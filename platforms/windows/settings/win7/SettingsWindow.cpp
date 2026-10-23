@@ -19,6 +19,7 @@
 #include "../SettingsStateDirectory.h"
 #include "../SettingsDocumentFile.h"
 #include "../../common/StateDirectory.h"
+#include "../../common/ClientAgent.h"
 #include "../../common/GameCompatProfile.h"
 #include "../../compat/WindowsDpi.h"
 #include "../../tsf/IPC/AuxNamedpipeSender.h"
@@ -173,6 +174,22 @@ std::filesystem::path account_directory() {
   return result;
 }
 
+Json account_request(const Json& action) {
+  Json request{{"directory", account_directory().u8string()}, {"action", action}};
+  PWSTR local = nullptr;
+  if (SUCCEEDED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local)) && local)
+    request["legacy_directory"] = (std::filesystem::path(local) / MSIME_EDITION_TAURI_IDENTIFIER).u8string();
+  CoTaskMemFree(local);
+  static const auto agent = [] {
+    const auto value = theme_data::value(theme_data::call(msime_client_client_agent,
+        {{"platform", "windows"}, {"version", MSIME_WINDOWS_VERSION}, {"edition", MSIME_EDITION_ID},
+         {"device", msime::windows::windows_device_model()}, {"system", msime::windows::windows_system_description()}}));
+    return value && value->is_string() ? value->get<std::string>() : std::string{};
+  }();
+  if (!agent.empty()) request["client_agent"] = agent;
+  return request;
+}
+
 // 宿主选项有明确大小上限，文件读取只在工作线程执行。
 Json runtime_options() {
   auto options_file = std::filesystem::path(environment(L"MSIME_CLIENT_HOST_OPTIONS"));
@@ -288,24 +305,36 @@ struct Completion {
   std::optional<Json> statistics_response;
   std::optional<Json> statistics_upload_response;
   bool statistics_upload_changed = false;
+  std::optional<theme_data::Image> account_avatar;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
 class Worker {
 public:
-  explicit Worker(HWND window, SettingsWindow::CommunityTransport transport, SettingsWindow::CommunityTransport statistics_upload_transport) : window_(window), community_transport_(std::move(transport)), statistics_upload_transport_(std::move(statistics_upload_transport)), thread_([this] { run(); }) {}
+  explicit Worker(HWND window, SettingsWindow::CommunityTransport transport, SettingsWindow::CommunityTransport statistics_upload_transport,
+      SettingsWindow::CommunityTransport account_transport) : window_(window), community_transport_(std::move(transport)),
+      statistics_upload_transport_(std::move(statistics_upload_transport)), account_transport_(std::move(account_transport)), thread_([this] { run(); }) {}
   ~Worker() {
     {
       std::lock_guard<std::mutex> guard(lock_);
       stopping_ = true;
+      google_cancel_requested_ = true;
     }
     ready_.notify_one();
+    google_cancel_ready_.notify_one();
     thread_.join();
+  }
+
+  void cancel_google() {
+    { std::lock_guard<std::mutex> guard(lock_); google_cancel_requested_ = true; }
+    google_cancel_ready_.notify_one();
   }
 
   void submit(Job job) {
     {
       std::lock_guard<std::mutex> guard(lock_);
+      if (job.action == Job::Action::account && job.credential &&
+          job.credential->value("operation", std::string{}) == "google_login") google_cancel_requested_ = false;
       pending_ = std::move(job);
     }
     ready_.notify_one();
@@ -317,6 +346,42 @@ public:
   }
 
 private:
+  Json call_account(const Json& request) {
+    return account_transport_ ? Json::parse(account_transport_(request.dump()), nullptr, false) : theme_data::call(msime_client_account, request);
+  }
+
+  Json google_login(const Json& request) {
+    {
+      std::lock_guard<std::mutex> guard(lock_);
+      if (google_cancel_requested_) return Json{{"ok", false}, {"error", "account_cancelled"}};
+    }
+    auto cancellation = request;
+    cancellation["action"] = Json{{"operation", "google_cancel"}};
+    bool finished = false;
+    // 取消走同一会话的内存标志，不能排到正等浏览器的串行 worker 后面。
+    // 重试涵盖取消先于 Rust 建立等待标志的竞态；正常登录不调用取消接口。
+    std::thread canceller([&] {
+      std::unique_lock<std::mutex> guard(lock_);
+      google_cancel_ready_.wait(guard, [&] { return finished || google_cancel_requested_; });
+      while (!finished) {
+        guard.unlock();
+        try { call_account(cancellation); } catch (const std::exception&) {}
+        guard.lock();
+        google_cancel_ready_.wait_for(guard, std::chrono::milliseconds(100), [&] { return finished; });
+      }
+    });
+    const auto finish = [&] {
+      { std::lock_guard<std::mutex> guard(lock_); finished = true; }
+      google_cancel_ready_.notify_one();
+      canceller.join();
+    };
+    try {
+      auto response = call_account(request);
+      finish();
+      return response;
+    } catch (...) { finish(); throw; }
+  }
+
   Result execute(const Job& job) {
     notice_.clear();
     folder_.clear();
@@ -324,6 +389,7 @@ private:
     credential_response_.reset();
     ai_models_response_.reset();
     account_response_.reset();
+    account_avatar_.reset();
     fonts_.reset();
     community_response_.reset();
     community_preview_ = {};
@@ -352,7 +418,7 @@ private:
           action["day"] = msime::settings::typing::day_key(statistics_data::local_day());
           action["platform"] = "windows";
           const auto call = [&](const Json& upload_action) {
-            const auto request = Json{{"directory", account.u8string()}, {"action", upload_action}};
+            const auto request = account_request(upload_action);
             return statistics_upload_transport_ ? Json::parse(statistics_upload_transport_(request.dump()), nullptr, false) :
                 theme_data::call(msime_client_account, request);
           };
@@ -399,8 +465,10 @@ private:
             if (!action.contains("image")) community_response_ = Json{{"ok", false}, {"error", "candidate_skin_too_large"}};
           }
           if (!community_response_) {
-            const auto request = Json{{"directory", account.u8string()}, {"skins_directory", (directory_ / L"skins").u8string()},
-                {"state_root", directory_.u8string()}, {"action", std::move(action)}};
+            auto request = account_request(action);
+            request.erase("client_agent");
+            request["skins_directory"] = (directory_ / L"skins").u8string();
+            request["state_root"] = directory_.u8string();
             community_response_ = community_transport_ ? Json::parse(community_transport_(request.dump()), nullptr, false) :
                 theme_data::call(msime_client_community, request);
             if (job.credential->value("operation", std::string{}) == "candidate_skin_preview")
@@ -457,10 +525,23 @@ private:
       if (directory.empty()) {
         account_response_ = Json{{"ok", false}, {"error", "account_storage"}};
       } else {
-        const auto body = Json{{"directory", directory.u8string()}, {"action", *job.credential}}.dump();
-        auto owned = msime::host_api::own_string(msime_client_account(
-            reinterpret_cast<const uint8_t*>(body.data()), body.size()));
-        account_response_ = owned ? Json::parse(owned.get(), nullptr, false) : Json();
+        auto action = *job.credential;
+        const auto operation = action.value("operation", std::string{});
+        if (operation == "preferences_upload" || operation == "preferences_apply") action["preferences_directory"] = directory_.u8string();
+        const auto request = account_request(action);
+        account_response_ = operation == "google_login" ? google_login(request) : call_account(request);
+        if (operation == "avatar") {
+          account_avatar_.emplace();
+          const auto value = theme_data::value(*account_response_);
+          if (value && value->is_string()) {
+            *account_avatar_ = image_data::decode(value->get<std::string>(), 1024 * 1024);
+            if (account_avatar_->bgra.empty()) account_response_ = Json{{"ok", false}, {"error", "account_avatar_invalid"}};
+          } else if (value && !value->is_null()) account_response_ = Json{{"ok", false}, {"error", "account_unavailable"}};
+        }
+        if (operation == "preferences_apply") {
+          // 失败也可能源自并发更新或写后清理；所有页面必须重读实际快照。
+          auto fresh = store_->load(); snapshot_ = fresh.snapshot; return fresh;
+        }
       }
       return {Outcome::loaded, snapshot_};
     }
@@ -545,7 +626,9 @@ private:
               if (change.path.front() == key) return true;
             return false;
           });
-          if (scan || changed || job.action == Job::Action::import_file || job.action == Job::Action::theme_preview) {
+          const bool account_apply = job.action == Job::Action::account && job.credential &&
+              job.credential->value("operation", std::string{}) == "preferences_apply";
+          if (scan || changed || account_apply || job.action == Job::Action::import_file || job.action == Job::Action::theme_preview) {
             ThemeCompletion completion;
             if (scan) {
               completion.themes = theme_data::response(msime_client_theme_catalog());
@@ -562,7 +645,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_), std::move(community_response_), std::move(community_preview_), std::move(statistics_response_), std::move(statistics_upload_response_), job.statistics_upload};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_), std::move(community_response_), std::move(community_preview_), std::move(statistics_response_), std::move(statistics_upload_response_), job.statistics_upload, std::move(account_avatar_)};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -578,7 +661,9 @@ private:
   HWND window_;
   std::mutex lock_;
   std::condition_variable ready_;
+  std::condition_variable google_cancel_ready_;
   bool stopping_ = false;
+  bool google_cancel_requested_ = false;
   std::optional<Job> pending_;
   std::optional<Completion> completed_;
   std::optional<PreferencesStore> store_;
@@ -591,6 +676,7 @@ private:
   std::optional<Json> credential_response_;
   std::optional<Json> ai_models_response_;
   std::optional<Json> account_response_;
+  std::optional<theme_data::Image> account_avatar_;
   std::optional<Json> fonts_;
   std::optional<ThemeCompletion> theme_;
   int theme_preview_mode_ = 0;
@@ -598,6 +684,7 @@ private:
   theme_data::Image community_preview_;
   SettingsWindow::CommunityTransport community_transport_;
   SettingsWindow::CommunityTransport statistics_upload_transport_;
+  SettingsWindow::CommunityTransport account_transport_;
   std::optional<Json> statistics_response_;
   std::optional<Json> statistics_upload_response_;
   std::thread thread_;
@@ -666,6 +753,7 @@ struct SettingsWindow::State {
   CommunitySkinForm community_form;
   CommunityTransport community_transport;
   CommunityTransport statistics_upload_transport;
+  CommunityTransport account_transport;
   StatisticsForm statistics_form;
   ToolbarPreview toolbar_preview_form;
   FolderPicker folder_picker;
@@ -859,7 +947,7 @@ struct SettingsWindow::State {
     developer_height = 906;
   }
 
-  std::optional<std::filesystem::path> pick_settings_file(bool save, bool preview = false) const {
+  std::optional<std::filesystem::path> pick_settings_file(bool save, bool preview = false, const wchar_t* image_title = L"选择皮肤预览图") const {
     if (file_picker) return file_picker(window, save);
     // 与现代原生设置使用相同的系统文件选择接口；此 COM 接口从 Vista 起可用。
     IFileDialog* raw = nullptr;
@@ -874,7 +962,7 @@ struct SettingsWindow::State {
     const COMDLG_FILTERSPEC filter{preview ? L"预览图片 (*.png;*.jpg;*.jpeg)" : L"设置文件 (*.json)", preview ? L"*.png;*.jpg;*.jpeg" : L"*.json"};
     FILEOPENDIALOGOPTIONS options = 0;
     if (FAILED(dialog->SetFileTypes(1, &filter)) || FAILED(dialog->SetDefaultExtension(preview ? L"png" : L"json")) ||
-        FAILED(dialog->SetTitle(preview ? L"选择皮肤预览图" : save ? L"导出设置" : L"导入设置")) ||
+        FAILED(dialog->SetTitle(preview ? image_title : save ? L"导出设置" : L"导入设置")) ||
         FAILED(dialog->SetOkButtonLabel(preview ? L"选择" : save ? L"导出" : L"导入")) ||
         FAILED(dialog->GetOptions(&options)) || FAILED(dialog->SetOptions(options | FOS_FORCEFILESYSTEM |
             FOS_DONTADDTORECENT | (save ? FOS_OVERWRITEPROMPT : FOS_FILEMUSTEXIST)))) return failure();
@@ -1172,6 +1260,8 @@ struct SettingsWindow::State {
 
   void submit(Job job) {
     if (busy) return;
+    account_form.google_waiting(job.action == Job::Action::account && job.credential &&
+        job.credential->value("operation", std::string{}) == "google_login");
     saving_cloud = job.changes.size() == 1 &&
         job.changes.front().path == std::vector<std::string>{"cloud_candidate_provider"};
     saving_wubi_keys = job.changes.size() == 1 &&
@@ -1408,6 +1498,7 @@ struct SettingsWindow::State {
     if (!completed) return;
     auto result = std::make_optional(std::move(completed->result));
     busy = false;
+    account_form.google_waiting(false);
     snapshot = std::move(result->snapshot);
     if (snapshot && !valid_settings(*snapshot)) {
       snapshot.reset();
@@ -1455,15 +1546,10 @@ struct SettingsWindow::State {
     if (completed->fonts) appearance_form.font_catalog(*completed->fonts);
     if (completed->ai_models_response && completed->credential_request)
       ai_form.completed(*completed->credential_request, *completed->ai_models_response, completed->ai_models);
+    std::optional<Json> account_followup;
+    if (completed->account_avatar) account_form.avatar(std::move(*completed->account_avatar));
     if (completed->account_response && completed->credential_request) {
-      account_form.completed(*completed->credential_request, *completed->account_response);
-      if (completed->credential_request->value("operation", std::string{}) == "providers") {
-        Job job;
-        job.reload = false;
-        job.action = Job::Action::account;
-        job.credential = account_form.status_request();
-        submit(std::move(job));
-      }
+      account_followup = account_form.completed(*completed->credential_request, *completed->account_response);
     }
     if (completed->theme) {
       toolbar_preview_form.theme(std::move(completed->theme->toolbar));
@@ -1503,6 +1589,10 @@ struct SettingsWindow::State {
       if (opened <= 32) completed->notice = L"无法打开目录，可能是文件管理器不可用。";
     }
     SetWindowTextW(status, completed->notice.empty() ? message : completed->notice.c_str());
+    if (account_followup) {
+      Job job; job.reload = false; job.action = Job::Action::account; job.credential = std::move(account_followup);
+      submit(std::move(job));
+    }
   }
 
   void poll_statistics() {
@@ -1515,6 +1605,10 @@ struct SettingsWindow::State {
 
   void command(WPARAM command) {
     const int id = LOWORD(command);
+    if (id == account_google_cancel && HIWORD(command) == BN_CLICKED) {
+      if (account_form.command(command).request && worker) worker->cancel_google();
+      return;
+    }
     if (id == page_selector && HIWORD(command) == CBN_SELCHANGE) {
       const auto selected = SendMessageW(selector, CB_GETCURSEL, 0, 0);
       TabCtrl_DeleteAllItems(tabs);
@@ -1671,7 +1765,17 @@ struct SettingsWindow::State {
     }
     auto account_change = account_form.command(command);
     if (account_change.handled) {
+      if (account_change.choose_avatar) {
+        const auto file = pick_settings_file(false, true, L"选择头像（1 MiB 以内的 PNG 或 JPEG）");
+        if (!file) return;
+        account_change.request = Json{{"operation", "upload_avatar"}, {"path", file->u8string()}};
+      }
       if (account_change.request) {
+        if (!account_change.confirmation.empty()) {
+          const bool allowed = confirmation ? confirmation(window, L"账号与同步", account_change.confirmation.c_str()) :
+              MessageBoxW(window, account_change.confirmation.c_str(), L"账号与同步", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+          if (!allowed) return;
+        }
         Job job;
         job.reload = false;
         job.action = Job::Action::account;
@@ -1889,7 +1993,7 @@ struct SettingsWindow::State {
     }
     if (message == WM_DRAWITEM) {
       const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
-      if (draw && (self->theme_form.draw(*draw) || self->community_form.draw(*draw) || self->statistics_form.draw(*draw) || self->toolbar_preview_form.draw(*draw))) return TRUE;
+      if (draw && (self->account_form.draw(*draw) || self->theme_form.draw(*draw) || self->community_form.draw(*draw) || self->statistics_form.draw(*draw) || self->toolbar_preview_form.draw(*draw))) return TRUE;
       if (draw && draw->CtlID == appearance_preview) {
         RECT rect = draw->rcItem;
         const auto background = CreateSolidBrush(RGB(248, 248, 248));
@@ -1940,7 +2044,10 @@ struct SettingsWindow::State {
     if (!self) return DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
     case WM_CREATE: return self->controls() ? 0 : -1;
-    case WM_TIMER: if (wparam == 72) self->poll_statistics(); return 0;
+    case WM_TIMER:
+      if (wparam == 72) self->poll_statistics();
+      else if (wparam == 73) self->account_form.tick();
+      return 0;
     case WM_ACTIVATE: if (LOWORD(wparam) != WA_INACTIVE) self->poll_statistics(); break;
     case WM_SIZE: self->layout(); return 0;
     case WM_GETMINMAXINFO: {
@@ -1974,7 +2081,7 @@ struct SettingsWindow::State {
       return 0;
     }
     case completed_message: self->complete(); return 0;
-    case WM_DESTROY: KillTimer(hwnd, 72); self->worker.reset(); PostQuitMessage(0); return 0;
+    case WM_DESTROY: KillTimer(hwnd, 72); KillTimer(hwnd, 73); self->worker.reset(); PostQuitMessage(0); return 0;
     case WM_NCDESTROY:
       SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
       self->window = nullptr;
@@ -1984,12 +2091,13 @@ struct SettingsWindow::State {
   }
 };
 
-SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker, CommunityTransport community_transport, CommunityTransport statistics_upload_transport) : state_(std::make_unique<State>()) {
+SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker, CommunityTransport community_transport, CommunityTransport statistics_upload_transport, CommunityTransport account_transport) : state_(std::make_unique<State>()) {
   state_->file_picker = std::move(file_picker);
   state_->confirmation = std::move(confirmation);
   state_->folder_picker = std::move(folder_picker);
   state_->community_transport = std::move(community_transport);
   state_->statistics_upload_transport = std::move(statistics_upload_transport);
+  state_->account_transport = std::move(account_transport);
 }
 
 SettingsWindow::~SettingsWindow() {
@@ -2021,8 +2129,9 @@ bool SettingsWindow::create(HINSTANCE instance) {
       WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
       state_->dip(900), state_->dip(720), nullptr, nullptr, instance, state_.get());
   if (!window) return false;
-  state_->worker = std::make_unique<Worker>(window, state_->community_transport, state_->statistics_upload_transport);
+  state_->worker = std::make_unique<Worker>(window, state_->community_transport, state_->statistics_upload_transport, state_->account_transport);
   SetTimer(window, 72, 5000, nullptr);
+  SetTimer(window, 73, 1000, nullptr);
   return true;
 }
 

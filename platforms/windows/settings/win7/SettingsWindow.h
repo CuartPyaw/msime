@@ -54,6 +54,10 @@ enum ControlId {
   account_status = 1500, account_refresh, account_email, account_phone, account_target,
   account_request_code, account_code, account_login, account_google, account_logout,
   account_logout_all, account_notice,
+  account_profile, account_profile_text, account_name, account_rename, account_forget,
+  account_delete, account_sync_load, account_sync_upload, account_sync_apply, account_sync_notice,
+  account_google_cancel,
+  account_avatar, account_avatar_load, account_avatar_upload, account_avatar_remove,
   theme_mode = 1600, theme_candidate_mode, theme_global, theme_preview_mode,
   theme_preview, theme_skins, theme_skin_use, theme_skin_stop, theme_skin_refresh,
   theme_skin_import, theme_skin_directory, theme_skin_notice, theme_slot_summary,
@@ -82,7 +86,7 @@ public:
   // 可注入社区传输以验证真实窗口与 worker；默认仍调用共享 Rust 服务。
   using CommunityTransport = std::function<std::string(const std::string&)>;
   explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {}, FolderPicker folder_picker = {},
-      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {});
+      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;
