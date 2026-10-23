@@ -1,13 +1,20 @@
 #include "../../panels/win7/HandwritingWindow.h"
+#include "../../panels/win7/ResourcePackWorker.h"
 #include "msime_client.h"
 #include "../../../../shared/contracts/msime_edition.h"
 
 #include <windowsx.h>
 #include <nlohmann/json.hpp>
 #include <cassert>
+#include <atomic>
+#include <condition_variable>
+#include <chrono>
 #include <cstdio>
 #include <functional>
 #include <filesystem>
+#include <fstream>
+#include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -51,8 +58,8 @@ struct SyntheticState {
     return response.at("value");
   }
 };
-void pump_until(const std::function<bool()>& condition) {
-  const ULONGLONG deadline = GetTickCount64() + 20000;
+void pump_until(const std::function<bool()>& condition, DWORD timeout = 20000) {
+  const ULONGLONG deadline = GetTickCount64() + timeout;
   for (;;) {
     MSG message{};
     while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
@@ -105,6 +112,60 @@ void draw_cross(HWND canvas) {
   stroke(canvas, bounds.right * 2 / 7, bounds.bottom / 2, bounds.right * 5 / 7, bounds.bottom / 2);
   stroke(canvas, bounds.right / 2, bounds.bottom * 2 / 7, bounds.right / 2, bounds.bottom * 5 / 7);
 }
+
+void resource_pack_cancellation(const std::filesystem::path& root, bool before_registration) {
+  std::mutex mutex;
+  std::condition_variable ready;
+  bool resolving = false;
+  bool released = !before_registration;
+  std::atomic<bool> saw_first_progress{false};
+  std::optional<ResourcePackResult> result;
+  ResourcePackWorker* running = nullptr;
+  ResourcePackWorker worker([&] {
+    std::unique_lock<std::mutex> guard(mutex);
+    resolving = true;
+    ready.notify_all();
+    ready.wait(guard, [&] { return released; });
+    return root;
+  }, [&] {
+    auto update = running->take();
+    if (update.busy && update.progress.phase == "download" && !saw_first_progress.exchange(true)) {
+      // 真正的 Rust 首次回调发生在任何 I/O 前；验证同一工作器不能并发装另一个包。
+      assert(update.progress.done == 0 && update.progress.total > 0);
+      assert(!running->start(ResourcePackAction::remove, "handwriting"));
+      if (before_registration) assert(update.cancelling);
+      else running->cancel();
+    }
+    if (update.result) {
+      std::lock_guard<std::mutex> guard(mutex);
+      result = std::move(update.result);
+      ready.notify_all();
+    }
+  });
+  running = &worker;
+  assert(worker.start(ResourcePackAction::download, "handwriting"));
+  if (before_registration) {
+    {
+      std::unique_lock<std::mutex> guard(mutex);
+      assert(ready.wait_for(guard, std::chrono::seconds(10), [&] { return resolving; }));
+    }
+    worker.cancel();
+    {
+      std::lock_guard<std::mutex> guard(mutex);
+      released = true;
+    }
+    ready.notify_all();
+  }
+  {
+    std::unique_lock<std::mutex> guard(mutex);
+    assert(ready.wait_for(guard, std::chrono::seconds(20), [&] { return result.has_value(); }));
+    assert(result->response.at("ok") == false);
+    assert(result->response.at("error") == "local_model_cancelled");
+    assert(result->catalog.at("ok") == true);
+  }
+  assert(saw_first_progress);
+  assert(!std::filesystem::exists(root / L"resource-packs/handwriting"));
+}
 #endif
 } // namespace
 
@@ -134,6 +195,8 @@ int main(int argc, char** argv) {
   return 0;
 #else
   SyntheticState synthetic;
+  resource_pack_cancellation(synthetic.path, false);
+  resource_pack_cancellation(synthetic.path, true);
   synthetic.statistics({{"operation", "set_enabled"}, {"enabled", true}});
   const auto probe = std::string("{\"operation\":\"status\"}");
   char* buffer = msime_client_windows_handwriting(reinterpret_cast<const uint8_t*>(probe.data()), probe.size());
@@ -161,7 +224,13 @@ int main(int argc, char** argv) {
     if (accept) inserted.assign(candidate);
     return accept;
   };
-  HandwritingWindow window(std::move(sink));
+  std::vector<std::filesystem::path> selected;
+  size_t picker_calls = 0;
+  HandwritingWindow window(std::move(sink), [&](HWND parent) {
+    assert(IsWindow(parent));
+    ++picker_calls;
+    return selected;
+  });
   assert(window.create(GetModuleHandleW(nullptr)));
   HWND host = window.handle();
   HWND canvas = GetDlgItem(host, handwriting_canvas);
@@ -170,6 +239,64 @@ int main(int argc, char** argv) {
   assert(SendMessageW(host, WM_MOUSEACTIVATE, 0, MAKELPARAM(HTCLIENT, WM_LBUTTONDOWN)) == MA_NOACTIVATE);
   ShowWindow(host, SW_SHOWNOACTIVATE);
   pump_until([&] { return !busy(host); });
+  pump_until([&] { return IsWindowEnabled(GetDlgItem(host, handwriting_model_refresh)); });
+  assert(caption(GetDlgItem(host, handwriting_model_status)).find(L"未安装") != std::wstring::npos);
+  assert(IsWindowEnabled(GetDlgItem(host, handwriting_model_download)));
+  assert(!IsWindowEnabled(GetDlgItem(host, handwriting_model_remove)));
+  assert(!IsWindowEnabled(GetDlgItem(host, handwriting_model_cancel)));
+  const auto model_notice = caption(GetDlgItem(host, handwriting_model_progress));
+  SendMessageW(GetDlgItem(host, handwriting_model_import), BM_CLICK, 0, 0);
+  assert(picker_calls == 1);
+  assert(caption(GetDlgItem(host, handwriting_model_progress)) == model_notice);
+  const auto invalid = synthetic.path / L"synthetic-invalid.model";
+  { std::ofstream file(invalid, std::ios::binary); file << "synthetic-invalid-model"; }
+  selected = {invalid};
+  SendMessageW(GetDlgItem(host, handwriting_model_import), BM_CLICK, 0, 0);
+  pump_until([&] { return IsWindowEnabled(GetDlgItem(host, handwriting_model_refresh)); });
+  assert(caption(GetDlgItem(host, handwriting_model_progress)).find(L"文件不完整") != std::wstring::npos);
+  assert(std::filesystem::file_size(invalid) == 23);
+  assert(!std::filesystem::exists(synthetic.path / L"resource-packs/handwriting"));
+  assert(IsWindowEnabled(GetDlgItem(host, handwriting_model_download)));
+  wchar_t network_probe[2]{};
+  if (GetEnvironmentVariableW(L"MSIME_WINDOWS7_TEST_HANDWRITING_DOWNLOAD", network_probe, 2) == 1 && network_probe[0] == L'1') {
+    // 显式开启的联网验收走真实下载按钮，不使用离线文件或替代网络实现。
+    SendMessageW(GetDlgItem(host, handwriting_model_download), BM_CLICK, 0, 0);
+    draw_cross(canvas);
+    assert(IsWindowEnabled(GetDlgItem(host, handwriting_clear)));
+    SendMessageW(GetDlgItem(host, handwriting_clear), BM_CLICK, 0, 0);
+    pump_until([&] { return IsWindowEnabled(GetDlgItem(host, handwriting_model_refresh)); }, 180000);
+    assert(caption(GetDlgItem(host, handwriting_model_status)).find(L"已安装") != std::wstring::npos);
+    assert(std::filesystem::file_size(synthetic.path / L"resource-packs/handwriting/handwriting-zh_CN.model") == 26834816);
+    SendMessageW(GetDlgItem(host, handwriting_model_remove), BM_CLICK, 0, 0);
+    pump_until([&] { return IsWindowEnabled(GetDlgItem(host, handwriting_model_refresh)); });
+    assert(!std::filesystem::exists(synthetic.path / L"resource-packs/handwriting"));
+  }
+  // 可选固定锁文件对应的真实模型：验证完整离线导入、发布后状态以及移除，只写合成状态目录。
+  wchar_t model_files[32768]{};
+  const DWORD model_length = GetEnvironmentVariableW(L"MSIME_WINDOWS7_TEST_HANDWRITING_FILES", model_files, 32768);
+  if (model_length && model_length < 32768) {
+    const std::filesystem::path source(model_files);
+    assert(source.is_absolute());
+    selected = {source / L"handwriting-zh_CN.model", source / L"HandwritingModel-LICENSE.txt"};
+    for (const auto& path : selected) assert(std::filesystem::is_regular_file(path));
+    SendMessageW(GetDlgItem(host, handwriting_model_import), BM_CLICK, 0, 0);
+    // 资源安装不占用识别线程；模型变化和正在书写相遇时也不清掉笔划。
+    draw_cross(canvas);
+    assert(IsWindowEnabled(GetDlgItem(host, handwriting_clear)));
+    pump_until([&] { return IsWindowEnabled(GetDlgItem(host, handwriting_model_refresh)); });
+    assert(caption(GetDlgItem(host, handwriting_model_status)).find(L"已安装") != std::wstring::npos);
+    assert(!IsWindowEnabled(GetDlgItem(host, handwriting_model_download)));
+    assert(IsWindowEnabled(GetDlgItem(host, handwriting_model_remove)));
+    assert(std::filesystem::file_size(synthetic.path / L"resource-packs/handwriting/handwriting-zh_CN.model") == 26834816);
+    for (const auto& path : selected) assert(std::filesystem::is_regular_file(path));
+    SendMessageW(GetDlgItem(host, handwriting_model_remove), BM_CLICK, 0, 0);
+    pump_until([&] { return IsWindowEnabled(GetDlgItem(host, handwriting_model_refresh)); });
+    assert(caption(GetDlgItem(host, handwriting_model_status)).find(L"未安装") != std::wstring::npos);
+    assert(!std::filesystem::exists(synthetic.path / L"resource-packs/handwriting"));
+    SendMessageW(GetDlgItem(host, handwriting_clear), BM_CLICK, 0, 0);
+  }
+  SendMessageW(GetDlgItem(host, handwriting_model_refresh), BM_CLICK, 0, 0);
+  pump_until([&] { return IsWindowEnabled(GetDlgItem(host, handwriting_model_refresh)); });
   assert(!IsWindowEnabled(GetDlgItem(host, handwriting_undo)));
   draw_cross(canvas);
   pump_until([&] { return !busy(host); });
@@ -215,6 +342,8 @@ int main(int argc, char** argv) {
   assert(!IsWindowEnabled(GetDlgItem(host, handwriting_clear)));
   assert(!cross_candidate(host));
   // 关闭时等待识别线程退出，不泄漏线程或把结果投递给已经销毁的窗口。
+  selected = {invalid};
+  SendMessageW(GetDlgItem(host, handwriting_model_import), BM_CLICK, 0, 0);
   draw_cross(canvas);
   SendMessageW(host, WM_CLOSE, 0, 0);
   assert(!IsWindow(host));

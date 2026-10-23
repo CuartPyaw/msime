@@ -4,6 +4,8 @@
 
 `settings/win7` 是使用 Win32 标准控件的原生兼容宿主，目前接通快捷键页，工具栏显示、按钮与尺寸控件，输入页的语言与方案选择、双拼和五笔选项、五笔查码、中英模式与应用例外、选词与翻页、候选混输与联想、云候选配置、繁简输出、空格和全角，高级选项的快捷模式、模糊音、辅助码与调频，标点组的模式、引号与括号样式、成对标点和智能标点，候选释义的离线英文、翻译与读音开关和两种目标语言，翻译服务的切换、凭据保存与配置测试，以及维护与诊断页的日志开关、重启请求、目录打开和设置文件导入导出；配置使用同源 Rust 持久化与并发冲突处理。以词定字与翻页键冲突时一次保存关闭以词定字，页面刷新保留无关配置与原默认值。工具栏图形预览和主题跳转及其他设置页仍未完成，普通设置启动器和安装包继续使用 WinUI 3。不能将此目标作为完整 Win7 产品安装。
 
+候选窗口页另提供排列、每页数量、logo、跟随光标、字体预设与两种自定义字体、字号、缩放、透明度、圆角和预编辑，以及游戏候选覆盖和两张程序例外表。字体目录在工作线程读取，字体编辑显式保存；已有非标准档位只展示不改写。原生候选兼容名称复用普通设置的管理员操作入口，完整安装后的实际提权与系统登记仍需验收；候选图形预览尚未完成。
+
 在 Windows MSVC 开发环境中，使用同一提交、同一架构的核心与原生依赖前缀构建：
 
 ```powershell
@@ -27,7 +29,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File platforms/windows/tests/tool
 
 `panels/win7` 是不依赖 WebView 的原生面板宿主，当前只承载手写。画布支持自动识别、撤销、清空与候选上屏，识别在工作线程执行；清空或继续书写后丢弃旧结果。窗口不激活，只向打开时仍在前台的原编辑器上屏，切换到其他窗口时拒绝输入。成功上屏通过共享接口按手写来源记录聚合统计，使用 TSF 面板标记避免重复计数。
 
-Win7 专用 Rust 目标使用系统 Tablet PC COM 中文识别器，普通 Windows 继续使用 WinRT。缺少系统识别器时可回退到运行时选项 `handwriting_model`、`MSIME_HANDWRITING_MODEL`、随包模型或已发布手写资源包；此独立目标尚不提供模型下载界面。所有设置页、其他面板及安装集成完成前，它不接入普通产品启动器与发布包。
+Win7 专用 Rust 目标使用系统 Tablet PC COM 中文识别器，普通 Windows 继续使用 WinRT。缺少系统识别器或没有候选时可回退到运行时选项 `handwriting_model`、`MSIME_HANDWRITING_MODEL`、随包模型或已发布手写资源包。窗口提供模型状态、下载、取消、离线多文件导入、移除和刷新；共享安装器按固定锁校验大小与 SHA-256，下载沿用已保存的模型镜像。离线导入需同时选择 `handwriting-zh_CN.model` 和 `HandwritingModel-LICENSE.txt`，按内容识别文件，保留源文件。模型操作使用独立线程，不占用识别队列，关闭时取消并等待退出。所有设置页、其他面板及安装集成完成前，它不接入普通产品启动器与发布包。
 
 ```powershell
 cmake -S platforms/windows/panels/win7 -B target/windows-full/x64/win7-panels -A x64 "-DCMAKE_PREFIX_PATH=<x64 原生依赖前缀>" "-DMSIME_HOST_LIBRARY=$PWD/target/windows7-core/x64/msime_host_api.dll.lib"
@@ -39,6 +41,10 @@ ctest --test-dir target/windows-full/x64/win7-panels -C RelWithDebInfo --output-
 核心必须由同一份源码运行 `Build-Windows7Core.ps1` 重新生成，包含 `msime_client_windows_handwriting`。32 位构建使用 x86 的依赖与核心、`-A Win32`、`target/windows-full/x86/win7-panels`。通过 vcpkg 工具链构建时，`VCPKG_MANIFEST_DIR` 指向 `platforms/windows/settings/win7`，复用其最小清单。两个原生兼容宿主都在程序目录生成当前 edition 的 `edition.json`。
 
 `windows7-handwriting-test.exe` 用实际窗口鼠标消息与真实识别器验证合成笔划，输入提交边界可注入测试回调。另在有中文识别器的交互桌面运行 `windows7-handwriting-test.exe --desktop`，验证合成候选进入它自己创建的编辑器、切换到另一个测试窗口时拒绝上屏，以及按手写来源只记一次；全部状态使用临时合成目录。测试通过不能替代 Win7 SP1 的实际组件、安装和输入法验收。
+
+默认测试通过真实资源包 C ABI 在首次进度回调取消下载，不访问网络，另覆盖任务登记前的取消、离线选择取消和错误文件不发布。将 `MSIME_WINDOWS7_TEST_HANDWRITING_FILES` 设为 `resources/handwriting-model.lock.json` 所对应的两个真实文件所在目录，可额外验证完整离线导入、安装状态与移除；仍只写测试自己的合成状态目录，不改用户模型。系统文件选择器与下载网络在交互桌面另行验收。
+
+显式设置 `MSIME_WINDOWS7_TEST_HANDWRITING_DOWNLOAD=1` 后直接运行同一个测试程序，会额外点击实际下载按钮、经共享下载器联网安装模型，并在下载中操作画布，最后移除测试模型。该模式允许等待最多 180 秒，不属于默认离线 CTest；服务会话跑过它仍不能代替交互桌面验收。
 
 ## 目录结构
 

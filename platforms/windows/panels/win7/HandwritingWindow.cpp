@@ -1,4 +1,5 @@
 #include "HandwritingWindow.h"
+#include "ResourcePackWorker.h"
 #include "../../src/input/NativeTextInput.h"
 #include "../../common/StateDirectory.h"
 #include "../../compat/WindowsDpi.h"
@@ -8,11 +9,13 @@
 #include "../../../../shared/contracts/msime_edition.h"
 
 #include <windowsx.h>
+#include <commdlg.h>
 #include <nlohmann/json.hpp>
 #include <algorithm>
 #include <array>
 #include <condition_variable>
 #include <cstdio>
+#include <cwchar>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -28,6 +31,7 @@ namespace {
 using Json = nlohmann::json;
 using Stroke = std::vector<std::pair<float, float>>;
 constexpr UINT completed_message = WM_APP + 72;
+constexpr UINT model_message = WM_APP + 73;
 constexpr wchar_t host_class[] = L"MSIME.Windows7Handwriting" MSIME_EDITION_NAME_SUFFIX;
 constexpr wchar_t canvas_class[] = L"MSIME.Windows7Handwriting.Canvas" MSIME_EDITION_NAME_SUFFIX;
 // 与共享 HandwritingRecognitionRequest 一致；超限时保留可撤销笔划，不增长缓存。
@@ -71,6 +75,47 @@ Json bounded_document(const std::filesystem::path& path) {
   content.resize(static_cast<size_t>(stream.gcount()));
   if (content.size() > 1024 * 1024) return Json();
   return Json::parse(content, nullptr, false);
+}
+
+std::vector<std::filesystem::path> select_model_files(HWND parent) {
+  std::vector<wchar_t> buffer(65536, L'\0');
+  OPENFILENAMEW dialog{sizeof(OPENFILENAMEW)};
+  dialog.hwndOwner = parent;
+  dialog.lpstrTitle = L"选择手写模型和许可证文件（可多选）";
+  dialog.lpstrFilter = L"手写模型与许可证\0*.model;*.txt\0所有文件\0*.*\0\0";
+  dialog.lpstrFile = buffer.data();
+  dialog.nMaxFile = static_cast<DWORD>(buffer.size());
+  dialog.Flags = OFN_EXPLORER | OFN_ALLOWMULTISELECT | OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST |
+      OFN_NOCHANGEDIR | OFN_DONTADDTORECENT | OFN_HIDEREADONLY;
+  if (!GetOpenFileNameW(&dialog)) return {};
+  const auto first = std::filesystem::path(buffer.data());
+  const auto* next = buffer.data() + std::wcslen(buffer.data()) + 1;
+  if (!*next) return {first};
+  std::vector<std::filesystem::path> files;
+  while (*next) {
+    files.push_back(first / next);
+    next += std::wcslen(next) + 1;
+  }
+  return files;
+}
+
+std::wstring megabytes(uint64_t bytes) {
+  std::array<char, 48> text{};
+  std::snprintf(text.data(), text.size(), "%.1f MB", static_cast<double>(bytes) / (1024.0 * 1024.0));
+  return wide(text.data());
+}
+
+const wchar_t* model_error(const Json& response) {
+  const auto error = response.is_object() ? response.value("error", "") : "";
+  if (error == "local_model_cancelled") return L"已取消；再次下载可继续未完成的部分。";
+  if (error == "resource_pack_busy") return L"手写模型正在其他任务中安装，请稍后刷新。";
+  if (error.find("local_model_import_missing") == 0) return L"文件不完整：请同时选择手写模型和许可证文件。";
+  if (error.find("local_model_import_unreadable") == 0) return L"无法读取所选文件，请检查文件权限后重试。";
+  if (error.find("local_model_checksum_mismatch") == 0 || error.find("local_model_size_mismatch") == 0)
+    return L"模型校验失败，未发布这些文件；请重新下载或选择正确文件。";
+  if (error.find("local_model_network") == 0 || error.find("local_model_http_status") == 0)
+    return L"模型下载失败，请检查网络后重试，也可离线导入。";
+  return L"模型操作未能完成，请检查空间、目录权限后重试。";
 }
 
 struct Context { std::filesystem::path directory; Json options; };
@@ -222,12 +267,19 @@ private:
 } // namespace
 
 struct HandwritingWindow::State {
-  explicit State(SubmitCandidate sink) : submit(std::move(sink)) {}
+  State(SubmitCandidate sink, SelectModelFiles select) : submit(std::move(sink)), select_files(std::move(select)) {}
   HWND host = nullptr;
   HWND canvas = nullptr;
   HWND status = nullptr;
   HWND undo = nullptr;
   HWND clear = nullptr;
+  HWND model_status = nullptr;
+  HWND model_progress = nullptr;
+  HWND model_download = nullptr;
+  HWND model_import = nullptr;
+  HWND model_remove = nullptr;
+  HWND model_cancel = nullptr;
+  HWND model_refresh = nullptr;
   std::array<HWND, max_candidates> buttons{};
   std::vector<Stroke> strokes;
   std::vector<std::wstring> candidates;
@@ -236,16 +288,75 @@ struct HandwritingWindow::State {
   UINT dpi = 96;
   HFONT font = nullptr;
   SubmitCandidate submit;
+  SelectModelFiles select_files;
+  bool model_known = false;
+  std::string model_state;
   msimeui::NativeTextInputTarget target = msimeui::NativeTextInputTarget::Capture();
   std::unique_ptr<Recognizer> recognizer;
+  std::unique_ptr<ResourcePackWorker> models;
 
   ~State() {
+    models.reset();
     recognizer.reset();
     if (host && IsWindow(host)) DestroyWindow(host);
     if (font) DeleteObject(font);
   }
   int px(int value) const { return MulDiv(value, static_cast<int>(dpi), 96); }
   void notice(const wchar_t* message) { SetWindowTextW(status, message); }
+  void model_action(ResourcePackAction action, std::vector<std::filesystem::path> files = {}) {
+    if (models->start(action, "handwriting", std::move(files))) model_complete();
+  }
+  void import_model() {
+    auto files = select_files ? select_files(host) : select_model_files(host);
+    if (files.empty()) return;
+    if (files.size() > 16) { SetWindowTextW(model_progress, L"一次最多选择 16 个文件。请只选择手写模型及其许可证。"); return; }
+    model_action(ResourcePackAction::import_files, std::move(files));
+  }
+  void model_complete() {
+    if (!models) return;
+    const auto update = models->take();
+    if (update.result) {
+      const auto& catalog = update.result->catalog;
+      model_known = false;
+      if (catalog.is_object() && catalog.value("ok", false) && catalog.contains("value") && catalog["value"].is_array()) {
+        for (const auto& pack : catalog["value"]) {
+          if (!pack.is_object() || pack.value("id", "") != "handwriting") continue;
+          model_state = pack.value("state", "");
+          model_known = model_state == "installed" || model_state == "outdated" || model_state == "missing";
+          const auto title = std::wstring(L"手写模型包：") + (model_state == "installed" ? L"已安装" :
+              model_state == "outdated" ? L"需要更新" : L"未安装") + L"（" + megabytes(pack.value<uint64_t>("size", 0)) + L"）";
+          SetWindowTextW(model_status, title.c_str());
+          SetWindowTextW(model_download, model_state == "outdated" ? L"更新模型" : L"下载模型");
+          break;
+        }
+      }
+      if (!model_known) SetWindowTextW(model_status, L"手写模型包：状态不可用");
+      const auto& response = update.result->response;
+      const bool ok = response.is_object() && response.value("ok", false);
+      const auto action = update.result->action;
+      SetWindowTextW(model_progress, !ok ? model_error(response) : action == ResourcePackAction::list ?
+          L"系统识别器可直接使用；模型包用于系统识别无结果时的回退。" : action == ResourcePackAction::remove ?
+          L"已移除下载的模型包；系统识别器和随包模型仍可使用。" : L"手写模型已校验并安装，可以继续书写。");
+      // 模型变化后重识别当前笔划，旧的识别结果由画布代次拒绝。
+      if (ok && action != ResourcePackAction::list && !drawing) recognize();
+    }
+    const bool transfer = update.action == ResourcePackAction::download || update.action == ResourcePackAction::import_files;
+    EnableWindow(model_download, !update.busy && model_known && model_state != "installed");
+    EnableWindow(model_import, !update.busy && model_known);
+    EnableWindow(model_remove, !update.busy && model_known && model_state != "missing");
+    EnableWindow(model_refresh, !update.busy);
+    EnableWindow(model_cancel, update.busy && transfer && !update.cancelling);
+    if (!update.busy) return;
+    if (update.cancelling) SetWindowTextW(model_progress, L"正在取消模型安装…");
+    else if (!update.progress.phase.empty()) {
+      const auto& progress = update.progress;
+      const auto text = std::wstring(progress.phase == "import" ? L"正在导入模型：" : progress.phase == "download" ?
+          L"正在下载模型：" : progress.phase == "done" ? L"正在完成模型安装：" : L"正在校验模型：") +
+          megabytes(progress.done) + L" / " + megabytes(progress.total);
+      SetWindowTextW(model_progress, text.c_str());
+    } else SetWindowTextW(model_progress, update.action == ResourcePackAction::list ? L"正在查询模型状态…" :
+        update.action == ResourcePackAction::remove ? L"正在移除模型包…" : L"正在准备模型安装…");
+  }
   void reset_candidates() {
     candidates.clear();
     for (HWND button : buttons) { ShowWindow(button, SW_HIDE); SetWindowTextW(button, L""); }
@@ -279,7 +390,7 @@ struct HandwritingWindow::State {
     }
     const auto& value = response.at("value");
     if (value.contains("system_recognizer")) {
-      notice(value.value("system_recognizer", false) ? L"在方框内书写，松开鼠标后自动识别。" : L"未检测到系统中文手写识别器；已安装的手写模型仍可用于识别。");
+      notice(value.value("system_recognizer", false) ? L"在方框内书写，松开鼠标后自动识别。" : L"未检测到系统中文手写识别器；可下载或离线导入手写模型。");
       return;
     }
     if (!value.contains("candidates") || !value.at("candidates").is_array()) { notice(L"手写识别未能完成，请重试。"); return; }
@@ -400,10 +511,17 @@ struct HandwritingWindow::State {
       if (control >= handwriting_candidate && control < handwriting_candidate + static_cast<int>(max_candidates)) state->insert(static_cast<size_t>(control - handwriting_candidate));
       else if (control == handwriting_undo && !state->strokes.empty()) { state->strokes.pop_back(); state->recognize(); }
       else if (control == handwriting_clear) { state->strokes.clear(); state->recognize(); }
+      else if (control == handwriting_model_download && IsWindowEnabled(state->model_download)) state->model_action(ResourcePackAction::download);
+      else if (control == handwriting_model_import && IsWindowEnabled(state->model_import)) state->import_model();
+      else if (control == handwriting_model_remove && IsWindowEnabled(state->model_remove)) state->model_action(ResourcePackAction::remove);
+      else if (control == handwriting_model_refresh && IsWindowEnabled(state->model_refresh)) state->model_action(ResourcePackAction::list);
+      else if (control == handwriting_model_cancel && IsWindowEnabled(state->model_cancel)) { state->models->cancel(); state->model_complete(); }
       return 0;
     }
     case completed_message: state->complete(); return 0;
+    case model_message: state->model_complete(); return 0;
     case WM_CLOSE:
+      state->models.reset();
       state->recognizer.reset();
       DestroyWindow(window);
       return 0;
@@ -417,7 +535,8 @@ struct HandwritingWindow::State {
   }
 };
 
-HandwritingWindow::HandwritingWindow(SubmitCandidate submit) : state_(std::make_unique<State>(std::move(submit))) {}
+HandwritingWindow::HandwritingWindow(SubmitCandidate submit, SelectModelFiles select)
+    : state_(std::make_unique<State>(std::move(submit), std::move(select))) {}
 HandwritingWindow::~HandwritingWindow() = default;
 HWND HandwritingWindow::handle() const { return state_->host; }
 
@@ -436,7 +555,7 @@ bool HandwritingWindow::create(HINSTANCE instance) {
   // 小屏幕上缩放整块面板，保证画布、候选与操作按钮都留在工作区内。
   const UINT fit = static_cast<UINT>(std::max<LONG>(48, std::min(
       (monitor.rcWork.right - monitor.rcWork.left) * 96 / 720,
-      (monitor.rcWork.bottom - monitor.rcWork.top) * 96 / 570)));
+      (monitor.rcWork.bottom - monitor.rcWork.top) * 96 / 660)));
   state.dpi = std::min(state.dpi, fit);
   WNDCLASSEXW type{sizeof(WNDCLASSEXW)};
   type.hInstance = instance;
@@ -449,7 +568,7 @@ bool HandwritingWindow::create(HINSTANCE instance) {
   type.lpszClassName = canvas_class;
   type.hCursor = LoadCursorW(nullptr, IDC_CROSS);
   if (!RegisterClassExW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
-  RECT frame{0, 0, state.px(700), state.px(510)};
+  RECT frame{0, 0, state.px(700), state.px(600)};
   const DWORD style = WS_CAPTION | WS_SYSMENU | WS_CLIPCHILDREN;
   const DWORD extended = WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW;
   AdjustWindowRectEx(&frame, style, FALSE, extended);
@@ -470,17 +589,28 @@ bool HandwritingWindow::create(HINSTANCE instance) {
       state.host, reinterpret_cast<HMENU>(static_cast<INT_PTR>(handwriting_canvas)), instance, &state);
   state.undo = control(L"BUTTON", L"撤销一笔", BS_PUSHBUTTON, handwriting_undo, 16, 444, 100, 28);
   state.clear = control(L"BUTTON", L"清空", BS_PUSHBUTTON, handwriting_clear, 128, 444, 100, 28);
-  state.status = control(L"STATIC", L"正在查询中文手写识别器…", SS_LEFT, handwriting_status, 16, 480, 668, 26);
+  state.model_refresh = control(L"BUTTON", L"刷新模型", BS_PUSHBUTTON, handwriting_model_refresh, 240, 444, 100, 28);
+  state.model_status = control(L"STATIC", L"正在查询手写模型包…", SS_LEFT, handwriting_model_status, 452, 392, 232, 44);
+  state.model_download = control(L"BUTTON", L"下载模型", BS_PUSHBUTTON, handwriting_model_download, 452, 444, 110, 28);
+  state.model_import = control(L"BUTTON", L"离线导入", BS_PUSHBUTTON, handwriting_model_import, 574, 444, 110, 28);
+  state.model_remove = control(L"BUTTON", L"移除模型包", BS_PUSHBUTTON, handwriting_model_remove, 452, 480, 110, 28);
+  state.model_cancel = control(L"BUTTON", L"取消安装", BS_PUSHBUTTON, handwriting_model_cancel, 574, 480, 110, 28);
+  state.model_progress = control(L"STATIC", L"", SS_LEFT, handwriting_model_progress, 16, 516, 668, 28);
+  state.status = control(L"STATIC", L"正在查询中文手写识别器…", SS_LEFT, handwriting_status, 16, 552, 668, 40);
   for (size_t i = 0; i < max_candidates; ++i) {
     state.buttons[i] = control(L"BUTTON", L"", BS_PUSHBUTTON, handwriting_candidate + static_cast<int>(i),
         452 + static_cast<int>(i % 2) * 118, 16 + static_cast<int>(i / 2) * 62, 112, 54);
     if (!state.buttons[i]) return false;
   }
-  if (!state.canvas || !state.undo || !state.clear || !state.status) return false;
+  if (!state.canvas || !state.undo || !state.clear || !state.status || !state.model_status || !state.model_progress ||
+      !state.model_download || !state.model_import || !state.model_remove || !state.model_cancel || !state.model_refresh) return false;
   state.reset_candidates();
   EnableWindow(state.undo, FALSE);
   EnableWindow(state.clear, FALSE);
   state.recognizer = std::make_unique<Recognizer>(state.host);
+  state.models = std::make_unique<ResourcePackWorker>([] { return context().directory; },
+      [window = state.host] { PostMessageW(window, model_message, 0, 0); });
+  state.model_action(ResourcePackAction::list);
   state.recognizer->submit({state.generation, {{"operation", "status"}}});
   return true;
 #endif
