@@ -11,6 +11,7 @@ std::optional<int> settings_page_for_route(std::string_view route) {
   const auto category = route.substr(prefix.size());
   if (category == "vocabulary") return 14;
   if (category == "community") return 9;
+  if (category == "voice") return 19;
   if (category == "community-resources") return 18;
   if (category == "community-plugins") return 17;
   bool recognized = find_page(category) != nullptr;
