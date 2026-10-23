@@ -330,9 +330,16 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private var inputContext = KeyboardInputContext()
   private var inputScheme: ChineseInputScheme = .editionFallback {
     didSet {
-      if (oldValue == .fourteenKey) != (inputScheme == .fourteenKey) { applyReadingRowPlacement() }
+      if Self.usesFourteenKeyLayout(for: oldValue) != Self.usesFourteenKeyLayout(for: inputScheme) {
+        applyReadingRowPlacement()
+      }
     }
   }
+  private static func usesFourteenKeyLayout(for scheme: ChineseInputScheme) -> Bool {
+    scheme == .fourteenKey
+      || (scheme.shuangpinProfile != nil && TouchShuangpinLayoutPreference.layout == .fourteenKey)
+  }
+  private var usesFourteenKeyLayout: Bool { Self.usesFourteenKeyLayout(for: inputScheme) }
   private var usesShuangpin: Bool { inputScheme.shuangpinProfile != nil }
   // In an active Quanpin or Shuangpin composition, Shift marks the next letter as Engine helpcode.
   // Idle Chinese input keeps the existing shortcut that switches to English capitalization.
@@ -590,7 +597,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   /// 读音并入候选行而此刻没有读音时，把那一段收成零宽，候选从行首开始。
   private var inlineReadingCollapse: NSLayoutConstraint?
   /// 读音是否在候选行上面单独一行：全拼 14 键是，它的拼音选择条排在读音右边。按方案而不是按中英文状态判断，切到英文时顶栏高度不变，按键不跳。
-  private var separateReadingRow: Bool { inputScheme == .fourteenKey }
+  private var separateReadingRow: Bool { usesFourteenKeyLayout }
   /// 根视图的内边距（`KeyboardFormFactor.padding`）：上、前、后、下。
   private var keyboardPaddingConstraints: [NSLayoutConstraint] = []
 
@@ -703,6 +710,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     translations.onArrival = { [weak self] in self?.renderCandidateStrip() }
     // 方案以共享文档为准。会话在本控制器创建时已经同步读过一次文档，先把其中记的方案抄进 App Group 镜像再按镜像行事，不额外读盘；否则在 `viewWillAppear` 的后台重载回来之前，键盘会先按镜像里的旧方案（比如双拼）画出来并开始接收按键。
     InputSchemePreference.mirror(session.sharedPreferences)
+    TouchShuangpinLayoutPreference.mirror(session.sharedPreferences)
     inputScheme = InputSchemePreference.scheme
     isChineseMode = ImeModeMemoryPreference.startsInChinese(fallback: Self.startsInChinese(session.sharedPreferences))
     appliedCharacterWidth = CharacterWidthPreference.value(in: session.sharedPreferences)
@@ -2687,7 +2695,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   }
 
   /// 14 键是否画在屏幕上并把按键交给引擎的 14 键网格：中文模式、方案是全拼 14 键、不在本地输入模式里。英文模式和本地输入模式画 26 键字母。
-  private var typesFourteenKey: Bool { isChineseMode && inputScheme == .fourteenKey && !isInLocalMode }
+  private var typesFourteenKey: Bool { isChineseMode && usesFourteenKeyLayout && !isInLocalMode }
 
   private func makeLetterRow(_ letters: [Character], includesShift: Bool) -> UIStackView {
     let row = makeRow()
@@ -4493,7 +4501,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     case .nineKey: session.switchToNineKey()
     case .nineKeyShuangpin: session.switchToNineKeyShuangpin()
     case .fourteenKey: session.switchToFourteenKey()
-    case .ziranma, .microsoft, .shoudao: session.switch(toShuangpinProfile: inputScheme.rawValue)
+    case .ziranma, .microsoft, .shoudao:
+      usesFourteenKeyLayout
+        ? session.switchToFourteenKeyShuangpin(profile: inputScheme.rawValue)
+        : session.switch(toShuangpinProfile: inputScheme.rawValue)
     case .wubi: session.switchToWubi()
     case .japanese, .japaneseNineKey: session.switchToJapanese()
     case .korean: session.switchToKorean()
@@ -4504,7 +4515,10 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     case .stroke: session.switchToStroke()
     case .handwriting: session.switchToHandwriting()
     case .quanpin: session.switch(toShuangpin: usesShuangpin)
-    case .shuangpin: session.switch(toShuangpinProfile: "xiaohe")
+    case .shuangpin:
+      usesFourteenKeyLayout
+        ? session.switchToFourteenKeyShuangpin(profile: "xiaohe")
+        : session.switch(toShuangpinProfile: "xiaohe")
     }
   }
 
@@ -4945,6 +4959,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   /// while composing so a settings reload cannot interrupt Engine state.
   private func synchronizeSharedTouchPreferences() -> Bool {
     guard let preferences = session.sharedPreferences else { return false }
+    let previousFourteenKeyLayout = usesFourteenKeyLayout
+    TouchShuangpinLayoutPreference.mirror(preferences)
     let previousTranslationSettings = InputHabitPreference.mirrored
     // The Tauri host stores learning and frequency settings in the canonical
     // PreferencesStore. Keep the legacy App Group values in sync because the
@@ -5028,8 +5044,18 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       if !enabled.isEmpty { InputSchemePreference.enabledSchemes = enabled }
       selectedScheme = (schemes["selected"] as? String).flatMap(Self.sharedInputScheme)
     }
+    var selectedSchemeChanged = false
     if !hasComposition, let selectedScheme, InputSchemePreference.offeredSchemes.contains(selectedScheme) {
+      selectedSchemeChanged = selectedScheme != inputScheme
       selectInputScheme(selectedScheme, persistShared: false)
+    }
+    if !hasComposition && !selectedSchemeChanged && previousFourteenKeyLayout != usesFourteenKeyLayout {
+      let source = typingSource
+      let snapshot = applyInputScheme()
+      updateSchemeButton()
+      render(snapshot, source: source)
+      applyCandidateGlossLayout()
+      synchronizeReplyKeyboard()
     }
     if inputScheme == .nineKeyShuangpin {
       nineKeyShuangpinLayout = try? .current(in: preferences)
@@ -5162,7 +5188,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
 
   /// 全拼九键或 14 键正在组字时，展开的是三栏的九键面板（单字和笔画筛选照常可用）；其他方案、注音九键和本地模式使用铺满键区的候选网格，由顶部箭头收起。
   private var opensNineKeyPanel: Bool {
-    (inputScheme.isMandarinNineKey || inputScheme == .fourteenKey) && isChineseMode && hasComposition && !isInLocalMode
+    (inputScheme.isMandarinNineKey || usesFourteenKeyLayout) && isChineseMode && hasComposition && !isInLocalMode
   }
 
   private func candidatePanelAnnotations(_ snapshot: CandidatePanelSnapshot) -> [KeyboardCandidateAnnotation] {

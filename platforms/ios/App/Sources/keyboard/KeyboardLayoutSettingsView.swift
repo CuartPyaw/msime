@@ -10,6 +10,7 @@ struct KeyboardLayoutSettingsView: View {
   @State private var height = KeyboardLayoutPreference.heightAdjustment
   @State private var skin = KeyboardTheme.current
   @State private var scheme = InputSchemePreference.scheme
+  @State private var shuangpinLayout = TouchShuangpinLayoutPreference.layout
   @State private var hideLanguageKey = KeyboardLayoutPreference.hideLanguageKey
   @State private var tabletFullKeys = KeyboardLayoutPreference.tabletFullKeys
   @State private var tabletSplit = KeyboardLayoutPreference.tabletSplit
@@ -64,14 +65,17 @@ struct KeyboardLayoutSettingsView: View {
   // MARK: - 预览
 
   private var nineKey: Bool { scheme.isMandarinNineKey }
-  /// 键盘上有没有 iPad 的数字行：九键和全拼 14 键都不画它。
-  private var drawsNumberRow: Bool { !nineKey && scheme != .fourteenKey }
+  private var fourteenKey: Bool {
+    scheme == .fourteenKey || (scheme.shuangpinProfile != nil && shuangpinLayout == .fourteenKey)
+  }
+  /// 键盘上有没有 iPad 的数字行：九键和 14 键都不画它。
+  private var drawsNumberRow: Bool { !nineKey && !fourteenKey }
 
   private var preview: some View {
     VStack(spacing: 6) {
       grip
       KeyboardSkinPreview(
-        skin: skin, nineKey: nineKey, fourteenKey: scheme == .fourteenKey,
+        skin: skin, nineKey: nineKey, fourteenKey: fourteenKey,
         layout: KeyboardGeometry(keySpacing: keySpacing, rowSpacing: rowSpacing, showsBottomLanguage: !hideLanguageKey),
         heightAdjustment: height
       )
@@ -156,6 +160,18 @@ struct KeyboardLayoutSettingsView: View {
   private var layoutGroup: some View {
     DesignGroup(title: "布局", footer: saveFailed ? SettingsSaveFailure.message : nil) {
       chineseKeyboardRow
+      if scheme.shuangpinProfile != nil {
+        DesignDivider()
+        DesignSelectRow(
+          title: "双拼键盘",
+          subtitle: "当前双拼方案使用的字母键布局",
+          options: TouchShuangpinLayoutPreference.Layout.allCases.map {
+            DesignOption(title: $0.title, value: $0, identifier: "shuangpinKeyboard\($0.rawValue)")
+          },
+          selection: Binding(get: { shuangpinLayout }, set: { _ in }),
+          sheetTitle: "双拼键盘", identifier: "shuangpinKeyboardPicker",
+          onSelect: selectShuangpinLayout)
+      }
       DesignDivider()
       // 只有双拼方案的 26 键画键位提示；本版本没有双拼时不列这一行。
       if ChineseInputScheme.shuangpin.isOfferedByEdition {
@@ -368,7 +384,7 @@ struct KeyboardLayoutSettingsView: View {
 
   // MARK: - 存储
 
-  /// 当前方案所属的一组键盘，按 26 键、14 键、9 键排列，只留本版本提供的：全拼有 26 键、14 键和 9 键，日语有 26 键和 9 键。其余方案都只有一种排列，为 nil。
+  /// 当前方案所属的一组键盘，按 26 键、14 键、9 键排列，只留本版本提供的：全拼有 26 键、14 键和 9 键，日语有 26 键和 9 键。双拼的 14 键布局单独由上面的行保存，避免切换方案时丢掉双拼 profile。
   static func layoutChoices(_ scheme: ChineseInputScheme) -> [(title: String, scheme: ChineseInputScheme, identifier: String)]? {
     let choices: [(title: String, scheme: ChineseInputScheme, identifier: String)]
     switch scheme {
@@ -396,6 +412,16 @@ struct KeyboardLayoutSettingsView: View {
     guard next != scheme else { return }
     saveFailed = !InputSchemePreference.select(next)
     readPreferences()
+  }
+
+  private func selectShuangpinLayout(_ next: TouchShuangpinLayoutPreference.Layout) {
+    guard next != shuangpinLayout else { return }
+    saveFailed = !TouchShuangpinLayoutPreference.save(next)
+    if saveFailed {
+      shuangpinLayout = TouchShuangpinLayoutPreference.layout(in: MetasequoiaInputSessionBridge.loadSharedPreferences())
+    } else {
+      shuangpinLayout = next
+    }
   }
 
   private func previewHaptics() {
@@ -443,6 +469,7 @@ struct KeyboardLayoutSettingsView: View {
     let preferences = MetasequoiaInputSessionBridge.loadSharedPreferences()
     // 文档里的选择（取不到时退回 App Group 镜像）就是键盘下次打开时用的方案。
     scheme = InputSchemePreference.current(in: preferences).scheme
+    shuangpinLayout = TouchShuangpinLayoutPreference.layout(in: preferences)
     keySpacing = KeyboardLayoutPreference.keySpacing
     rowSpacing = KeyboardLayoutPreference.rowSpacing
     height = KeyboardLayoutPreference.heightAdjustment

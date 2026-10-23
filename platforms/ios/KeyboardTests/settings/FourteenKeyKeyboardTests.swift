@@ -68,6 +68,18 @@ final class FourteenKeyKeyboardTests: XCTestCase {
     XCTAssertFalse(bridge.gridKey("b").isHandled)
   }
 
+  /// 双拼 14 键沿用当前双拼 profile；同一张键面交给双拼网格后，组码仍按双拼规则解码。
+  func testTheBridgeTypesShuangpinFourteenKeyWithTheSelectedProfile() {
+    let bridge = MetasequoiaInputSessionBridge()
+    let switched = bridge.switchToFourteenKeyShuangpin(profile: "xiaohe")
+    XCTAssertNil(switched.diagnosticText)
+    var snapshot = bridge.cancel()
+    for code in "bugao" { snapshot = bridge.gridKey(String(code)) }
+    XCTAssertTrue(snapshot.isHandled)
+    XCTAssertTrue(snapshot.candidates.contains("你好"), "\(snapshot.candidates)")
+    XCTAssertTrue(snapshot.nineKeyReading.contains("hao"), snapshot.nineKeyReading)
+  }
+
   // MARK: - 键面
 
   /// 14 键在手机窄屏和宽屏上都不越界，四排等高，按键与 26 键一样高；键盘总高度比 26 键多出单独一行的读音（26 键的读音并入候选行，14 键的拼音选择条要排在读音右边）。字母行、数字行和 Shift 都不显示，底行是手机 26 键底行。
