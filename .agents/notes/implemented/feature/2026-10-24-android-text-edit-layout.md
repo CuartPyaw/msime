@@ -33,5 +33,6 @@ Status: implemented
 - `check-host.sh` 初轮发现新增入口缺搜索关键词，补齐后通过 258 项 JVM smoke、225 份设备源码编译和 JNI/Java/API/资源契约。固定布局回归检查全部动作、四角留白、默认和反向顺序以及原编辑器事件。
 - `TextEditRecentClipboardDeviceSmoke` 增加真实设置页的取消、保存、重置、页面重开与键盘进程读取排序，并把原滚动测试改为所有快捷键完整可见和真实点击。新增断言尚未在设备执行。
 - Gradle `:app:compileFullReleaseJavaWithJavac`、`client-core` 严格 Clippy、Rust 格式、共享偏好字段一致性和 `pnpm build`（包含 TypeScript 检查）通过。
+- macOS 偏好覆盖检查先因缺少新字段的适用范围声明而失败；补充「仅 Android 原生文本编辑面板读取，共享 macOS 设置页不显示入口」后通过，扫描器四项回归也通过。
 - 本地 quick 已通过 Windows 可移植测试、契约、笔记、Rust workspace、Android 与 WASM 目标检查；随后因本机只剩约 7 GiB、远端系统盘约 24 GiB，主动停止于后续原生构建之前，退出 143，不能记为完整通过。Rust 阶段复用主工作区现有标准 `target/` 缓存，未新增完整依赖构建树，也未启动原生库与专用 AVD 完整构建。
 - API 28/35 原生包、设置和编辑器专项、横屏/单手/浮动触控尺寸仍需验收。设备缺口关闭前保持草稿，不能据 JVM 或编译检查声称设备通过。
