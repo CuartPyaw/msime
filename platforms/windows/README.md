@@ -6,6 +6,25 @@ Windows 平台的实现源码在 `src/` 下；`tsf/`、`msimeui/`、`tests/`、`
 
 `common/` 只收 TSF DLL 与 Server 两侧都要编译的协议头：`PipeMetadata.h`（主管道元数据位）、`AuxMessage.h`（Aux 管道消息的编码与解析）、`TsfFocusLeaseProtocol.h`（焦点租约帧）、`KeyEventSendResult.h`（按键写入结果的三分类；`tsf/IPC/KeyEventSendResult.h` 只是把它以 DLL 原有的全局名转出来）和 `StateDirectory.h`（状态目录的解析顺序：本版本的数据目录环境变量（full 是 `METASEQUOIA_IME_FULL_DATA_DIR`）、本版本 HKLM 键在 64 位视图下的 `DataDir`、`%LOCALAPPDATA%\<本版本的状态目录>`（full 是 `MSIME-Client`），两个进程各自解析，但必须落到同一个根；`crates/host-windows` 的 `server_state_directory` 是它的 Rust 副本，`scripts/test-windows-state-dir-parity.py` 核对两边都从版本表取这些名字；WinUI 设置窗口 `settings/main.cpp` 从开始菜单启动、没有 Server 注入的状态目录时也用它找到 Server 的状态根）。`tsf/` 只能以相对路径（`../common/`、`../../common/`）引用这里的头文件，不得再伸进 `src/`；Server 侧经全局 include 路径按文件名引用。往这里加头文件等于扩大 DLL ↔ Server 的契约，只放两侧确实共用的定义。
 
+## Win7 核心兼容构建（开发中）
+
+完整 Win7 支持尚未完成：设置窗口、共享面板、安装升级和 Win7 SP1 实机验收仍在适配。`Build-Windows7Core.ps1` 只产出核心 DLL 与 x64 MCP，不产出可安装的完整产品，也不替代 `Build-Client.ps1` 的普通构建。
+
+在对应架构的 VS 2022 MSVC 开发环境中，先为仓库固定的 Rust 工具链安装标准库源码，再运行：
+
+```powershell
+rustup component add rust-src
+.\platforms\windows\Build-Windows7Core.ps1 -Architecture x64 -OutputDirectory "$PWD\target\windows7-core"
+# 32 位核心在 vcvarsall.bat x64_x86 开发环境中单独编译。
+.\platforms\windows\Build-Windows7Core.ps1 -Architecture x86 -OutputDirectory "$PWD\target\windows7-core"
+```
+
+Rust 使用 `x86_64-win7-windows-msvc` / `i686-win7-windows-msvc` 与 `build-std`，产物在固定的 `target/<triple>/release` 下；MSVC 兼容对象与测试在 `target/windows7-compat/<arch>`，收集后的核心与导入清单在 `target/windows7-core/<arch>`。标准库构建需要的 `RUSTC_BOOTSTRAP` 只在脚本执行期间启用，退出时恢复环境。普通 Windows 构建的工具链、目标与入口保持原状。
+
+32 位构建使用 64 位宿主的交叉编译器（`vcvarsall.bat x64_x86`）。服务账号的 Cargo 缓存可能位于 `C:\Windows\System32\config\systemprofile`；32 位宿主编译器会受 WOW64 文件系统重定向影响，把已有的源文件报成不存在。切换宿主编译器即可，不要修改依赖源码或清空缓存。
+
+`compat/Windows7DelayLoad.cpp` 仅链接进 Win7 核心：对已确认不兼容的三个系统 DLL 使用 MSVC 延迟加载，系统模块从系统目录探测；可用 API 仍调用系统实现，旧 COM 使用 `ole32.dll`，默认音频设备用传统 WASAPI 异步激活。`Test-Windows7CoreImports.ps1` 同时检查普通和延迟导入，拒绝未覆盖的延迟接口并输出清单；它只检查已发现的兼容障碍，不能代替 Win7 系统导出与全部随包运行库的验证。
+
 ## 产品版本（edition）
 
 同一套源码按 `shared/contracts/editions.json` 打出几个可以同时安装、彼此完全隔离的产品：full（水杉输入法）、pinyin（水杉拼音）、wubi（水杉五笔）、japanese（水杉日语）、vietnamese（水杉越南语）和 tibetan（水杉藏文）。每个版本有自己的 TSF CLSID、profile 和全部 TSF 内部 GUID、Inno AppId、Program Files 下的安装目录、HKLM 键、状态目录、用户目录（匿名账号和使用统计）、数据目录环境变量、看门狗计划任务、host DLL 名、`MSIME.exe` 的 Tauri identifier 和安装包名；命名管道、命名事件、互斥量和窗口类名都带 `.<id>` 后缀，full 也是（`.full`）。
