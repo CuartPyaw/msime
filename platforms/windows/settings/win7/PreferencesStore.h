@@ -74,6 +74,7 @@ public:
       const bool optional_object = change.value.is_object() &&
           (change.path == std::vector<std::string>{"app_input_mode_rules"} ||
            change.path == std::vector<std::string>{"plugins"} ||
+           change.path == std::vector<std::string>{"cloud_clipboard_relay"} ||
            change.path == std::vector<std::string>{"game_compatibility"} ||
            change.path == std::vector<std::string>{"wubi_candidate_selection"});
       for (size_t index = 0; index < change.path.size(); ++index) {

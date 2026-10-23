@@ -85,6 +85,14 @@ enum ControlId {
   clipboard_previous, clipboard_next, clipboard_list, clipboard_detail,
   clipboard_pin, clipboard_copy, clipboard_remove, clipboard_clear, clipboard_notice,
   clipboard_timestamp,
+  cloud_clipboard_source = 2100, cloud_clipboard_relay_url, cloud_clipboard_relay_token,
+  cloud_clipboard_relay_save, cloud_clipboard_relay_clear, cloud_clipboard_refresh,
+  cloud_clipboard_status, cloud_clipboard_enabled, cloud_clipboard_retention,
+  cloud_clipboard_search, cloud_clipboard_find, cloud_clipboard_items, cloud_clipboard_detail,
+  cloud_clipboard_copy, cloud_clipboard_pin, cloud_clipboard_delete, cloud_clipboard_clear,
+  cloud_clipboard_text, cloud_clipboard_add, cloud_clipboard_devices, cloud_clipboard_device_detail,
+  cloud_clipboard_approve, cloud_clipboard_reject, cloud_clipboard_remove,
+  cloud_clipboard_reset, cloud_clipboard_notice, cloud_clipboard_metadata,
 };
 
 class SettingsWindow {
@@ -99,8 +107,12 @@ public:
     CommunityTransport transport;
     std::function<bool(HWND, std::wstring_view)> copy;
   };
+  struct CloudClipboardServices {
+    CommunityTransport account;
+    CommunityTransport relay;
+  };
   explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {}, FolderPicker folder_picker = {},
-      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {}, ClipboardServices clipboard = {});
+      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {}, ClipboardServices clipboard = {}, CloudClipboardServices cloud_clipboard = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;

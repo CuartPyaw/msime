@@ -10,6 +10,8 @@
 #include "AiForm.h"
 #include "AccountForm.h"
 #include "ClipboardForm.h"
+#include "CloudClipboardForm.h"
+#include "CloudClipboardWorker.h"
 #include "ThemeForm.h"
 #include "CommunitySkinForm.h"
 #include "StatisticsForm.h"
@@ -63,7 +65,7 @@ bool copy_clipboard(HWND owner, std::wstring_view text) {
 }
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard };
+  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard, cloud_clipboard };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -281,7 +283,7 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory, community, statistics, clipboard };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory, community, statistics, clipboard, cloud_clipboard };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
@@ -322,14 +324,15 @@ struct Completion {
   bool statistics_upload_changed = false;
   std::optional<theme_data::Image> account_avatar;
   std::optional<Json> clipboard_response;
+  std::optional<Json> cloud_clipboard_response;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
 class Worker {
 public:
   explicit Worker(HWND window, SettingsWindow::CommunityTransport transport, SettingsWindow::CommunityTransport statistics_upload_transport,
-      SettingsWindow::CommunityTransport account_transport, SettingsWindow::CommunityTransport clipboard_transport) : window_(window), community_transport_(std::move(transport)),
-      statistics_upload_transport_(std::move(statistics_upload_transport)), account_transport_(std::move(account_transport)), clipboard_transport_(std::move(clipboard_transport)), thread_([this] { run(); }) {}
+      SettingsWindow::CommunityTransport account_transport, SettingsWindow::CommunityTransport clipboard_transport, SettingsWindow::CloudClipboardServices cloud_clipboard_services) : window_(window), community_transport_(std::move(transport)),
+      statistics_upload_transport_(std::move(statistics_upload_transport)), account_transport_(std::move(account_transport)), clipboard_transport_(std::move(clipboard_transport)), cloud_clipboard_services_(std::move(cloud_clipboard_services)), thread_([this] { run(); }) {}
   ~Worker() {
     {
       std::lock_guard<std::mutex> guard(lock_);
@@ -407,6 +410,7 @@ private:
     account_response_.reset();
     account_avatar_.reset();
     clipboard_response_.reset();
+    cloud_clipboard_response_.reset();
     fonts_.reset();
     community_response_.reset();
     community_preview_ = {};
@@ -419,6 +423,13 @@ private:
     }
     if (job.reload || job.action == Job::Action::helpcode_sources) helpcodes_ = helpcode_sources(directory_);
     Result result;
+    if (job.action == Job::Action::cloud_clipboard && job.credential) {
+      const auto account = account_directory();
+      if (account.empty()) cloud_clipboard_response_ = Json{{"response", {{"ok", false}, {"error", "account_storage"}}}};
+      else cloud_clipboard_response_ = run_cloud_clipboard(*job.credential, directory_.u8string(), account.u8string(),
+          [&] { return call_account(account_request({{"operation", "status"}})); }, cloud_clipboard_services_);
+      auto fresh = store_->load(); snapshot_ = fresh.snapshot; return fresh;
+    }
     if (job.action == Job::Action::clipboard) {
       result = job.changes.empty() ? store_->load() : snapshot_ ? store_->save(*snapshot_, job.changes) : Result{};
       if (!result.snapshot) result.snapshot = store_->load().snapshot;
@@ -681,7 +692,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_), std::move(community_response_), std::move(community_preview_), std::move(statistics_response_), std::move(statistics_upload_response_), job.statistics_upload, std::move(account_avatar_), std::move(clipboard_response_)};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_), std::move(community_response_), std::move(community_preview_), std::move(statistics_response_), std::move(statistics_upload_response_), job.statistics_upload, std::move(account_avatar_), std::move(clipboard_response_), std::move(cloud_clipboard_response_)};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -714,6 +725,7 @@ private:
   std::optional<Json> account_response_;
   std::optional<theme_data::Image> account_avatar_;
   std::optional<Json> clipboard_response_;
+  std::optional<Json> cloud_clipboard_response_;
   std::optional<Json> fonts_;
   std::optional<ThemeCompletion> theme_;
   int theme_preview_mode_ = 0;
@@ -723,6 +735,7 @@ private:
   SettingsWindow::CommunityTransport statistics_upload_transport_;
   SettingsWindow::CommunityTransport account_transport_;
   SettingsWindow::CommunityTransport clipboard_transport_;
+  SettingsWindow::CloudClipboardServices cloud_clipboard_services_;
   std::optional<Json> statistics_response_;
   std::optional<Json> statistics_upload_response_;
   std::thread thread_;
@@ -765,6 +778,7 @@ struct SettingsWindow::State {
   int community_height = 0;
   int statistics_height = 0;
   int clipboard_height = 0;
+  int cloud_clipboard_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
   int expression_tab = 0;
@@ -772,6 +786,7 @@ struct SettingsWindow::State {
   Surface surface = Surface::shortcuts;
   bool busy = true;
   bool saving_cloud = false;
+  bool saving_clipboard_relay = false;
   bool saving_wubi_keys = false;
   bool failed = false;
   bool com_initialized = false;
@@ -789,12 +804,14 @@ struct SettingsWindow::State {
   AiForm ai_form;
   AccountForm account_form;
   ClipboardForm clipboard_form;
+  CloudClipboardForm cloud_clipboard_form;
   ThemeForm theme_form;
   CommunitySkinForm community_form;
   CommunityTransport community_transport;
   CommunityTransport statistics_upload_transport;
   CommunityTransport account_transport;
   ClipboardServices clipboard_services;
+  CloudClipboardServices cloud_clipboard_services;
   StatisticsForm statistics_form;
   ToolbarPreview toolbar_preview_form;
   FolderPicker folder_picker;
@@ -823,7 +840,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -915,6 +932,9 @@ struct SettingsWindow::State {
     });
     clipboard_height = clipboard_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) {
       return surface_row(Surface::clipboard, type, text, style, id, top, height);
+    });
+    cloud_clipboard_height = cloud_clipboard_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) {
+      return surface_row(Surface::cloud_clipboard, type, text, style, id, top, height);
     });
     enable(false);
     layout();
@@ -1224,6 +1244,7 @@ struct SettingsWindow::State {
     ai_form.enable(enabled);
     account_form.enable(enabled);
     clipboard_form.enable(enabled);
+    cloud_clipboard_form.enable(enabled);
     theme_form.enable(enabled);
     community_form.enable(enabled);
     statistics_form.enable(enabled);
@@ -1259,7 +1280,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::cloud_clipboard ? cloud_clipboard_height : surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -1307,6 +1328,7 @@ struct SettingsWindow::State {
     if (busy) return;
     account_form.google_waiting(job.action == Job::Action::account && job.credential &&
         job.credential->value("operation", std::string{}) == "google_login");
+    saving_clipboard_relay = job.changes.size() == 1 && job.changes.front().path == std::vector<std::string>{"cloud_clipboard_relay"};
     saving_cloud = job.changes.size() == 1 &&
         job.changes.front().path == std::vector<std::string>{"cloud_candidate_provider"};
     saving_wubi_keys = job.changes.size() == 1 &&
@@ -1323,6 +1345,7 @@ struct SettingsWindow::State {
     case Job::Action::credential_test: message = L"正在测试服务配置…"; break;
     case Job::Action::ai_models: message = L"正在获取模型列表…"; break;
     case Job::Action::account: message = L"正在读取账号…"; break;
+    case Job::Action::cloud_clipboard: message = L"正在更新云剪贴板…"; break;
     case Job::Action::clipboard: message = L"正在更新剪贴板历史…"; break;
     case Job::Action::wubi_lookup: message = L"正在查询编码…"; break;
     case Job::Action::helpcode_sources: message = L"正在读取辅助码方案…"; break;
@@ -1575,6 +1598,7 @@ struct SettingsWindow::State {
       ai_form.refresh(snapshot->preferences());
       account_form.refresh();
       clipboard_form.refresh(snapshot->preferences());
+      cloud_clipboard_form.refresh(*snapshot);
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1614,6 +1638,8 @@ struct SettingsWindow::State {
     }
     if (completed->statistics_response) statistics_form.completed(*completed->statistics_response);
     if (completed->clipboard_response) clipboard_form.completed(*completed->clipboard_response);
+    if (completed->cloud_clipboard_response && completed->credential_request)
+      cloud_clipboard_form.completed(*completed->credential_request, *completed->cloud_clipboard_response);
     if (completed->statistics_upload_response) statistics_form.upload_completed(*completed->statistics_upload_response, completed->statistics_upload_changed);
     appearance_form.game_profile(completed->game_profile_enabled);
     enable(snapshot.has_value());
@@ -1627,6 +1653,8 @@ struct SettingsWindow::State {
     case Outcome::invalid_response: message = L"设置返回内容无法读取，请重新读取后重试。"; break;
     case Outcome::storage: message = L"读写设置失败，请重新读取后重试。"; break;
     }
+    if (saving_clipboard_relay && result->outcome == Outcome::storage)
+      message = L"中继配置未保存，请检查地址与令牌；未保存的输入已保留。";
     if (saving_cloud && result->outcome == Outcome::storage)
       message = L"保存云候选服务失败，请检查地址、请求头 JSON、请求体模板、响应路径和超时；未保存的内容已保留。";
     if (saving_wubi_keys && result->outcome == Outcome::storage)
@@ -1649,6 +1677,12 @@ struct SettingsWindow::State {
     job.reload = false; job.action = Job::Action::statistics;
     job.credential = Json{{"operation", "load"}};
     submit(std::move(job));
+  }
+
+  void poll_cloud_clipboard() {
+    if (busy || !worker || surface != Surface::cloud_clipboard) return;
+    Job job; job.reload = false; job.action = Job::Action::cloud_clipboard;
+    job.credential = cloud_clipboard_form.refresh_request(); submit(std::move(job));
   }
 
   void poll_clipboard() {
@@ -1680,13 +1714,14 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 12 ? Surface::cloud_clipboard : selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
       scroll = 0;
       layout();
       if (selected == 11) poll_clipboard();
+      if (selected == 12) poll_cloud_clipboard();
       if (selected == 3 && !busy && HelpcodeForm::offered()) {
         Job job;
         job.reload = false;
@@ -1717,7 +1752,7 @@ struct SettingsWindow::State {
       return;
     }
     if (busy) return;
-    if (id == reload_settings && HIWORD(command) == BN_CLICKED) { if (surface == Surface::statistics) poll_statistics(); else if (surface == Surface::clipboard) poll_clipboard(); else submit(Job{}); return; }
+    if (id == reload_settings && HIWORD(command) == BN_CLICKED) { if (surface == Surface::statistics) poll_statistics(); else if (surface == Surface::clipboard) poll_clipboard(); else if (surface == Surface::cloud_clipboard) poll_cloud_clipboard(); else submit(Job{}); return; }
     if (id == toolbar_theme && HIWORD(command) == BN_CLICKED) {
       SendMessageW(selector, CB_SETCURSEL, 8, 0);
       this->command(MAKEWPARAM(page_selector, CBN_SELCHANGE));
@@ -1815,6 +1850,25 @@ struct SettingsWindow::State {
           job.action = ai_change.models ? Job::Action::ai_models : Job::Action::credential_test;
           job.ai_models = ai_change.models;
         }
+        submit(std::move(job));
+      }
+      return;
+    }
+    auto cloud_clipboard_change = cloud_clipboard_form.command(command);
+    if (cloud_clipboard_change.handled) {
+      if (!cloud_clipboard_change.confirmation.empty()) {
+        const bool allowed = confirmation ? confirmation(window, L"云剪贴板", cloud_clipboard_change.confirmation.c_str()) :
+            MessageBoxW(window, cloud_clipboard_change.confirmation.c_str(), L"云剪贴板", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+        if (!allowed) { cloud_clipboard_form.cancelled(); return; }
+      }
+      if (cloud_clipboard_change.copy) {
+        const bool copied = clipboard_services.copy ? clipboard_services.copy(window, *cloud_clipboard_change.copy) : copy_clipboard(window, *cloud_clipboard_change.copy);
+        cloud_clipboard_form.copy_result(copied);
+      }
+      if (!cloud_clipboard_change.changes.empty() || cloud_clipboard_change.request) {
+        Job job; job.reload = false;
+        job.action = cloud_clipboard_change.request ? Job::Action::cloud_clipboard : Job::Action::preferences;
+        job.changes = std::move(cloud_clipboard_change.changes); job.credential = std::move(cloud_clipboard_change.request);
         submit(std::move(job));
       }
       return;
@@ -2172,7 +2226,7 @@ struct SettingsWindow::State {
   }
 };
 
-SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker, CommunityTransport community_transport, CommunityTransport statistics_upload_transport, CommunityTransport account_transport, ClipboardServices clipboard) : state_(std::make_unique<State>()) {
+SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker, CommunityTransport community_transport, CommunityTransport statistics_upload_transport, CommunityTransport account_transport, ClipboardServices clipboard, CloudClipboardServices cloud_clipboard) : state_(std::make_unique<State>()) {
   state_->file_picker = std::move(file_picker);
   state_->confirmation = std::move(confirmation);
   state_->folder_picker = std::move(folder_picker);
@@ -2180,6 +2234,7 @@ SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation
   state_->statistics_upload_transport = std::move(statistics_upload_transport);
   state_->account_transport = std::move(account_transport);
   state_->clipboard_services = std::move(clipboard);
+  state_->cloud_clipboard_services = std::move(cloud_clipboard);
 }
 
 SettingsWindow::~SettingsWindow() {
@@ -2211,7 +2266,7 @@ bool SettingsWindow::create(HINSTANCE instance) {
       WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
       state_->dip(900), state_->dip(720), nullptr, nullptr, instance, state_.get());
   if (!window) return false;
-  state_->worker = std::make_unique<Worker>(window, state_->community_transport, state_->statistics_upload_transport, state_->account_transport, state_->clipboard_services.transport);
+  state_->worker = std::make_unique<Worker>(window, state_->community_transport, state_->statistics_upload_transport, state_->account_transport, state_->clipboard_services.transport, state_->cloud_clipboard_services);
   SetTimer(window, 72, 5000, nullptr);
   SetTimer(window, 73, 1000, nullptr);
   return true;
