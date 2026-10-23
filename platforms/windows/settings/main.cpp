@@ -13765,7 +13765,7 @@ private:
   }
 
   void cancel_sentence_pack(std::wstring const &id) {
-    const auto bytes = utf8(id);
+    const auto bytes = utf8(hstring(id));
     msime_client_resource_pack_cancel(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
   }
 
