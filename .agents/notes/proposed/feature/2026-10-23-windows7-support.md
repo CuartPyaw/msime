@@ -24,6 +24,12 @@ Win7 Rust 构建需要独立的 `*-win7-windows-msvc` 目标、标准库和依�
 
 首轮 Rust Win7 目标构建成功，但实际 DLL 仍导入 `combase.dll` 的两个旧 COM 函数、WinRT 错误 API，以及 `mmdevapi.dll` 的 `ActivateAudioInterfaceAsync`。后者在 Win7 不存在，新版 cpal 的默认麦克风和扬声器也会使用它。Win7 核心构建使用 MSVC 延迟加载及专用通知钩子处理这三个已确认的依赖；原有现代构建不加此钩子。系统模块只从系统目录加载，存在的函数仍调用原地址；旧 COM 函数使用 `ole32.dll` 的同一函数，WinRT 错误消息使用传统 `IErrorInfo` 保存。默认录音和播放的虚拟 GUID 用 Win7 的 `IMMDeviceEnumerator` 与 `IMMDevice::Activate` 激活，由 MTA 工作线程按原接口回调完成结果；不能仅返回“不支持”而使现有语音和音效失效。不为未知导入伪造成功或通用空实现。该切片仍需普通麦克风、语音播放和 Win7 实机验证。
 
+### 本地识别运行库
+
+锁定的 sherpa-onnx 1.13.8 Windows x64/x86 包已下载并通过现有 SHA-256 校验。实际 ONNX Runtime 版本为 1.28.2，静态导入 `CreateFile2`、`GetProcessMitigationPolicy`、`GetSystemTimePreciseAsFileTime` 与 Windows 8 的路径接口；当前包不能作为 Win7 运行库。普通 Windows 的锁文件不改。兼容运行库从 ONNX Runtime 同版本固定提交 `33ca9628233dc8f002435e868d4c2e9f82766ca1` 构建，针对已发现的系统接口使用真实旧 API 或能力探测，保持模型格式与运算支持，不靠整体退到旧 ONNX Runtime 避开问题。构建源码与产物仍在隔离的 `target/tooling` 和 `target/windows7-voice/<arch>` 内，最终导入和实际模型推理必须重新验证。
+
+[语音运行库的独立构建](../../implemented/feature/2026-10-23-windows7-voice-runtime.md)已落地 x64 与 x86 的同版本源码构建、导入检查、真实合成 Add 与优化卷积推理、sherpa C ABI 与相邻依赖验证；Win7 实机仍需继续验证。该切片不代表整机语音能力已经验收。
+
 ### 既有笔记审计
 
 - [原生兼容设置基础](../../implemented/feature/2026-10-23-windows7-native-settings-foundation.md)：部分落地，快捷键页、工具栏设置控件与存储边界已有真实测试，完整页面和操作仍需继续适配。
