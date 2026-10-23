@@ -35,10 +35,10 @@ Status: implemented
 
 ## Device verification coverage
 
-- API 28 与 API 35 已通过标准隐式 Intent 发现、调用、一次性 PendingIntent 成功与取消回传、采集启动边界取消以及授权阶段 Home；原内部 Activity 仍不导出。
+- API 28 与 API 35 已通过标准隐式 Intent 发现、调用、一次性 PendingIntent 成功与取消回传、独立 UID 应用的 Activity 成功与取消回传、采集启动边界取消以及授权阶段 Home；原内部 Activity 仍不导出。
 - 待设备验证：权限拒绝、无模型、缺运行库、旋转及重复调用；API 35 真实模型识别尚未通过。
 - JVM 已验证：合成 PCM 的静音、幅度增长、符号对称、最大负数、部分缓冲与上限；API 28 真实合成音频已驱动完整识别与音量回调。
-- 待设备验证：飞行模式下用真实本地模型完成识别，结果只返回请求者；检查待插入队列和剪贴板没有新增结果。
+- API 28 已在飞行模式下用真实本地模型完成识别并返回请求者；API 35 仍待通过。待设备验证：调用前后待插入队列和剪贴板没有新增结果。
 - 待互通验证：安装官方 MacroDroid，执行其真实语音输入宏，确认返回字符串变量；标准测试调用器只能证明 Android 契约，不能替代此项。
 - API 28 原生 APK 截图已确认人物、放大耳部和红色信号可见，设备用例确认信号由合成录音驱动；API 35 尚待完成。资源、生命周期与互通验证通过后才关闭 issue。
 
@@ -69,3 +69,13 @@ Status: implemented
 - Android 系统别名的原生回归已分别在 API 28 和 API 35 通过。API 35 的权限窗口实际存在，但原观察只查询活动辅助功能根；设备用例启用交互窗口检索并检查各系统权限窗口，仍保留未授权、`started=false`、弹窗可见及 Home 取消断言。更新后的用例分别在 API 28 与 API 35 通过（`issue-9159-api28-permission-windows.log`、`issue-9159-api35-permission-windows.log`），独立复审无新增阻塞。
 - API 35 的音频注入使模拟器宿主崩溃，故障栈位于 `audio_forwarder_enable`；去掉 `-no-audio` 后仍发生，不能认定禁音参数是唯一原因。AOSP 的转发实现直接访问当前输入 voice，后续须先确认设备实际录音已启动再注入；尚未获得 API 35 真实识别通过的证据。仅记录固定符号与结果，不提交系统崩溃报告或模拟器令牌。
 - 更新生命周期契约后的整轮 quick 通过（`issue-9159-quick-current.log`），Linux 原生 111 项通过；本分支 API 28 四组共享库设备单测合计 2034 项通过、0 失败。API 35 确认实际录音已启动后，默认后端注入仍使模拟器宿主崩溃；显式空音频后端避免崩溃，但尚未驱动产品音量信号，不能算识别通过。用户没有官方 MacroDroid APK，后续继续按代码与标准调用器核对契约，保留真实互通的验证缺口。
+
+- 本分支 API 35 四组共享库设备单测也通过，合计 2034 项、0 失败（`issue-9159-api35-core-current.log`）；不把隔离子进程输出重复计数。
+- 标准 Activity 结果增加独立 UID 的测试调用器：它自己发出 `startActivityForResult`，产品请求不带结果 PendingIntent；只有调用器的 `onActivityResult` 将实际结果码、原始结果字段和回调次数转发给本次测试专用的报告桥。测试检查成功列表精确相等、取消时完全没有 `EXTRA_RESULTS`，并尝试第二次产品回传以覆盖迟到结果覆盖。测试 APK 不访问模型和输入法存储。初版辅助功能观察在 SystemUI 无响应弹窗及空活动根处失败，临时诊断确认调用器实际已收到一次标准成功结果；改为读取调用器的实际回调报告，避免系统窗口状态混入结果协议断言，设备重跑结果另行记录。
+
+- 独立 UID 调用器的 `offline-activity-result` 和 `offline-activity-cancel` 已分别在 API 28 与 API 35 通过，四项均返回 `INSTRUMENTATION_CODE: -1`（`issue-9159-emulator-5566-activity-relay.log`、`issue-9159-emulator-5580-activity-relay.log`）。本次测试专用桥经过独立复审：产品请求不含报告通道，桥只转发调用器实际收到的 Activity 结果，不合成成功数据。
+
+- API 35 在显式空音频后端下另做无显式限速、`MODE_UNSPECIFIED` 注入对照，与 API 28 已通过的注入方式对齐；已确认实际 AudioFlinger 采集启动，注入进程正常退出，但测试仍因音量信号未响应而失败（`issue-9159-api35-asr-unpaced-orchestration.log`）。没有放宽识别时限，也未将命令退出码 0 当作通过；API 35 的真实识别缺口保留。
+
+- API 28 当前原生产品 `smoke.sh emulator-5566 --core` 以 1 退出（`issue-9159-api28-core-smoke-current.log`）：短语上屏与删除、延迟批量组字、数字层三组通过，随后在组字放大镜的长拼写准备断言失败。没有精确本分支原始基线的同场对照，故不将该失败归为基线，完整装包验收仍未完成。
+- 按用户要求继续代码核对：外部 Activity 只读取共享解析的本地模型，结果仅经 `setResult` 或请求方指定的 PendingIntent 返回；取消与迟到回调共用一次性终止状态。该入口没有 `VoiceResultStore` 或剪贴板写入调用，静态核对不代替待完成的设备前后状态断言，也不证明实际 MacroDroid 互通。

@@ -49,11 +49,17 @@ final class OfflineVoiceDeviceCases {
                 failure = error;
             }
         }
-        if (!scenario.equals("offline-result") && !scenario.equals("offline-cancel")) return;
+        if (!java.util.Set.of("offline-result", "offline-cancel", "offline-activity-result",
+                "offline-activity-cancel").contains(scenario)) return;
         try {
+            if (scenario.startsWith("offline-activity-")) {
+                if (created.getCallingActivity() == null) throw new AssertionError("Caller identity missing");
+                if (created.isFinishing()) throw new AssertionError("Standard Activity request rejected");
+            }
             var deliver = created.getClass().getDeclaredMethod("returnResult", String.class);
             deliver.setAccessible(true);
-            String text = scenario.equals("offline-result") ? "synthetic external transcript" : null;
+            String text = scenario.equals("offline-result") || scenario.equals("offline-activity-result")
+                ? "synthetic external transcript" : null;
             deliver.invoke(created, text);
             deliver.invoke(created, "synthetic late transcript");
         } catch (ReflectiveOperationException error) {
@@ -66,6 +72,7 @@ final class OfflineVoiceDeviceCases {
         try {
             if (scenario.equals("offline-prepare")) prepareLocalModel();
             else if (scenario.equals("offline-capture-cancel")) captureCancellation();
+            else if (scenario.startsWith("offline-activity-")) activityResult();
             else externalResult();
             result.putString("stream", "Offline voice boundary passed: " + scenario);
             instrumentation.finish(Activity.RESULT_OK, result);
@@ -73,6 +80,65 @@ final class OfflineVoiceDeviceCases {
             result.putString("stream", "Offline voice boundary failed: " + error.getClass().getSimpleName()
                 + ": " + error.getMessage());
             instrumentation.finish(Activity.RESULT_CANCELED, result);
+        }
+    }
+
+    /** 不同 UID 的测试应用必须通过 onActivityResult 接到单次成功或不带文字的取消。 */
+    private void activityResult() throws Exception {
+        Context context = instrumentation.getTargetContext();
+        var caller = context.getPackageManager().getApplicationInfo("app.msime.android.test", 0);
+        if (caller.uid == context.getApplicationInfo().uid) throw new AssertionError("Caller is not isolated");
+        AtomicInteger reports = new AtomicInteger();
+        AtomicInteger code = new AtomicInteger();
+        AtomicReference<Intent> returned = new AtomicReference<>();
+        String action = context.getPackageName() + ".OFFLINE_CALLER." + java.util.UUID.randomUUID();
+        BroadcastReceiver receiver = new BroadcastReceiver() {
+            @Override public void onReceive(Context ignored, Intent intent) {
+                code.set(getResultCode());
+                returned.set(intent);
+                reports.incrementAndGet();
+            }
+        };
+        if (Build.VERSION.SDK_INT >= 33) context.registerReceiver(receiver, new IntentFilter(action), Context.RECEIVER_NOT_EXPORTED);
+        else context.registerReceiver(receiver, new IntentFilter(action));
+        int flags = PendingIntent.FLAG_CANCEL_CURRENT;
+        if (Build.VERSION.SDK_INT >= 31) flags |= PendingIntent.FLAG_MUTABLE;
+        PendingIntent report = PendingIntent.getBroadcast(context, 9159,
+            new Intent(action).setPackage(context.getPackageName()), flags);
+        Intent launch = new Intent().setClassName("app.msime.android.test",
+            "app.msime.android.test.OfflineVoiceCallerActivity")
+            .putExtra(OfflineVoiceCallerActivity.REPORT, report)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TASK);
+        try {
+            instrumentation.runOnMainSync(() -> context.startActivity(launch));
+            await(() -> activity != null, "External activity was not called by the fixture");
+            await(() -> reports.get() > 0, "Standard Activity result did not reach the separate caller");
+            if (failure != null) throw new AssertionError("Activity callback failed", failure);
+            boolean success = scenario.equals("offline-activity-result");
+            Intent observed = returned.get();
+            if (reports.get() != 1 || observed.getIntExtra("caller_deliveries", 0) != 1)
+                throw new AssertionError("Caller observed repeated Activity results");
+            if (code.get() != (success ? Activity.RESULT_OK : Activity.RESULT_CANCELED))
+                throw new AssertionError("Caller observed an incorrect Activity result code");
+            if (success) {
+                if (!java.util.List.of("synthetic external transcript").equals(
+                        observed.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)))
+                    throw new AssertionError("Caller observed an incorrect transcript");
+            } else if (observed.hasExtra(RecognizerIntent.EXTRA_RESULTS)) {
+                throw new AssertionError("Cancelled Activity result contains text");
+            }
+            if (!finished()) throw new AssertionError("Completed request is still visible");
+        } finally {
+            context.unregisterReceiver(receiver);
+            report.cancel();
+            if (activity != null) instrumentation.runOnMainSync(activity::finish);
+            try (var input = instrumentation.getUiAutomation().executeShellCommand(
+                    "am force-stop app.msime.android.test")) {
+                try (var stream = new java.io.FileInputStream(input.getFileDescriptor())) {
+                    byte[] discard = new byte[4096];
+                    while (stream.read(discard) != -1) { }
+                }
+            }
         }
     }
 
