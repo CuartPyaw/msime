@@ -27,7 +27,7 @@ public final class TextEditRecentClipboardDeviceSmoke extends DeviceSmoke {
 
     @Override protected String successDescription() {
         return spaceCopyOnly ? "space upward copy, editor permissions, selection restoration and clipboard preview"
-            : "space upward copy, selection mode, editor shortcuts, copy/cut preview and disabled suggestions";
+            : "fixed editor grid, saved/cancelled/reset side order, shortcuts, selection and clipboard preview";
     }
 
     @Override protected void runChecks() throws Exception {
@@ -60,17 +60,23 @@ public final class TextEditRecentClipboardDeviceSmoke extends DeviceSmoke {
                 new SpaceCopyDeviceChecks(this).run(false);
                 return;
             }
+            stage = "text editor side order settings";
+            revision = checkOrderSettings(preferences, values, revision);
             stage = "prepare editor before opening panel";
             openPanel();
-            // API 28 的 UiAutomation 看不到面板内部节点；API 30+ 验证右列滚动快捷键及其真实编辑结果。
-            if (Build.VERSION.SDK_INT >= 30) {
-                stage = "scroll editor shortcuts";
-                AccessibilityNodeInfo shortcuts = await(described("文本编辑快捷操作"));
-                Rect shortcutBounds = bounds(shortcuts);
-                int centerX = shortcutBounds.centerX();
-                shellDiscard("input swipe " + centerX + " " + (shortcutBounds.bottom - 12)
-                    + " " + centerX + " " + (shortcutBounds.top + 12) + " 350");
-                await(described("打开数字键盘"));
+            // 所有按键必须在面板内可见，不先滑动或滚动。
+            {
+                stage = "all editor shortcuts visible without scrolling";
+                Rect panelBounds = bounds(awaitStableBounds(described("文本编辑面板")));
+                for (String description : new String[] {"全选", "复制", "剪切", "粘贴", "打开数字键盘", "插入空格", "插入换行", "退格"}) {
+                    Rect keyBounds = bounds(await(described(description)));
+                    if (keyBounds.isEmpty() || !panelBounds.contains(keyBounds))
+                        throw new AssertionError("Editor key is outside panel: " + description);
+                }
+                Rect pasted = bounds(await(described("粘贴")));
+                Rect copied = bounds(await(described("复制")));
+                if (pasted.top >= copied.top || pasted.left != copied.left)
+                    throw new AssertionError("Keyboard ignored the saved side order");
                 stage = "editor space shortcut";
                 click("插入空格");
                 await(field("msime-test-plain").and(node -> equalsText(TEXT + " ", node.getText())));
@@ -156,6 +162,67 @@ public final class TextEditRecentClipboardDeviceSmoke extends DeviceSmoke {
             restartIme();
             if (!originalIme.isEmpty() && !originalIme.equals("null")) shellDiscard("ime set " + originalIme);
         }
+    }
+
+    /** 使用真实设置页保存、取消、重置和重开，再由键盘进程读取同一顺序。 */
+    private long checkOrderSettings(File preferences, JSONObject values, long revision) throws Exception {
+        Class<?> nativeClient = getTargetContext().getClassLoader().loadClass("app.msime.android.NativeClient");
+        JSONObject response = new JSONObject((String) nativeClient.getMethod("defaultPreferences").invoke(null));
+        JSONArray defaults = response.getJSONObject("value").getJSONArray("touch_text_edit_button_order");
+        values.put("touch_text_edit_button_order", defaults);
+        save(preferences, ++revision, values);
+        openOrderSettings();
+        click("下移 复制");
+        tap(node -> equalsText("取消", node.getText()) && node.isClickable());
+        if (!defaults.toString().equals(read(preferences).getJSONObject("preferences")
+                .getJSONArray("touch_text_edit_button_order").toString()))
+            throw new AssertionError("Cancelling order draft wrote preferences");
+        openOrderSettings();
+        click("下移 复制");
+        tap(node -> equalsText("保存", node.getText()) && node.isClickable());
+        JSONArray changed = new JSONArray(defaults.toString());
+        Object first = changed.get(0);
+        changed.put(0, changed.get(1));
+        changed.put(1, first);
+        awaitOrder(preferences, changed);
+        openOrderSettings();
+        await(node -> equalsText("1. 粘贴", node.getText()));
+        tap(node -> equalsText("重置", node.getText()) && node.isClickable());
+        await(node -> equalsText("1. 复制", node.getText()));
+        tap(node -> equalsText("保存", node.getText()) && node.isClickable());
+        awaitOrder(preferences, defaults);
+        openOrderSettings();
+        click("下移 复制");
+        tap(node -> equalsText("保存", node.getText()) && node.isClickable());
+        awaitOrder(preferences, changed);
+        values.put("touch_text_edit_button_order", changed);
+        return read(preferences).getLong("revision");
+    }
+
+    private void openOrderSettings() throws Exception {
+        shellDiscard("am start -W -f 0x10008000 -n app.msime.android/.home.HomeActivity --es msime_open_page KEYBOARD_OPTIONS");
+        dropStaleNodes();
+        AccessibilityNodeInfo entry = awaitAny(node -> equalsText("文本编辑按键顺序", node.getText()));
+        if (!entry.isVisibleToUser()) {
+            if (!entry.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId()))
+                throw new AssertionError("Text edit order could not be scrolled into view");
+            dropStaleNodes();
+            entry = await(node -> equalsText("文本编辑按键顺序", node.getText()));
+        }
+        while (!entry.isClickable() && entry.getParent() != null) entry = entry.getParent();
+        if (!entry.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            throw new AssertionError("Text edit order row did not open");
+        await(described("下移 复制"));
+    }
+
+    private void awaitOrder(File preferences, JSONArray expected) throws Exception {
+        long until = SystemClock.uptimeMillis() + 5000;
+        do {
+            if (expected.toString().equals(read(preferences).getJSONObject("preferences")
+                    .getJSONArray("touch_text_edit_button_order").toString())) return;
+            SystemClock.sleep(100);
+        } while (SystemClock.uptimeMillis() < until);
+        throw new AssertionError("Text edit order did not reach persisted value");
     }
 
     private void openPanel() throws Exception {

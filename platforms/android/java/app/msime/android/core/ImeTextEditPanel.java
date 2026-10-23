@@ -12,8 +12,9 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.InputConnection;
 import android.widget.Button;
+import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.ScrollView;
+import java.util.List;
 import java.util.EnumMap;
 import java.util.Map;
 
@@ -33,75 +34,44 @@ final class ImeTextEditPanel {
         this.s = s;
     }
 
-    /** 建面板视图（隐藏状态），布局与 {@link TextEditPanelModel} 的 4 × 4 网格一致。 */
+    /** 所有操作同屏可见；中央十字的四角留白，父面板拦截空白处触摸。 */
     LinearLayout build() {
-        buttons.clear();
-        LinearLayout panel = LayoutPolicy.row(s);
+        LinearLayout panel = LayoutPolicy.column(s);
         panel.setContentDescription("文本编辑面板");
         int padding = s.pixels(4);
         ViewPolicy.setPadding(panel, padding, padding, padding, padding);
-        // 键之间的空隙不能把触摸漏给底下的字母键。
         ViewPolicy.setClickable(panel, true);
-
-        LinearLayout left = LayoutPolicy.column(s);
-        LinearLayout arrows = LayoutPolicy.row(s);
-        arrows.addView(key(TextEditPanelModel.Action.LEFT), cell(true));
-        LinearLayout vertical = LayoutPolicy.column(s);
-        vertical.addView(key(TextEditPanelModel.Action.UP), cell(false));
-        vertical.addView(key(TextEditPanelModel.Action.SELECT), cell(false));
-        vertical.addView(key(TextEditPanelModel.Action.DOWN), cell(false));
-        arrows.addView(vertical, LayoutPolicy.weightedMatchParentParams(1));
-        arrows.addView(key(TextEditPanelModel.Action.RIGHT), cell(true));
-        left.addView(arrows, LayoutPolicy.weightedWidthParams(3));
-        LinearLayout ends = LayoutPolicy.row(s);
-        ends.addView(key(TextEditPanelModel.Action.DOCUMENT_START), cell(true));
-        ends.addView(key(TextEditPanelModel.Action.DOCUMENT_END), cell(true));
-        ends.addView(key(TextEditPanelModel.Action.DELETE), cell(true));
-        left.addView(ends, LayoutPolicy.weightedWidthParams(1));
-        panel.addView(left, LayoutPolicy.weightedMatchParentParams(3));
-
-        LinearLayout clipboard = LayoutPolicy.column(s);
-        clipboard.addView(key(TextEditPanelModel.Action.SELECT_ALL), cell(false));
-        clipboard.addView(key(TextEditPanelModel.Action.COPY), cell(false));
-        clipboard.addView(key(TextEditPanelModel.Action.CUT), cell(false));
-        clipboard.addView(key(TextEditPanelModel.Action.PASTE), cell(false));
-        for (TextEditPanelModel.Key shortcut : TextEditPanelModel.shortcuts())
-            clipboard.addView(key(shortcut.action()), cell(false));
-        ScrollView scroll = new ScrollView(s);
-        scroll.setContentDescription("文本编辑快捷操作");
-        scroll.setFillViewport(true);
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroll.addView(clipboard, LayoutPolicy.matchParentParams());
-        // 右列保持四行可见，新增的三个快捷键通过上下滑动访问；按键高度跟随当前键盘高度调整。
-        scroll.addOnLayoutChangeListener((view, xLeft, yTop, xRight, yBottom,
-                oldLeft, oldTop, oldRight, oldBottom) -> resizeShortcutRows(clipboard, yBottom - yTop));
-        panel.addView(scroll, LayoutPolicy.weightedMatchParentParams(1));
+        populate(panel);
         ViewPolicy.hide(panel);
         return panel;
     }
 
-    private void resizeShortcutRows(LinearLayout column, int viewportHeight) {
-        int height = viewportHeight / 4;
-        if (height <= 0) return;
-        for (int index = 0; index < column.getChildCount(); index++) {
-            View child = column.getChildAt(index);
-            LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) child.getLayoutParams();
-            if (params.height == height && params.weight == 0) continue;
-            params.width = LinearLayout.LayoutParams.MATCH_PARENT;
-            params.height = height;
-            params.weight = 0;
-            child.setLayoutParams(params);
+    private void populate(LinearLayout panel) {
+        stopRepeat();
+        buttons.clear();
+        panel.removeAllViews();
+        org.json.JSONObject preferences = s.preferencesSnapshot == null
+            ? null : s.preferencesSnapshot.optJSONObject("preferences");
+        List<TextEditPanelModel.Key> keys = TextEditPanelModel.keys(TextEditButtonOrder.fromPreferences(preferences));
+        for (int rowIndex = 0; rowIndex < TextEditPanelModel.ROWS; rowIndex++) {
+            LinearLayout row = LayoutPolicy.row(s);
+            int column = 0;
+            for (TextEditPanelModel.Key spec : keys) {
+                if (spec.row() != rowIndex) continue;
+                if (spec.column() > column) row.addView(new View(s), LayoutPolicy.weightedMatchParentParams(spec.column() - column));
+                FrameLayout slot = new FrameLayout(s);
+                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+                int margin = s.pixels(3);
+                params.setMargins(margin, margin, margin, margin);
+                slot.addView(key(spec.action()), params);
+                row.addView(slot, LayoutPolicy.weightedMatchParentParams(spec.columnSpan()));
+                column = spec.column() + spec.columnSpan();
+            }
+            if (column < TextEditPanelModel.COLUMNS)
+                row.addView(new View(s), LayoutPolicy.weightedMatchParentParams(TextEditPanelModel.COLUMNS - column));
+            panel.addView(row, LayoutPolicy.weightedWidthParams(1));
         }
-    }
-
-    /** 一格的布局参数：`horizontal` 为真时在横排里按宽度均分，否则在竖排里按高度均分，四周留出键距。 */
-    private LinearLayout.LayoutParams cell(boolean horizontal) {
-        LinearLayout.LayoutParams params = horizontal
-            ? LayoutPolicy.weightedMatchParentParams(1) : LayoutPolicy.weightedWidthParams(1);
-        int margin = s.pixels(3);
-        params.setMargins(margin, margin, margin, margin);
-        return params;
     }
 
     private Button key(TextEditPanelModel.Action action) {
@@ -199,6 +169,7 @@ final class ImeTextEditPanel {
         s.closeToolbarPanels();
         s.closeCandidatePanel();
         selecting = false;
+        populate(s.textEditPanel);
         renderState();
         s.imeStyler.applySkinBackground(s.textEditPanel);
         ViewPolicy.show(s.textEditPanel);
