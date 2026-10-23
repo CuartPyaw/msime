@@ -93,6 +93,11 @@ enum ControlId {
   cloud_clipboard_text, cloud_clipboard_add, cloud_clipboard_devices, cloud_clipboard_device_detail,
   cloud_clipboard_approve, cloud_clipboard_reject, cloud_clipboard_remove,
   cloud_clipboard_reset, cloud_clipboard_notice, cloud_clipboard_metadata,
+  dictionary_kind = 2200, dictionary_user_only, dictionary_query, dictionary_search,
+  dictionary_page, dictionary_previous, dictionary_next, dictionary_entries,
+  dictionary_entry_source, dictionary_key, dictionary_value, dictionary_weight,
+  dictionary_new, dictionary_save, dictionary_delete, dictionary_format,
+  dictionary_import, dictionary_export, dictionary_reset, dictionary_notice,
 };
 
 class SettingsWindow {
@@ -112,7 +117,7 @@ public:
     CommunityTransport relay;
   };
   explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {}, FolderPicker folder_picker = {},
-      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {}, ClipboardServices clipboard = {}, CloudClipboardServices cloud_clipboard = {});
+      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {}, ClipboardServices clipboard = {}, CloudClipboardServices cloud_clipboard = {}, CommunityTransport dictionary_transport = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;
