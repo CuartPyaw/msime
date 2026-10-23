@@ -12,6 +12,8 @@ iOS 已有全拼 14 键和多种 26 键双拼方案，但双拼只能使用 26 �
 
 布局选择写入共享 `PreferencesStore`，再镜像到键盘扩展的 App Group。切换双拼方案、重建会话和回到中文时保留选择；英文、本地模式和不支持组码的输入框回落到 26 键。物理字母仍经 26 键双拼路径，触摸 14 键按组首字母经 `grid_key` 进入共享引擎。iOS 账号同步继续使用原有全拼布局字段，不上传这个仅本机的双拼布局选择。
 
+键盘控制器单独保存已应用的双拼布局，并把是否显示 14 键纳入布局缓存。设置页写入 App Group 镜像不会提前改变键盘对旧布局的判断：空闲时热加载立即换键面和读音行；组字期间收到的布局留到提交或取消后再应用，与 Host API 的延迟应用一致。14 键不使用 26 键的分音节退格与快速空格滑动分段，也不参加平板横屏分离布局。微软双拼的分号与 L 共键，键面显示 `L;` 并向 VoiceOver 说明，组码、统计标识和既有全拼键面不变。
+
 ### 历史笔记检索
 
 - [Android 14 键双拼](2026-10-23-android-fourteen-key-shuangpin.md)：部分重叠，共用 `touch_shuangpin_layout`、Host API 门控、14 键双拼引擎契约和多义读音处理；iOS 只增加原生 Swift 设置、会话桥和键盘扩展接线。
@@ -24,6 +26,7 @@ iOS 已有全拼 14 键和多种 26 键双拼方案，但双拼只能使用 26 �
 - **增加一个名为「双拼 14 键」的独立输入方案**：设置入口简单，但会把布局和双拼 profile 绑在一起；从小鹤切到自然码时会丢掉用户的方案，且共享 `touch_keyboard_schemes` 没有这个方案值，因此不采用。
 - **只在 iOS App Group 保存布局，并由键盘每次手动调用 `set_key_grid`**：可以避免扩展 Host API 的平台门控，但新会话、词库维护重建和跨进程设置读取会出现不同步，且 canonical `PreferencesStore` 不知道用户选择，因此不采用。
 - **把 iOS 布局写进 `touch_keyboard_layout`**：字段已经表示全拼、九键和手写的方案布局，双拼另有当前 profile；混用会让全拼与双拼的选择互相覆盖，因此沿用 #9404 的独立字段。
+- **直接读取 App Group 镜像作为当前布局**：少存一份控制器状态，但设置页保存时已更新镜像，键盘重载前就失去了旧布局信息，而且组字中的键面会提前改变，因此控制器只在能应用时更新自身布局。
 
 ## Consequences
 
@@ -39,5 +42,9 @@ iOS 已有全拼 14 键和多种 26 键双拼方案，但双拼只能使用 26 �
 - `cargo test -p msime-host-api fourteen_key_shuangpin_preference_is_applied_by_touch_hosts --locked` 通过。
 - `cargo test -p msime-host-api fourteen_key_shuangpin --locked` 两项通过，覆盖 iOS/Android 宿主门控、profile 变化、硬件输入与 14 键布局保持。
 - `cargo test -p msime-client-core touch_shuangpin_layout --locked` 通过。
-- iOS Xcode 工程已完成 Swift 编译阶段检查；最终链接因当前 worktree 缺少 `target/ios/simulator/libmsime_host_api.a` 失败，因此没有宣称 iOS 模拟器运行验收通过。
+- `bash platforms/ios/build-native.sh simulator` 在远端编译当前源码通过，静态库拉回本机后运行模拟器测试。
+- iOS 27 arm64 模拟器运行 `FourteenKeyKeyboardTests` 全部 15 项通过，覆盖四种 profile 与会话重建、空闲和组字中的设置热加载、微软分号、手机键面和 iPad 横屏。多义组码的首选读音受词频影响，桥接测试明确选择 `ni` 后检查读音及「你好」候选。
+- 同次运行 `LanguageSchemesTests`：共 26 项，21 项通过，5 项因模拟器缺少对应语言词库跳过；无失败。验收层级为原生键盘控制器在模拟器测试宿主中运行，尚未覆盖真机系统键盘入口。
+- `python3 scripts/test-fourteen-key-table.py` 通过。
+- 原生产品 `MSIMEApp` 与内嵌键盘扩展的 arm64 模拟器构建通过，包含设置页的真实 SwiftUI 编译；构建前按锁文件校验并准备本地语音运行库。模拟器库只有 arm64，构建命令显式传入 `ARCHS=arm64 ONLY_ACTIVE_ARCH=YES`。
 - `pnpm run verify-notes`、本次改动的 Rust 格式检查和差异检查在提交前执行。

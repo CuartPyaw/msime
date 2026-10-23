@@ -197,7 +197,7 @@ struct KeyboardLayoutSettingsView: View {
     }
   }
 
-  /// 在当前方案所属的一组触屏方案之间切换：全拼是 26 键、14 键、9 键三选一，日语是 26 键和 9 键。只有一种排列的方案（双拼、五笔、手写等）没有这一组；在那里提供全拼会悄悄把小鹤用户切到全拼，所以这一行只显示方案名。
+  /// 在当前方案所属的一组触屏方案之间切换：全拼是 26 键、14 键、9 键三选一，日语是 26 键和 9 键。双拼的布局独立保存，五笔、手写等只有一种排列，因此这些方案没有这一组；在那里提供全拼会悄悄把小鹤用户切到全拼，所以这一行只显示方案名。
   @ViewBuilder
   private var chineseKeyboardRow: some View {
     if let layouts = Self.layoutChoices(scheme), layouts.count > 1 {
@@ -211,7 +211,8 @@ struct KeyboardLayoutSettingsView: View {
       HStack(spacing: 12) {
         VStack(alignment: .leading, spacing: 2) {
           Text("中文键盘").font(.system(size: 17)).foregroundStyle(.primary)
-          Text(Self.layoutChoices(scheme) == nil ? "当前方案只有一种键盘，在「输入」里换方案" : "本版本只有一种键盘")
+          Text(scheme.shuangpinProfile != nil ? "下方可选择双拼的 26 键或 14 键布局"
+            : Self.layoutChoices(scheme) == nil ? "当前方案只有一种键盘，在「输入」里换方案" : "本版本只有一种键盘")
             .designSubtext()
             .fixedSize(horizontal: false, vertical: true)
         }
