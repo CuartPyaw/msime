@@ -1170,6 +1170,9 @@ pub struct Preferences {
     pub wubi_profile: WubiProfile,
     #[serde(default)]
     pub touch_keyboard_layout: TouchKeyboardLayout,
+    /// Android 大屏竖屏也使用分离键盘；还需宿主的分离主开关开启，默认关闭。其他宿主原样保留。
+    #[serde(default)]
+    pub touch_keyboard_split_portrait: bool,
     /// 触屏键盘列出哪些方案、选中哪一个；桌面宿主原样保留、不使用。
     ///
     /// 总是写进文档，哪怕等于默认值：以前的版本在等于默认值时省略它，于是文档里没有它只能说明是以前的版本写的，按以前的默认列表读（[`TouchKeyboardScheme::LEGACY_DEFAULT_ENABLED`]）。新装的默认值已经不同，再省略就分不出这两种文档。
@@ -2880,6 +2883,7 @@ impl Default for Preferences {
             wubi_mixed_pinyin: false,
             wubi_profile: WubiProfile::default(),
             touch_keyboard_layout: TouchKeyboardLayout::default(),
+            touch_keyboard_split_portrait: false,
             touch_keyboard_schemes: TouchKeyboardSchemePreferences::default(),
             touch_key_spacing_tenths: default_touch_key_spacing_tenths(),
             touch_row_spacing_tenths: default_touch_row_spacing_tenths(),

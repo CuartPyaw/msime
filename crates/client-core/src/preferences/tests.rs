@@ -2104,12 +2104,14 @@ fn vim_mode_apps_stay_out_of_the_document_until_written() {
     // macOS 的 bundle id 和 Windows 的进程基名放在同一份名单里，保存再读回原样不变。
     let dir = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(dir.path());
-    let mut chosen = Preferences::default();
-    chosen.vim_mode_apps = vec![
-        "com.apple.Terminal".into(),
-        "code.exe".into(),
-        "nvim.exe".into(),
-    ];
+    let chosen = Preferences {
+        vim_mode_apps: vec![
+            "com.apple.Terminal".into(),
+            "code.exe".into(),
+            "nvim.exe".into(),
+        ],
+        ..Preferences::default()
+    };
     let written = serde_json::to_value(&chosen).unwrap();
     assert_eq!(
         written["vim_mode_apps"],
@@ -2174,8 +2176,10 @@ fn vim_mode_app_identifiers_are_validated() {
     // 拒绝的文档不会被保存。
     let dir = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(dir.path());
-    let mut rejected = Preferences::default();
-    rejected.vim_mode_apps = vec!["apps/code".into()];
+    let rejected = Preferences {
+        vim_mode_apps: vec!["apps/code".into()],
+        ..Preferences::default()
+    };
     assert!(matches!(
         store.save(0, rejected),
         Err(PreferencesError::InvalidVimModeApps)
@@ -6303,6 +6307,37 @@ fn restoring_defaults_in_the_store_is_one_compare_and_swap() {
     assert_eq!(store.load().unwrap(), restored);
 }
 
+#[test]
+fn android_portrait_split_defaults_and_validates_without_changing_legacy_documents() {
+    let mut document = serde_json::to_value(Preferences::default()).unwrap();
+    document
+        .as_object_mut()
+        .unwrap()
+        .remove("touch_keyboard_split_portrait");
+    let legacy = document.to_string();
+    let loaded: Preferences = serde_json::from_str(&legacy).unwrap();
+    assert_eq!(
+        serde_json::to_value(loaded).unwrap()["touch_keyboard_split_portrait"],
+        false
+    );
+    for enabled in [false, true] {
+        document["touch_keyboard_split_portrait"] = enabled.into();
+        let loaded: Preferences = serde_json::from_value(document.clone()).unwrap();
+        assert_eq!(
+            serde_json::to_value(loaded).unwrap()["touch_keyboard_split_portrait"],
+            enabled
+        );
+    }
+    for invalid in [
+        serde_json::json!("true"),
+        serde_json::json!(1),
+        serde_json::Value::Null,
+    ] {
+        document["touch_keyboard_split_portrait"] = invalid;
+        assert!(serde_json::from_value::<Preferences>(document.clone()).is_err());
+    }
+}
+
 /// 偏好里键名像凭据、但确实不是凭据的字段。新字段名含 token|key|secret|password 时，要么进 `Preferences::credential_slots`，要么在这里说明它不是凭据。
 const NOT_CREDENTIALS: &[&str] = &[
     "custom_theme.keyboard",
@@ -6323,6 +6358,7 @@ const NOT_CREDENTIALS: &[&str] = &[
     "touch_keyboard_height_adjustment",
     "touch_keyboard_layout",
     "touch_keyboard_schemes",
+    "touch_keyboard_split_portrait",
     "touch_number_keypad_order",
     "touch_shuangpin_key_hints",
     "touch_twenty_six_key_number_layout",
