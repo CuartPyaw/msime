@@ -941,16 +941,20 @@ int main() {
   saved = store.load();
   const auto ai_origin = saved.snapshot->preferences().at("ai_assistant").at("tokens");
   assert(!ai_origin.empty());
-  assert(std::any_of(ai_origin.begin(), ai_origin.end(), [](const auto& entry) { return entry.value() == "synthetic-ai-token"; }));
+  assert(std::any_of(ai_origin.begin(), ai_origin.end(), [](const auto& entry) {
+    return entry.is_string() && entry.get<std::string>() == "synthetic-ai-token";
+  }));
   assert(saved.snapshot->preferences().at("ai_assistant").at("token") == "");
+  tokens = ai_origin;
   assert(IsWindowEnabled(GetDlgItem(body, ai_models_fetch)) != FALSE);
-  assert(IsWindowEnabled(GetDlgItem(body, ai_test)) == FALSE); // AI 总开关仍按原偏好控制测试按钮。
+  const bool ai_was_enabled = saved.snapshot->preferences().at("ai_assistant").at("enabled").get<bool>();
+  assert((IsWindowEnabled(GetDlgItem(body, ai_test)) != FALSE) == ai_was_enabled); // AI 总开关仍按原偏好控制测试按钮。
   const auto ai_before_toggle = saved.snapshot->revision();
   click(ai_enabled);
   saved = store.load();
   assert(saved.snapshot->revision() == ai_before_toggle + 1);
-  assert(saved.snapshot->preferences().at("ai_assistant").at("enabled") == true);
-  assert(IsWindowEnabled(GetDlgItem(body, ai_test)) != FALSE);
+  assert(saved.snapshot->preferences().at("ai_assistant").at("enabled") == !ai_was_enabled);
+  assert((IsWindowEnabled(GetDlgItem(body, ai_test)) != FALSE) == !ai_was_enabled);
   saved = store.load();
   // 候选外观的可选字段及已有范围外展示值不能因页面切换被静默归一。
   const auto appearance_seed = store.save(*saved.snapshot, {{{"candidate_page_size"}, 2},

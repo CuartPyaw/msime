@@ -32,7 +32,7 @@ Win7 Rust 构建需要独立的 `*-win7-windows-msvc` 目标、标准库和依�
 
 [语音运行库的独立构建](../../implemented/feature/2026-10-23-windows7-voice-runtime.md)已落地 x64 与 x86 的同版本源码构建、导入检查、真实合成 Add 与优化卷积推理、sherpa C ABI 与相邻依赖验证；Win7 实机仍需继续验证。该切片不代表整机语音能力已经验收。
 
-[原生手写切片](../../implemented/feature/2026-10-23-windows7-handwriting.md)接通 Tablet PC COM、Windows 专用 C ABI 与独立 Win32 画布；x64/x86 构建与实际系统识别测试已执行，模型状态、下载取消、离线导入与移除经共享资源包接口接通，并已在 Windows 11 上验证真实下载安装；候选窗口设置页补充了原生 owner-draw 固定样例预览；兼容设置新增 AI 输入辅助的服务商、地址、密钥、模型、提示词和配置测试；用户交互桌面上屏、Win7 SP1 组件与安装集成仍未完成。
+[原生手写切片](../../implemented/feature/2026-10-23-windows7-handwriting.md)接通 Tablet PC COM、Windows 专用 C ABI 与独立 Win32 画布；x64/x86 构建与实际系统识别测试已执行，模型状态、下载取消、离线导入与移除经共享资源包接口接通，并已在 Windows 11 上验证真实下载安装；候选窗口设置页补充了原生 owner-draw 固定样例预览；兼容设置新增 AI 输入辅助的服务商、地址、密钥、模型、提示词和配置测试，以及账号状态、登录方式和登录/退出操作；用户交互桌面上屏、Win7 SP1 组件与安装集成仍未完成。
 
 ### 既有笔记审计
 

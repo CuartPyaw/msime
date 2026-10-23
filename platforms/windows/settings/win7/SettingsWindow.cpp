@@ -8,6 +8,7 @@
 #include "TranslationForm.h"
 #include "CandidateAppearanceForm.h"
 #include "AiForm.h"
+#include "AccountForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -42,7 +43,7 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai };
+  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -156,6 +157,18 @@ std::filesystem::path preferences_directory() {
   return settings_state_directory(injected, root, configured);
 }
 
+// 账号会话与共享 Windows 设置应用使用同一份用户目录，不放进机器级状态根。
+std::filesystem::path account_directory() {
+  PWSTR local = nullptr;
+  if (FAILED(SHGetKnownFolderPath(FOLDERID_LocalAppData, 0, nullptr, &local))) {
+    CoTaskMemFree(local);
+    return {};
+  }
+  const auto result = std::filesystem::path(local) / MSIME_EDITION_USER_DATA_DIRECTORY / L"account";
+  CoTaskMemFree(local);
+  return result;
+}
+
 // 宿主选项有明确大小上限，文件读取只在工作线程执行。
 Json runtime_options() {
   auto options_file = std::filesystem::path(environment(L"MSIME_CLIENT_HOST_OPTIONS"));
@@ -232,7 +245,7 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, font_catalog, game_profile };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
@@ -252,6 +265,7 @@ struct Completion {
   std::optional<Json> credential_request;
   std::optional<Json> credential_response;
   std::optional<Json> ai_models_response;
+  std::optional<Json> account_response;
   bool ai_models = false;
   std::optional<Json> fonts;
   bool game_profile_enabled = false;
@@ -290,6 +304,7 @@ private:
     lookup_.reset();
     credential_response_.reset();
     ai_models_response_.reset();
+    account_response_.reset();
     fonts_.reset();
     if (!store_) {
       directory_ = preferences_directory();
@@ -321,6 +336,18 @@ private:
       auto owned = msime::host_api::own_string(msime_client_ai_models(
           reinterpret_cast<const uint8_t*>(request.data()), request.size()));
       ai_models_response_ = owned ? Json::parse(owned.get(), nullptr, false) : Json();
+      return {Outcome::loaded, snapshot_};
+    }
+    if (job.action == Job::Action::account && job.credential) {
+      const auto directory = account_directory();
+      if (directory.empty()) {
+        account_response_ = Json{{"ok", false}, {"error", "account_storage"}};
+      } else {
+        const auto body = Json{{"directory", directory.u8string()}, {"action", *job.credential}}.dump();
+        auto owned = msime::host_api::own_string(msime_client_account(
+            reinterpret_cast<const uint8_t*>(body.data()), body.size()));
+        account_response_ = owned ? Json::parse(owned.get(), nullptr, false) : Json();
+      }
       return {Outcome::loaded, snapshot_};
     }
     if (job.action == Job::Action::wubi_lookup) {
@@ -390,7 +417,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled()};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled()};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -418,6 +445,7 @@ private:
   std::optional<Json> lookup_;
   std::optional<Json> credential_response_;
   std::optional<Json> ai_models_response_;
+  std::optional<Json> account_response_;
   std::optional<Json> fonts_;
   std::thread thread_;
 };
@@ -454,6 +482,7 @@ struct SettingsWindow::State {
   int advanced_height = 0;
   int appearance_height = 0;
   int ai_height = 0;
+  int account_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
   int expression_tab = 0;
@@ -476,6 +505,7 @@ struct SettingsWindow::State {
   TranslationForm translation_form;
   CandidateAppearanceForm appearance_form;
   AiForm ai_form;
+  AccountForm account_form;
   Confirmation confirmation;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
@@ -501,7 +531,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -574,6 +604,10 @@ struct SettingsWindow::State {
     ai_height = ai_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                       int id, int top, int height) {
       return surface_row(Surface::ai, type, text, style, id, top, height);
+    });
+    account_height = account_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+                                                int id, int top, int height) {
+      return surface_row(Surface::account, type, text, style, id, top, height);
     });
     enable(false);
     layout();
@@ -846,6 +880,7 @@ struct SettingsWindow::State {
     translation_form.enable(enabled);
     appearance_form.enable(enabled);
     ai_form.enable(enabled);
+    account_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -878,7 +913,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -938,6 +973,8 @@ struct SettingsWindow::State {
     case Job::Action::data_directory:
     case Job::Action::logs_directory: message = L"正在打开目录…"; break;
     case Job::Action::credential_test: message = L"正在测试服务配置…"; break;
+    case Job::Action::ai_models: message = L"正在获取模型列表…"; break;
+    case Job::Action::account: message = L"正在读取账号…"; break;
     case Job::Action::wubi_lookup: message = L"正在查询编码…"; break;
     case Job::Action::helpcode_sources: message = L"正在读取辅助码方案…"; break;
     case Job::Action::preferences: break;
@@ -1176,6 +1213,7 @@ struct SettingsWindow::State {
       translation_form.refresh(snapshot->preferences());
       appearance_form.refresh(snapshot->preferences());
       ai_form.refresh(snapshot->preferences());
+      account_form.refresh();
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1194,6 +1232,16 @@ struct SettingsWindow::State {
     if (completed->fonts) appearance_form.font_catalog(*completed->fonts);
     if (completed->ai_models_response && completed->credential_request)
       ai_form.completed(*completed->credential_request, *completed->ai_models_response, completed->ai_models);
+    if (completed->account_response && completed->credential_request) {
+      account_form.completed(*completed->credential_request, *completed->account_response);
+      if (completed->credential_request->value("operation", std::string{}) == "providers") {
+        Job job;
+        job.reload = false;
+        job.action = Job::Action::account;
+        job.credential = account_form.status_request();
+        submit(std::move(job));
+      }
+    }
     appearance_form.game_profile(completed->game_profile_enabled);
     enable(snapshot.has_value());
     layout_body();
@@ -1236,7 +1284,7 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
@@ -1246,6 +1294,13 @@ struct SettingsWindow::State {
         Job job;
         job.reload = false;
         job.action = Job::Action::helpcode_sources;
+        submit(std::move(job));
+      }
+      if (selected == 7 && !busy) {
+        Job job;
+        job.reload = false;
+        job.action = Job::Action::account;
+        job.credential = Json{{"operation", "providers"}};
         submit(std::move(job));
       }
       return;
@@ -1284,6 +1339,17 @@ struct SettingsWindow::State {
           job.action = ai_change.models ? Job::Action::ai_models : Job::Action::credential_test;
           job.ai_models = ai_change.models;
         }
+        submit(std::move(job));
+      }
+      return;
+    }
+    auto account_change = account_form.command(command);
+    if (account_change.handled) {
+      if (account_change.request) {
+        Job job;
+        job.reload = false;
+        job.action = Job::Action::account;
+        job.credential = std::move(account_change.request);
         submit(std::move(job));
       }
       return;

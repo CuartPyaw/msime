@@ -49,6 +49,9 @@ enum ControlId {
   ai_enabled = 1400, ai_provider, ai_endpoint, ai_endpoint_hint, ai_token,
   ai_token_reveal, ai_token_save, ai_model, ai_service_save, ai_models_fetch,
   ai_models_status, ai_prompt, ai_prompt_save, ai_test, ai_test_result,
+  account_status = 1500, account_refresh, account_email, account_phone, account_target,
+  account_request_code, account_code, account_login, account_google, account_logout,
+  account_logout_all, account_notice,
 };
 
 class SettingsWindow {
