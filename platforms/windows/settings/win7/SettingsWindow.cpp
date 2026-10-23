@@ -9,6 +9,7 @@
 #include "CandidateAppearanceForm.h"
 #include "AiForm.h"
 #include "AccountForm.h"
+#include "ClipboardForm.h"
 #include "ThemeForm.h"
 #include "CommunitySkinForm.h"
 #include "StatisticsForm.h"
@@ -44,11 +45,25 @@
 namespace msime::settings::win7 {
 namespace {
 constexpr UINT completed_message = WM_APP + 71;
+constexpr UINT activated_message = WM_APP + 74;
 constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_SUFFIX;
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
+bool copy_clipboard(HWND owner, std::wstring_view text) {
+  const auto memory = GlobalAlloc(GMEM_MOVEABLE, (text.size() + 1) * sizeof(wchar_t));
+  if (!memory) return false;
+  const auto target = static_cast<wchar_t*>(GlobalLock(memory));
+  if (!target) { GlobalFree(memory); return false; }
+  std::copy(text.begin(), text.end(), target); target[text.size()] = L'\0';
+  GlobalUnlock(memory);
+  if (!OpenClipboard(owner)) { GlobalFree(memory); return false; }
+  const bool copied = EmptyClipboard() && SetClipboardData(CF_UNICODETEXT, memory);
+  CloseClipboard();
+  if (!copied) GlobalFree(memory);
+  return copied;
+}
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics };
+  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -266,7 +281,7 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory, community, statistics };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory, community, statistics, clipboard };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
@@ -306,14 +321,15 @@ struct Completion {
   std::optional<Json> statistics_upload_response;
   bool statistics_upload_changed = false;
   std::optional<theme_data::Image> account_avatar;
+  std::optional<Json> clipboard_response;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
 class Worker {
 public:
   explicit Worker(HWND window, SettingsWindow::CommunityTransport transport, SettingsWindow::CommunityTransport statistics_upload_transport,
-      SettingsWindow::CommunityTransport account_transport) : window_(window), community_transport_(std::move(transport)),
-      statistics_upload_transport_(std::move(statistics_upload_transport)), account_transport_(std::move(account_transport)), thread_([this] { run(); }) {}
+      SettingsWindow::CommunityTransport account_transport, SettingsWindow::CommunityTransport clipboard_transport) : window_(window), community_transport_(std::move(transport)),
+      statistics_upload_transport_(std::move(statistics_upload_transport)), account_transport_(std::move(account_transport)), clipboard_transport_(std::move(clipboard_transport)), thread_([this] { run(); }) {}
   ~Worker() {
     {
       std::lock_guard<std::mutex> guard(lock_);
@@ -390,6 +406,7 @@ private:
     ai_models_response_.reset();
     account_response_.reset();
     account_avatar_.reset();
+    clipboard_response_.reset();
     fonts_.reset();
     community_response_.reset();
     community_preview_ = {};
@@ -402,6 +419,25 @@ private:
     }
     if (job.reload || job.action == Job::Action::helpcode_sources) helpcodes_ = helpcode_sources(directory_);
     Result result;
+    if (job.action == Job::Action::clipboard) {
+      result = job.changes.empty() ? store_->load() : snapshot_ ? store_->save(*snapshot_, job.changes) : Result{};
+      if (!result.snapshot) result.snapshot = store_->load().snapshot;
+      snapshot_ = result.snapshot;
+      if (!snapshot_ || (result.outcome != Outcome::loaded && result.outcome != Outcome::saved)) return result;
+      auto action = job.credential.value_or(Json{{"operation", "list"}});
+      if (snapshot_->preferences().at("clipboard_history") == false && action.value("operation", std::string{}) != "clear") action = Json{{"operation", "list"}};
+      const Json request{{"directory", directory_.u8string()}, {"action", action}};
+      if (clipboard_transport_) clipboard_response_ = Json::parse(clipboard_transport_(request.dump()), nullptr, false);
+      else if (action.value("operation", std::string{}) == "capture") {
+        const auto captured = theme_data::call(msime_client_capture_clipboard_history, {{"directory", directory_.u8string()}, {"text", action.at("text")}});
+        clipboard_response_ = theme_data::value(captured) ? theme_data::call(msime_client_desktop_clipboard_history,
+            {{"directory", directory_.u8string()}, {"action", {{"operation", "list"}}}}) : captured;
+      } else clipboard_response_ = theme_data::call(msime_client_desktop_clipboard_history, request);
+      // 采集和列表读取期间别的进程也可能关掉历史；界面使用最后的真实偏好。
+      auto fresh = store_->load(); snapshot_ = fresh.snapshot; result.snapshot = snapshot_;
+      if (fresh.outcome != Outcome::loaded) result.outcome = fresh.outcome;
+      return result;
+    }
     if (job.action == Job::Action::helpcode_sources) return {Outcome::loaded, snapshot_};
     if (job.action == Job::Action::theme_preview) theme_preview_mode_ = job.preview_mode;
     if (job.action == Job::Action::theme_scan || job.action == Job::Action::theme_preview)
@@ -645,7 +681,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_), std::move(community_response_), std::move(community_preview_), std::move(statistics_response_), std::move(statistics_upload_response_), job.statistics_upload, std::move(account_avatar_)};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), std::move(account_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled(), std::move(theme_), std::move(community_response_), std::move(community_preview_), std::move(statistics_response_), std::move(statistics_upload_response_), job.statistics_upload, std::move(account_avatar_), std::move(clipboard_response_)};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -677,6 +713,7 @@ private:
   std::optional<Json> ai_models_response_;
   std::optional<Json> account_response_;
   std::optional<theme_data::Image> account_avatar_;
+  std::optional<Json> clipboard_response_;
   std::optional<Json> fonts_;
   std::optional<ThemeCompletion> theme_;
   int theme_preview_mode_ = 0;
@@ -685,6 +722,7 @@ private:
   SettingsWindow::CommunityTransport community_transport_;
   SettingsWindow::CommunityTransport statistics_upload_transport_;
   SettingsWindow::CommunityTransport account_transport_;
+  SettingsWindow::CommunityTransport clipboard_transport_;
   std::optional<Json> statistics_response_;
   std::optional<Json> statistics_upload_response_;
   std::thread thread_;
@@ -726,6 +764,7 @@ struct SettingsWindow::State {
   int theme_height = 0;
   int community_height = 0;
   int statistics_height = 0;
+  int clipboard_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
   int expression_tab = 0;
@@ -749,11 +788,13 @@ struct SettingsWindow::State {
   CandidateAppearanceForm appearance_form;
   AiForm ai_form;
   AccountForm account_form;
+  ClipboardForm clipboard_form;
   ThemeForm theme_form;
   CommunitySkinForm community_form;
   CommunityTransport community_transport;
   CommunityTransport statistics_upload_transport;
   CommunityTransport account_transport;
+  ClipboardServices clipboard_services;
   StatisticsForm statistics_form;
   ToolbarPreview toolbar_preview_form;
   FolderPicker folder_picker;
@@ -782,7 +823,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -871,6 +912,9 @@ struct SettingsWindow::State {
     theme_height = theme_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                             int id, int top, int height) {
       return surface_row(Surface::themes, type, text, style, id, top, height);
+    });
+    clipboard_height = clipboard_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) {
+      return surface_row(Surface::clipboard, type, text, style, id, top, height);
     });
     enable(false);
     layout();
@@ -1179,6 +1223,7 @@ struct SettingsWindow::State {
     appearance_form.enable(enabled);
     ai_form.enable(enabled);
     account_form.enable(enabled);
+    clipboard_form.enable(enabled);
     theme_form.enable(enabled);
     community_form.enable(enabled);
     statistics_form.enable(enabled);
@@ -1214,7 +1259,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -1278,6 +1323,7 @@ struct SettingsWindow::State {
     case Job::Action::credential_test: message = L"正在测试服务配置…"; break;
     case Job::Action::ai_models: message = L"正在获取模型列表…"; break;
     case Job::Action::account: message = L"正在读取账号…"; break;
+    case Job::Action::clipboard: message = L"正在更新剪贴板历史…"; break;
     case Job::Action::wubi_lookup: message = L"正在查询编码…"; break;
     case Job::Action::helpcode_sources: message = L"正在读取辅助码方案…"; break;
     case Job::Action::statistics: message = L"正在读取打字统计…"; break;
@@ -1528,6 +1574,7 @@ struct SettingsWindow::State {
       theme_form.refresh(snapshot->preferences());
       ai_form.refresh(snapshot->preferences());
       account_form.refresh();
+      clipboard_form.refresh(snapshot->preferences());
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1566,6 +1613,7 @@ struct SettingsWindow::State {
       community_form.completed(*completed->credential_request, *completed->community_response);
     }
     if (completed->statistics_response) statistics_form.completed(*completed->statistics_response);
+    if (completed->clipboard_response) clipboard_form.completed(*completed->clipboard_response);
     if (completed->statistics_upload_response) statistics_form.upload_completed(*completed->statistics_upload_response, completed->statistics_upload_changed);
     appearance_form.game_profile(completed->game_profile_enabled);
     enable(snapshot.has_value());
@@ -1603,6 +1651,13 @@ struct SettingsWindow::State {
     submit(std::move(job));
   }
 
+  void poll_clipboard() {
+    if (busy || !worker || surface != Surface::clipboard) return;
+    Job job; job.reload = false; job.action = Job::Action::clipboard;
+    job.credential = Json{{"operation", "list"}};
+    submit(std::move(job));
+  }
+
   void command(WPARAM command) {
     const int id = LOWORD(command);
     if (id == account_google_cancel && HIWORD(command) == BN_CLICKED) {
@@ -1625,12 +1680,13 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
       scroll = 0;
       layout();
+      if (selected == 11) poll_clipboard();
       if (selected == 3 && !busy && HelpcodeForm::offered()) {
         Job job;
         job.reload = false;
@@ -1661,7 +1717,7 @@ struct SettingsWindow::State {
       return;
     }
     if (busy) return;
-    if (id == reload_settings && HIWORD(command) == BN_CLICKED) { if (surface == Surface::statistics) poll_statistics(); else submit(Job{}); return; }
+    if (id == reload_settings && HIWORD(command) == BN_CLICKED) { if (surface == Surface::statistics) poll_statistics(); else if (surface == Surface::clipboard) poll_clipboard(); else submit(Job{}); return; }
     if (id == toolbar_theme && HIWORD(command) == BN_CLICKED) {
       SendMessageW(selector, CB_SETCURSEL, 8, 0);
       this->command(MAKEWPARAM(page_selector, CBN_SELCHANGE));
@@ -1759,6 +1815,24 @@ struct SettingsWindow::State {
           job.action = ai_change.models ? Job::Action::ai_models : Job::Action::credential_test;
           job.ai_models = ai_change.models;
         }
+        submit(std::move(job));
+      }
+      return;
+    }
+    auto clipboard_change = clipboard_form.command(command);
+    if (clipboard_change.handled) {
+      if (!clipboard_change.confirmation.empty()) {
+        const bool allowed = confirmation ? confirmation(window, L"剪贴板", clipboard_change.confirmation.c_str()) :
+            MessageBoxW(window, clipboard_change.confirmation.c_str(), L"剪贴板", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+        if (!allowed) { if (snapshot) clipboard_form.cancelled(snapshot->preferences()); return; }
+      }
+      if (clipboard_change.copy) {
+        const bool copied = clipboard_services.copy ? clipboard_services.copy(window, *clipboard_change.copy) : copy_clipboard(window, *clipboard_change.copy);
+        if (!copied) { clipboard_form.copy_failed(); return; }
+      }
+      if (clipboard_change.request) {
+        Job job; job.reload = false; job.action = Job::Action::clipboard;
+        job.changes = std::move(clipboard_change.changes); job.credential = std::move(clipboard_change.request);
         submit(std::move(job));
       }
       return;
@@ -2053,7 +2127,9 @@ struct SettingsWindow::State {
       if (wparam == 72) self->poll_statistics();
       else if (wparam == 73) self->account_form.tick();
       return 0;
-    case WM_ACTIVATE: if (LOWORD(wparam) != WA_INACTIVE) self->poll_statistics(); break;
+    // 激活可发生在按钮的按下与通知之间；延后刷新，不能在第一次点击中途禁用控件。
+    case WM_ACTIVATE: if (LOWORD(wparam) != WA_INACTIVE) PostMessageW(hwnd, activated_message, 0, 0); break;
+    case activated_message: self->poll_statistics(); self->poll_clipboard(); return 0;
     case WM_SIZE: self->layout(); return 0;
     case WM_GETMINMAXINFO: {
       auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
@@ -2096,13 +2172,14 @@ struct SettingsWindow::State {
   }
 };
 
-SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker, CommunityTransport community_transport, CommunityTransport statistics_upload_transport, CommunityTransport account_transport) : state_(std::make_unique<State>()) {
+SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker, CommunityTransport community_transport, CommunityTransport statistics_upload_transport, CommunityTransport account_transport, ClipboardServices clipboard) : state_(std::make_unique<State>()) {
   state_->file_picker = std::move(file_picker);
   state_->confirmation = std::move(confirmation);
   state_->folder_picker = std::move(folder_picker);
   state_->community_transport = std::move(community_transport);
   state_->statistics_upload_transport = std::move(statistics_upload_transport);
   state_->account_transport = std::move(account_transport);
+  state_->clipboard_services = std::move(clipboard);
 }
 
 SettingsWindow::~SettingsWindow() {
@@ -2134,7 +2211,7 @@ bool SettingsWindow::create(HINSTANCE instance) {
       WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
       state_->dip(900), state_->dip(720), nullptr, nullptr, instance, state_.get());
   if (!window) return false;
-  state_->worker = std::make_unique<Worker>(window, state_->community_transport, state_->statistics_upload_transport, state_->account_transport);
+  state_->worker = std::make_unique<Worker>(window, state_->community_transport, state_->statistics_upload_transport, state_->account_transport, state_->clipboard_services.transport);
   SetTimer(window, 72, 5000, nullptr);
   SetTimer(window, 73, 1000, nullptr);
   return true;

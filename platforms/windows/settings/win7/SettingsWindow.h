@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace msime::settings::win7 {
 
@@ -80,6 +81,10 @@ enum ControlId {
   account_device_detail, account_device_revoke, account_devices_notice,
   account_data_refresh, account_data_summary, account_data_export, account_data_delete,
   account_voice_retry, account_data_notice, account_data_section_first = 1930,
+  clipboard_enabled = 2000, clipboard_limit, clipboard_refresh, clipboard_page,
+  clipboard_previous, clipboard_next, clipboard_list, clipboard_detail,
+  clipboard_pin, clipboard_copy, clipboard_remove, clipboard_clear, clipboard_notice,
+  clipboard_timestamp,
 };
 
 class SettingsWindow {
@@ -90,8 +95,12 @@ public:
   using FolderPicker = std::function<std::optional<std::filesystem::path>(HWND)>;
   // 可注入社区传输以验证真实窗口与 worker；默认仍调用共享 Rust 服务。
   using CommunityTransport = std::function<std::string(const std::string&)>;
+  struct ClipboardServices {
+    CommunityTransport transport;
+    std::function<bool(HWND, std::wstring_view)> copy;
+  };
   explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {}, FolderPicker folder_picker = {},
-      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {});
+      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {}, ClipboardServices clipboard = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;
