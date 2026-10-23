@@ -49,7 +49,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File platforms/windows/tests/tool
 
 ## Windows 7 原生面板（开发中）
 
-`panels/win7` 是不依赖 WebView 的原生面板宿主，提供 `--route=handwriting`（默认）、`--route=clipboard`、`--route=cloud-clipboard` 和 `--route=vocabulary`、`--route=cloud-dictionary`，也读取 Server 的 `MSIME_CLIENT_ROUTE`；显式命令行优先，未知路由返回错误。画布支持自动识别、撤销、清空与候选上屏，识别在工作线程执行；清空或继续书写后丢弃旧结果。窗口不激活，只向打开时仍在前台的原编辑器上屏，切换到其他窗口时拒绝输入。成功上屏通过共享接口按手写来源记录聚合统计，使用 TSF 面板标记避免重复计数。
+`panels/win7` 是不依赖 WebView 的原生面板宿主，提供 `--route=handwriting`（默认）、`--route=clipboard`、`--route=cloud-clipboard` 、`--route=vocabulary`、`--route=cloud-dictionary` 和 `--route=emoji`，也读取 Server 的 `MSIME_CLIENT_ROUTE`；显式命令行优先，未知路由返回错误。画布支持自动识别、撤销、清空与候选上屏，识别在工作线程执行；清空或继续书写后丢弃旧结果。窗口不激活，只向打开时仍在前台的原编辑器上屏，切换到其他窗口时拒绝输入。成功上屏通过共享接口按手写来源记录聚合统计，使用 TSF 面板标记避免重复计数。
 
 Win7 专用 Rust 目标使用系统 Tablet PC COM 中文识别器，普通 Windows 继续使用 WinRT。缺少系统识别器或没有候选时可回退到运行时选项 `handwriting_model`、`MSIME_HANDWRITING_MODEL`、随包模型或已发布手写资源包。窗口提供模型状态、下载、取消、离线多文件导入、移除和刷新；共享安装器按固定锁校验大小与 SHA-256，下载沿用已保存的模型镜像。离线导入需同时选择 `handwriting-zh_CN.model` 和 `HandwritingModel-LICENSE.txt`，按内容识别文件，保留源文件。模型操作使用独立线程，不占用识别队列，关闭时取消并等待退出。所有设置页、其他面板及安装集成完成前，它不接入普通产品启动器与发布包。
 
@@ -59,6 +59,8 @@ cmake --build target/windows-full/x64/win7-panels --config RelWithDebInfo --para
 Copy-Item target/windows7-core/x64/msime_host_api.dll target/windows-full/x64/win7-panels/RelWithDebInfo/
 ctest --test-dir target/windows-full/x64/win7-panels -C RelWithDebInfo --output-on-failure
 ```
+
+表情面板提供表情、颜文字与符号目录、分类、搜索、分页、最近使用、复制与输入，符号保留父子分类并独立加载已安装插件。目录按共享游标读完，内置目录失败仍可使用插件。最近使用属于当前用户的限量面板元数据，损坏文件保留；复制不计打字统计，输入成功才记录。
 
 核心必须由同一份源码运行 `Build-Windows7Core.ps1` 重新生成，包含 `msime_client_windows_handwriting`。32 位构建使用 x86 的依赖与核心、`-A Win32`、`target/windows-full/x86/win7-panels`。通过 vcpkg 工具链构建时，`VCPKG_MANIFEST_DIR` 指向 `platforms/windows/settings/win7`，复用其最小清单。两个原生兼容宿主都在程序目录生成当前 edition 的 `edition.json`。
 

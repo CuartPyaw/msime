@@ -48,7 +48,8 @@ use msime_engine::host::{
 use msime_engine::{
     release_japanese_dictionary_cache, SchemeSet, SchemeType, ShuangpinProfileKind,
 };
-use msime_input_runtime::HandwritingQuery;
+#[cfg(unix)]
+use msime_input_runtime::TranslationQuery;
 #[cfg(unix)]
 use msime_input_runtime::UnixSocketProvider;
 use msime_input_runtime::{
@@ -56,8 +57,7 @@ use msime_input_runtime::{
     KeyGrid, NineKeySpellingId, OnlineCandidate, OnlineQuery, Reranker, Runtime, SentenceModel,
     Transition, TranslationService,
 };
-#[cfg(unix)]
-use msime_input_runtime::{EmojiPanelQuery, TranslationQuery};
+use msime_input_runtime::{EmojiPanelQuery, HandwritingQuery};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::cell::RefCell;

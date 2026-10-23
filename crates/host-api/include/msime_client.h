@@ -992,23 +992,22 @@ char *msime_client_emoji_provider_request(const uint8_t *query,
                                           size_t query_length,
                                           const uint8_t *socket_path,
                                           size_t socket_length);
-/* Query the verified local msime-others.db Emoji catalog. Resources is an absolute
- * generation directory containing msime-others.db; no provider socket is needed.
- * Optional offset is a nonnegative SQL row offset (default 0); limit is 1..255.
- * Optional group filters a catalog subdivision; list_groups:true returns
- * {groups:[name,...]} in catalog order instead of an item page.
- * list_symbol_groups:true returns {symbol_groups:[{parent,title},...]}.
- * Optional parent narrows symbols to a parent category before paging.
- * list_plugin_symbol_groups:true with plugins (absolute plugins directory) returns
- * {plugin_symbol_groups:[{pack,pack_name,tab:"symbols"|"kaomoji",title,keywords,items:[text,...]},...]}:
- * 已安装符号集插件的全部组，包按名字排序、组按清单顺序；keywords 没写时为空串。宿主把 symbols 组追加在内置符号之后、以 pack_name 为上级分类，
- * kaomoji 组追加在颜文字 All 之后，不与内置目录去重。没传 plugins 时为空列表。
- * Advance offset by limit, not returned item count: each page deduplicates text. */
+#endif
+/* 从已校验的 msime-others.db 读取本地表情目录；resources 为含该文件的绝对目录。
+ * 无需提供商套接字，Windows 和 Unix 宿主使用同一接口。
+ * offset 为非负行偏移（缺省 0），limit 为 1..255。
+ * group 筛选目录子类；list_groups:true 返回 {groups:[name,...]}。
+ * list_symbol_groups:true 返回 {symbol_groups:[{parent,title},...]}。
+ * parent 在分页前筛选符号父类，避免不同父类下的同名子类混淆。
+ * list_plugin_symbol_groups:true 搭配绝对 plugins 目录，返回
+ * {plugin_symbol_groups:[{pack,pack_name,tab,title,keywords,items:[text,...]},...]}。
+ * 插件组独立于内置数据库；包按名称、组按清单顺序，不与内置目录去重。
+ * cursor:true 返回 next_offset 和 complete；必须按 next_offset 推进，
+ * 空页可能只是坏行。缺省模式按 limit 推进，每页按文本去重。 */
 char *msime_client_emoji_catalog_request(const uint8_t *query,
                                          size_t query_length,
                                          const uint8_t *resources,
                                          size_t resources_length);
-#endif
 /* Shared Doubao authentication policy. Input (max 32768 bytes):
  * {auth_mode,app_id,token,resource_id}; an absent or empty mode means api_key.
  * Response value: {headers:[[name,value],...]}. Contains credentials: never
