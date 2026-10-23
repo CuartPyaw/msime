@@ -25,7 +25,9 @@ Status: implemented
 
 新增宿主回归在旧实现因 `nihao` 不分词而失败。三项回归覆盖自动分词、显式隔音符、纠错字母与尾部隔音符、字面大写、光标前后缀、原始提交、专用英文、本地模式与双拼显示偏好。远端 macOS arm64 上 `cargo test -p msime-engine` 的 2521 项单测及 31 项 golden、`cargo test -p msime-input-runtime` 的 365 项全部通过；保留 56 项原有忽略。引擎全目标 Clippy（`-D warnings`）、Rust 格式检查及本机笔记检查通过。macOS 原生 `shortcut` 与 `candidate-row-layout` 两项通过；尚未安装输入法进行真实应用输入验收。
 
-整轮 quick 尚未通过：首次运行的 Python 3.9 环境失败与语音请求超时经既有 Python 3.14 逐项复核通过；修正 PATH 后的整轮运行完成所有编译阶段，但 Linux `linux-clipboard-tool-parity` 的两次子进程超过原有 3 秒时限。同一产物在新容器中单独复核通过，没有改动断言或时限。另三项主题测试虽通过，但耗时显著增加，原因尚未确定。第三次整轮复核使用独立临时目录、`MSIME_CHECK_JOBS=2` 和仅作用于本轮容器的 CPU 相对权重 4096，结果待运行结束核对；草稿 PR 不据此宣称完整门禁通过。
+第三次完整 quick 成功退出，用时约 24 分钟；Linux 原生宿主的 111 个注册测试为 0 失败、1 项原有跳过，Rust workspace、Android、两种 WASM、Android Java、Linux 设置壳、macOS 原生和共享 Apple 桥的编译阶段通过。远端缺少 Node/pnpm、MinGW 和 HarmonyOS 打包依赖，对应阶段明确跳过；笔记检查在本机完成，不把这些环境跳过称为目标平台验收。
+
+保留前两轮失败证据：首次 Python 3.9 环境失败与语音请求超时经既有 Python 3.14 逐项复核通过；修正 PATH 后的整轮运行完成所有编译阶段，但 Linux `linux-clipboard-tool-parity` 的两次子进程超过原有 3 秒时限。同一产物在新容器中单独复核通过。第三轮使用独立临时目录、`MSIME_CHECK_JOBS=2` 和仅作用于本轮容器的 CPU 相对权重 4096，没有改动断言或时限；剪贴板本轮通过，三项主题测试耗时降至约 43、20、92 秒。异常耗时的具体原因仍未确定。
 
 ## Consequences
 
