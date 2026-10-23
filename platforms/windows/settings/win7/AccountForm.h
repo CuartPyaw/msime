@@ -4,6 +4,7 @@
 #include "PreferencesStore.h"
 #include "ThemeData.h"
 #include "DataUrlImage.h"
+#include "AccountManagementForm.h"
 #include "SettingsWindow.h"
 #include "../AccountPageModel.h"
 #include <commctrl.h>
@@ -22,6 +23,7 @@ public:
     std::optional<Json> request;
     std::wstring confirmation;
     bool choose_avatar = false;
+    bool export_data = false;
   };
 
   int create(const std::function<HWND(const wchar_t*, const wchar_t*, DWORD, int, int, int)>& row) {
@@ -63,6 +65,9 @@ public:
     add(account_sync_upload, L"BUTTON", L"上传本机设置", WS_TABSTOP | BS_PUSHBUTTON, 32);
     add(account_sync_apply, L"BUTTON", L"下载并应用云端设置", WS_TABSTOP | BS_PUSHBUTTON, 32);
     add(account_sync_notice, L"STATIC", L"", SS_LEFT, 96);
+    top += management_.create([&](const wchar_t* type, const wchar_t* title, DWORD style, int id, int offset, int height) {
+      return row(type, title, style, id, top + offset, height);
+    });
     add(account_delete, L"BUTTON", L"注销账号…", WS_TABSTOP | BS_PUSHBUTTON, 32);
     return top;
   }
@@ -92,6 +97,8 @@ public:
   }
 
   Command command(WPARAM event) {
+    auto managed = management_.command(event);
+    if (managed.handled) return {true, std::move(managed.request), std::move(managed.confirmation), false, managed.export_data};
     const int id = LOWORD(event), notification = HIWORD(event);
     if (!controls_.count(id)) return {};
     Command result; result.handled = true;
@@ -175,6 +182,13 @@ public:
   std::optional<Json> completed(const Json& request, const Json& response) {
     notice_.clear();
     const auto operation = request.value("operation", std::string{});
+    if (AccountManagementForm::handles(operation)) {
+      const auto value = theme_data::value(response);
+      if (operation == "data_delete" && value) { cloud_.reset(); sync_ready_ = false; }
+      auto next = management_.completed(request, response);
+      if (operation == "data_summary" && value && signed_in_ && !sync_ready_ && !next) next = Json{{"operation", "preferences_schema"}};
+      return next;
+    }
     const auto result = theme_data::value(response);
     if (!result) {
       const auto error = response.is_object() && response.contains("error") && response.at("error").is_string() ? response.at("error").get<std::string>() : "account_unavailable";
@@ -212,7 +226,7 @@ public:
       unreadable_ = false;
       signed_in_ = user.is_object() && user.contains("id") && user.at("id").is_string();
       const auto id = signed_in_ ? string(user, "id") : std::string{};
-      if (id != user_id_) { cloud_.reset(); sync_ready_ = false; profile_text_.clear(); sync_notice_.clear(); avatar({}); }
+      if (id != user_id_) { cloud_.reset(); sync_ready_ = false; profile_text_.clear(); sync_notice_.clear(); avatar({}); management_.clear(); }
       user_id_ = id;
       user_name_ = signed_in_ ? control_text::wide(string(user, "displayName")) : std::wstring{};
       name_ = user_name_;
@@ -256,6 +270,8 @@ public:
       signed_in_ = false; unreadable_ = false; user_id_.clear(); user_name_.clear(); name_.clear(); profile_text_.clear();
       cloud_.reset(); sync_ready_ = false; sync_notice_.clear(); challenge_.clear(); code_.clear();
       avatar({}); avatar_url_.clear(); avatar_uploaded_ = false;
+      management_.clear();
+      if (operation == "account_delete") management_.account_deleted(value);
       notice_ = operation == "account_delete" ? L"账号已注销。" : operation == "forget" ? L"失效的本机登录状态已清除。" : L"已退出登录。";
     }
     refresh();
@@ -275,6 +291,7 @@ private:
     return utf8.value_or(std::string{});
   }
   void update() {
+    management_.enable(enabled_, signed_in_);
     SetWindowTextW(get(account_google), google_waiting_ ? L"正在等待浏览器完成 Google 登录…" : L"使用 Google 登录");
     if (!enabled_) {
       for (const auto& entry : controls_) EnableWindow(entry.second, FALSE);
@@ -316,6 +333,7 @@ private:
   theme_data::Image avatar_;
   std::string avatar_url_;
   bool avatar_uploaded_ = false;
+  AccountManagementForm management_;
   int64_t expires_at_ = 0, resend_at_ = 0;
 };
 

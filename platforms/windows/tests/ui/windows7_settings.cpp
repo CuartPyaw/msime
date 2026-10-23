@@ -201,6 +201,13 @@ int main() {
   bool account_signed_in = false, allow_account = false, account_status_failed = false;
   bool malformed_account_status = false, fail_account_apply = false;
   bool fail_avatar_upload = false, malformed_avatar = false;
+  bool cloud_export_selection = false, malformed_devices = false, fail_account_delete = true;
+  const auto cloud_export_file = temporary.path / L"synthetic-cloud.zip";
+  const auto other_device_id = std::string(64, 'b');
+  Json account_devices = Json::array({
+      {{"id", std::string(64, 'a')}, {"name", "合成当前设备"}, {"platform", "windows"}, {"app_version", "1.0.0"}, {"current", true}, {"created_at", "2026-01-02T03:04:05Z"}, {"last_active", "2026-02-03T04:05:06Z"}},
+      {{"id", other_device_id}, {"name", "合成其他设备"}, {"platform", "web"}, {"app_version", ""}, {"current", false}, {"created_at", "2026-01-02T03:04:05Z"}, {"last_active", "2026-02-03T04:05:06Z"}}});
+  Json qq_links = Json::array({{{"id", "1"}, {"created_at", "2026-01-02T03:04:05Z"}}});
   std::mutex account_transport_lock;
   std::condition_variable account_google_ready;
   std::atomic<bool> account_google_started{false}, account_google_cancelled{false};
@@ -274,7 +281,33 @@ int main() {
       const auto applied = store.save(*current.snapshot, {{{"traditional_chinese_output"}, !fail_account_apply}});
       assert(applied.outcome == Outcome::saved); value = applied.snapshot->document;
       if (fail_account_apply) return Json{{"ok", false}, {"error", "account_storage"}}.dump();
-    } else if (operation == "account_delete") return Json{{"ok", false}, {"error", "account_recent_login_required"}}.dump();
+    } else if (operation == "sessions_list") value = {{"sessions", malformed_devices ? Json(false) : account_devices}};
+    else if (operation == "session_revoke") {
+      const auto id = action.at("id");
+      const bool current = id == std::string(64, 'a');
+      assert(current || id == other_device_id);
+      for (auto it = account_devices.begin(); it != account_devices.end(); ++it) if (it->at("id") == id) { account_devices.erase(it); break; }
+      if (current) account_signed_in = false;
+      value = {{"signed_out", current}};
+    } else if (operation == "qq_links") value = {{"links", qq_links}};
+    else if (operation == "qq_link_redeem") {
+      assert(action.at("code") == "12345678");
+      qq_links.push_back({{"id", "2"}, {"created_at", "2026-01-03T03:04:05Z"}});
+    } else if (operation == "qq_link_delete") {
+      assert(action.at("id") == "1"); qq_links.erase(qq_links.begin());
+    } else if (operation == "data_summary") value = {{"bytes", 123}, {"anonymous_voice", "unknown"}, {"sections", Json::array({{{"id", "voice"}, {"bytes", 123}, {"items", 2}}})}};
+    else if (operation == "data_export") {
+      assert(action.at("destination") == cloud_export_file.u8string());
+      value = {{"path", cloud_export_file.u8string()}, {"bytes", 0}, {"filename", "msime-data.zip"}};
+    } else if (operation == "data_delete") {
+      assert(action.at("sections") == Json::array({"voice"}));
+      value = {{"voice_samples", {{"ok", false}, {"error", "account_rate_limited"}, {"retry_after_seconds", 60}}}};
+    } else if (operation == "voice_delete") value = nullptr;
+    else if (operation == "account_delete") {
+      if (fail_account_delete) return Json{{"ok", false}, {"error", "account_recent_login_required"}}.dump();
+      account_signed_in = false;
+      value = {{"voice_samples", {{"ok", false}, {"error", "account_unavailable"}}}};
+    }
     else if (operation == "logout" || operation == "forget") { account_signed_in = false; account_status_failed = false; }
     else { assert(false); }
     return Json{{"ok", true}, {"value", value}}.dump();
@@ -283,6 +316,7 @@ int main() {
     DWORD process = 0;
     GetWindowThreadProcessId(owner, &process);
     assert(process == GetCurrentProcessId());
+    if (cloud_export_selection) return cancel_selection ? std::nullopt : std::optional<std::filesystem::path>(cloud_export_file);
     if (preview_selection) return cancel_selection ? std::nullopt : std::optional<std::filesystem::path>(preview_file);
     if (cancel_selection) return std::nullopt;
     assert(save == (selections == 0));
@@ -1631,7 +1665,8 @@ int main() {
   };
   const auto statistics_value = [&] { return theme_data::value(statistics_call({{"operation", "load"}})).value(); };
   select_page(10);
-  assert(statistics_upload_calls.size() == 1);
+  // 进入页面必须读取上传状态；同一消息循环也可能执行到期的自动刷新。
+  assert(!statistics_upload_calls.empty() && statistics_upload_calls.front().at("operation") == "typing_upload");
   assert(SendMessageW(GetDlgItem(body, statistics_enabled), BM_GETCHECK, 0, 0) == BST_UNCHECKED);
   const auto statistics_click = [&](int id) {
     SendMessageW(GetDlgItem(body, id), BM_CLICK, 0, 0);
@@ -1839,6 +1874,75 @@ int main() {
   assert(caption(GetDlgItem(body, account_status)).find(L"合成昵称") != std::wstring::npos);
   assert(caption(GetDlgItem(body, account_notice)).find(L"无法读取") != std::wstring::npos);
   malformed_account_status = false;
+  account_click(account_devices_refresh);
+  const auto devices_list = GetDlgItem(body, account_devices_list);
+  assert(SendMessageW(devices_list, LB_GETCOUNT, 0, 0) == 2);
+  const auto select_device = [&](int index) {
+    SendMessageW(devices_list, LB_SETCURSEL, index, 0);
+    SendMessageW(body, WM_COMMAND, MAKEWPARAM(account_devices_list, LBN_SELCHANGE), reinterpret_cast<LPARAM>(devices_list));
+  };
+  select_device(1);
+  assert(IsWindowEnabled(GetDlgItem(body, account_device_revoke)));
+  assert(caption(GetDlgItem(body, account_device_detail)).find(L"2026-02-03") != std::wstring::npos);
+  allow_account = false;
+  account_count = account_calls.size();
+  account_click(account_device_revoke);
+  assert(account_calls.size() == account_count && account_devices.size() == 2);
+  allow_account = true;
+  account_click(account_device_revoke);
+  assert(account_devices.size() == 1 && account_signed_in && account_calls.back().at("operation") == "sessions_list");
+  select_device(0);
+  malformed_devices = true;
+  account_click(account_devices_refresh);
+  assert(!IsWindowEnabled(GetDlgItem(body, account_device_revoke)));
+  assert(caption(GetDlgItem(body, account_devices_notice)).find(L"无法读取") != std::wstring::npos);
+  malformed_devices = false;
+  account_click(account_devices_refresh);
+  account_click(account_qq_refresh);
+  const auto qq_list = GetDlgItem(body, account_qq_list);
+  assert(SendMessageW(qq_list, LB_GETCOUNT, 0, 0) == 1);
+  SetWindowTextW(GetDlgItem(body, account_qq_code), L"1234567");
+  assert(!IsWindowEnabled(GetDlgItem(body, account_qq_redeem)));
+  SetWindowTextW(GetDlgItem(body, account_qq_code), L"12345678");
+  assert(IsWindowEnabled(GetDlgItem(body, account_qq_redeem)));
+  account_click(account_qq_redeem);
+  assert(qq_links.size() == 2 && caption(GetDlgItem(body, account_qq_code)).empty());
+  SendMessageW(qq_list, LB_SETCURSEL, 0, 0);
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(account_qq_list, LBN_SELCHANGE), reinterpret_cast<LPARAM>(qq_list));
+  allow_account = false;
+  account_count = account_calls.size();
+  account_click(account_qq_remove);
+  assert(account_calls.size() == account_count && qq_links.size() == 2);
+  allow_account = true;
+  account_click(account_qq_remove);
+  assert(qq_links.size() == 1 && account_calls.back().at("operation") == "qq_links");
+  account_click(account_data_refresh);
+  assert(caption(GetDlgItem(body, account_data_summary)).find(L"语音样本的数量暂时无法读取") != std::wstring::npos);
+  cloud_export_selection = true; cancel_selection = true;
+  account_count = account_calls.size();
+  account_click(account_data_export);
+  assert(account_calls.size() == account_count && !std::filesystem::exists(cloud_export_file));
+  cancel_selection = false;
+  account_click(account_data_export);
+  assert(account_calls.back().at("operation") == "data_export");
+  assert(caption(GetDlgItem(body, account_data_notice)).find(L"ZIP") != std::wstring::npos);
+  cloud_export_selection = false;
+  const auto voice_section = GetDlgItem(body, account_data_section_first + 4);
+  SendMessageW(voice_section, BM_SETCHECK, BST_CHECKED, 0);
+  account_click(account_data_section_first + 4);
+  allow_account = false;
+  account_count = account_calls.size();
+  account_click(account_data_delete);
+  assert(account_calls.size() == account_count && SendMessageW(voice_section, BM_GETCHECK, 0, 0) == BST_CHECKED);
+  allow_account = true;
+  account_click(account_data_delete);
+  assert(IsWindowEnabled(GetDlgItem(body, account_voice_retry)));
+  assert(SendMessageW(voice_section, BM_GETCHECK, 0, 0) == BST_UNCHECKED);
+  assert(caption(GetDlgItem(body, account_data_notice)).find(L"仍有未删除") != std::wstring::npos);
+  account_count = account_calls.size();
+  account_click(account_voice_retry);
+  assert(account_calls.size() == account_count + 1 && account_calls.back().at("operation") == "voice_delete");
+  assert(!IsWindowEnabled(GetDlgItem(body, account_voice_retry)));
   account_click(account_delete);
   assert(account_signed_in && IsWindowEnabled(GetDlgItem(body, account_logout)));
   assert(caption(GetDlgItem(body, account_notice)).find(L"重新登录") != std::wstring::npos);
@@ -1855,6 +1959,23 @@ int main() {
   account_click(account_forget);
   assert(!account_status_failed && !IsWindowEnabled(GetDlgItem(body, account_forget)));
   assert(account_confirmations >= 6);
+  // 注销已完成、匿名样本清理失败时，允许在未登录状态单独重试。
+  account_signed_in = true;
+  account_click(account_refresh);
+  account_click(account_devices_refresh);
+  select_device(0);
+  account_click(account_device_revoke);
+  assert(!account_signed_in && !IsWindowEnabled(GetDlgItem(body, account_logout)));
+  assert(account_calls.back().at("operation") == "status");
+  account_signed_in = true;
+  account_click(account_refresh);
+  fail_account_delete = false;
+  account_click(account_delete);
+  assert(!account_signed_in && !IsWindowEnabled(GetDlgItem(body, account_logout)));
+  assert(IsWindowEnabled(GetDlgItem(body, account_voice_retry)));
+  account_click(account_voice_retry);
+  assert(!IsWindowEnabled(GetDlgItem(body, account_voice_retry)));
+  fail_account_delete = true;
   SendMessageW(body, WM_COMMAND, MAKEWPARAM(account_google, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(body, account_google)));
   pump_until([&] { return account_google_started.load(); });
   assert(!IsWindowEnabled(language) && IsWindowEnabled(GetDlgItem(body, account_google_cancel)));

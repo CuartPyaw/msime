@@ -947,7 +947,7 @@ struct SettingsWindow::State {
     developer_height = 906;
   }
 
-  std::optional<std::filesystem::path> pick_settings_file(bool save, bool preview = false, const wchar_t* image_title = L"选择皮肤预览图") const {
+  std::optional<std::filesystem::path> pick_settings_file(bool save, bool preview = false, const wchar_t* image_title = L"选择皮肤预览图", bool cloud_export = false) const {
     if (file_picker) return file_picker(window, save);
     // 与现代原生设置使用相同的系统文件选择接口；此 COM 接口从 Vista 起可用。
     IFileDialog* raw = nullptr;
@@ -959,14 +959,14 @@ struct SettingsWindow::State {
         nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&raw)))) return failure();
     const auto release_dialog = [](IFileDialog* value) { value->Release(); };
     const std::unique_ptr<IFileDialog, decltype(release_dialog)> dialog(raw, release_dialog);
-    const COMDLG_FILTERSPEC filter{preview ? L"预览图片 (*.png;*.jpg;*.jpeg)" : L"设置文件 (*.json)", preview ? L"*.png;*.jpg;*.jpeg" : L"*.json"};
+    const COMDLG_FILTERSPEC filter{cloud_export ? L"云端数据 (*.zip)" : preview ? L"图片 (*.png;*.jpg;*.jpeg)" : L"设置文件 (*.json)", cloud_export ? L"*.zip" : preview ? L"*.png;*.jpg;*.jpeg" : L"*.json"};
     FILEOPENDIALOGOPTIONS options = 0;
-    if (FAILED(dialog->SetFileTypes(1, &filter)) || FAILED(dialog->SetDefaultExtension(preview ? L"png" : L"json")) ||
-        FAILED(dialog->SetTitle(preview ? image_title : save ? L"导出设置" : L"导入设置")) ||
+    if (FAILED(dialog->SetFileTypes(1, &filter)) || FAILED(dialog->SetDefaultExtension(cloud_export ? L"zip" : preview ? L"png" : L"json")) ||
+        FAILED(dialog->SetTitle(cloud_export ? L"导出云端数据" : preview ? image_title : save ? L"导出设置" : L"导入设置")) ||
         FAILED(dialog->SetOkButtonLabel(preview ? L"选择" : save ? L"导出" : L"导入")) ||
         FAILED(dialog->GetOptions(&options)) || FAILED(dialog->SetOptions(options | FOS_FORCEFILESYSTEM |
             FOS_DONTADDTORECENT | (save ? FOS_OVERWRITEPROMPT : FOS_FILEMUSTEXIST)))) return failure();
-    if (save && FAILED(dialog->SetFileName(MSIME_EDITION_DISPLAY_NAME L"设置.json"))) return failure();
+    if (save && FAILED(dialog->SetFileName(cloud_export ? L"msime-data.zip" : MSIME_EDITION_DISPLAY_NAME L"设置.json"))) return failure();
     const HRESULT shown = dialog->Show(window);
     if (shown == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return std::nullopt;
     if (FAILED(shown)) return failure();
@@ -1765,6 +1765,11 @@ struct SettingsWindow::State {
     }
     auto account_change = account_form.command(command);
     if (account_change.handled) {
+      if (account_change.export_data) {
+        const auto file = pick_settings_file(true, false, nullptr, true);
+        if (!file) return;
+        account_change.request = Json{{"operation", "data_export"}, {"destination", file->u8string()}};
+      }
       if (account_change.choose_avatar) {
         const auto file = pick_settings_file(false, true, L"选择头像（1 MiB 以内的 PNG 或 JPEG）");
         if (!file) return;
