@@ -1,6 +1,8 @@
 #include "../../settings/win7/SettingsWindow.h"
 #include "../../settings/win7/PreferencesStore.h"
 #include "../../settings/win7/ThemeData.h"
+#include "../../settings/win7/CommunitySkinData.h"
+#include "../../settings/win7/ControlText.h"
 #include "../../settings/InputSettingsModel.h"
 #include "../../../../shared/contracts/msime_edition.h"
 
@@ -182,16 +184,38 @@ int main() {
   bool cancel_selection = false;
   bool allow_fuzzy_reset = false;
   unsigned reset_confirmations = 0;
+  bool allow_community = false, preview_selection = false, community_unauthorized = false, malformed_community = false;
+  unsigned community_confirmations = 0;
+  unsigned installs = 0;
+  const DWORD ui_thread = GetCurrentThreadId();
+  std::vector<Json> community_calls;
+  const std::string synthetic_id = "00000000-0000-4000-8000-000000000001";
+  const std::string other_id = "00000000-0000-4000-8000-000000000002";
+  Json community_item{{"id", synthetic_id}, {"package_id", "synthetic-light"}, {"name", "合成社区皮肤"},
+      {"description", "合成测试说明"}, {"author", "合成作者"}, {"version", "1"}, {"owned", false},
+      {"category", "nature"}, {"visibility", "public"}, {"downloads", 3}, {"rating_count", 2}, {"rating_average", 4.5},
+      {"license", {{"code", "MIT"}, {"assets", "CC0-1.0"}}}};
+  const std::string preview_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGP4z8DwHwAFAAH/iZk9HQAAAABJRU5ErkJggg==";
+  const auto preview_file = temporary.path / L"synthetic-preview.png";
+  {
+    const unsigned char png[]{137,80,78,71,13,10,26,10,0,0,0,13,73,72,68,82,0,0,0,1,0,0,0,1,8,6,0,0,0,31,21,196,137,0,0,0,13,73,68,65,84,120,156,99,248,207,192,240,31,0,5,0,1,255,137,153,61,29,0,0,0,0,73,69,78,68,174,66,96,130};
+    std::ofstream image(preview_file, std::ios::binary);
+    image.write(reinterpret_cast<const char*>(png), sizeof(png)); assert(image.good());
+  }
   SettingsWindow window([&](HWND owner, bool save) -> std::optional<std::filesystem::path> {
     DWORD process = 0;
     GetWindowThreadProcessId(owner, &process);
     assert(process == GetCurrentProcessId());
+    if (preview_selection) return cancel_selection ? std::nullopt : std::optional<std::filesystem::path>(preview_file);
     if (cancel_selection) return std::nullopt;
     assert(save == (selections == 0));
     ++selections;
     return file;
   }, [&](HWND owner, const wchar_t* title, const wchar_t* text) {
     assert(IsWindow(owner));
+    if (std::wstring_view(title) == L"社区皮肤") {
+      assert(text && *text); ++community_confirmations; return allow_community;
+    }
     if (std::wstring_view(title) == L"导入皮肤") {
       assert(std::wstring_view(text).find(imported_skin.wstring()) != std::wstring_view::npos);
       ++skin_confirmations;
@@ -204,6 +228,45 @@ int main() {
   }, [&](HWND owner) -> std::optional<std::filesystem::path> {
     assert(IsWindow(owner));
     return cancel_skin_folder ? std::nullopt : std::optional<std::filesystem::path>(imported_skin);
+  }, [&](const std::string& body) {
+    assert(GetCurrentThreadId() != ui_thread);
+    const auto request = Json::parse(body);
+    assert(request.at("state_root") == temporary.path.u8string());
+    assert(request.at("skins_directory") == skins_root.u8string());
+    assert(std::filesystem::u8path(request.at("directory").get<std::string>()).filename() == L"account");
+    const auto action = request.at("action");
+    community_calls.push_back(action);
+    const auto operation = action.at("operation").get<std::string>();
+    if (community_unauthorized) return Json{{"ok", false}, {"error", "community_unauthorized"}}.dump();
+    if (malformed_community) return std::string("{broken");
+    Json value;
+    if (operation == "candidate_skin_list") {
+      assert(action.at("offset").is_number_unsigned() || action.at("offset").is_number_integer());
+      auto item = community_item;
+      const auto offset = action.at("offset").get<size_t>();
+      if (offset) { item["id"] = other_id; item["name"] = "合成第二款"; }
+      value = {{"skins", Json::array({item})}, {"has_more", offset == 0}};
+    } else if (operation == "candidate_skin_detail") value = community_item;
+    else if (operation == "candidate_skin_preview") value = {{"dataUrl", "data:image/png;base64," + preview_base64}};
+    else if (operation == "candidate_skin_install") {
+      ++installs;
+      if (!action.at("replace").get<bool>()) return Json{{"ok", false}, {"error", "candidate_skin_exists"}}.dump();
+      value = theme_data::value(theme_data::catalog(skins_root)).value();
+    } else if (operation == "candidate_skin_rate") value = {{"stars", action.at("stars")}};
+    else if (operation == "candidate_skin_set_visibility" || operation == "candidate_skin_set_category") {
+      community_item[operation == "candidate_skin_set_visibility" ? "visibility" : "category"] = action.at(operation == "candidate_skin_set_visibility" ? "visibility" : "category");
+      value = community_item;
+    } else if (operation == "candidate_skin_unpublish") value = {{"deleted", true}};
+    else if (operation == "candidate_skin_sync") value = {{"uploaded", Json::array()}, {"downloaded", Json::array()}, {"deleted_local", Json::array()}, {"skipped", Json::array()}, {"stopped", false}};
+    else if (operation == "report") { assert(action.at("kind") == "candidate-skins"); }
+    else if (operation == "candidate_skin_pack_preview" || operation == "candidate_skin_add_license" || operation == "candidate_skin_add_preview") {
+      auto local_request = request;
+      local_request["directory"] = (temporary.path / L"synthetic-account").u8string();
+      return theme_data::call(msime_client_community, local_request).dump();
+    } else if (operation == "candidate_skin_publish") {
+      assert(action.at("id").get<std::string>().size() == 36); value = community_item;
+    } else { assert(false); }
+    return Json{{"ok", true}, {"value", value}}.dump();
   });
   assert(window.create(GetModuleHandleW(nullptr)));
   const HWND host = window.handle();
@@ -1305,6 +1368,142 @@ int main() {
       reinterpret_cast<LPARAM>(GetDlgItem(body, import_settings)));
   assert(selections == 2 && IsWindowEnabled(tsf_log));
   assert(store.load().snapshot->revision() == before_cancel);
+  // 社区传输用合成服务响应；实际控件、串行 worker、预览解码和本地包修改使用正式路径。
+  const auto community_revision = store.load().snapshot->revision();
+  const auto community_click = [&](int id) {
+    SendMessageW(body, WM_COMMAND, MAKEWPARAM(id, BN_CLICKED), reinterpret_cast<LPARAM>(GetDlgItem(body, id)));
+    pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+  };
+  select_page(9);
+  assert(community_calls.size() == 1 && community_calls.back().at("operation") == "candidate_skin_list");
+  assert(SendMessageW(GetDlgItem(body, community_list), LB_GETCOUNT, 0, 0) == 1);
+  assert(IsWindowEnabled(GetDlgItem(body, community_more)));
+  assert(!IsWindowEnabled(GetDlgItem(body, community_unpublish)));
+  community_click(community_more);
+  assert(community_calls.back().at("offset") == 1);
+  assert(SendMessageW(GetDlgItem(body, community_list), LB_GETCOUNT, 0, 0) == 2);
+  assert(!IsWindowEnabled(GetDlgItem(body, community_more)));
+  SetWindowTextW(GetDlgItem(body, community_search), L"合成搜索");
+  SendMessageW(GetDlgItem(body, community_filter), CB_SETCURSEL, 2, 0);
+  SendMessageW(GetDlgItem(body, community_mine), BM_SETCHECK, BST_CHECKED, 0);
+  community_click(community_reload);
+  assert(community_calls.back().at("offset") == 0 && community_calls.back().at("category") == "guofeng");
+  assert(community_calls.back().at("search") == "合成搜索" && community_calls.back().at("mine") == true);
+  community_click(community_detail);
+  community_click(community_preview_load);
+  const auto frame = community_data::preview(Json{{"ok", true}, {"value", {{"dataUrl", "data:image/png;base64," + preview_base64}}}});
+  assert(frame.width == 1 && frame.height == 1 && frame.bgra == std::vector<uint8_t>({0,0,255,255}));
+  const auto community_dc = CreateCompatibleDC(nullptr);
+  void* community_bits = nullptr;
+  const auto community_bitmap = CreateDIBSection(community_dc, &preview_info, DIB_RGB_COLORS, &community_bits, nullptr, 0);
+  assert(community_dc && community_bitmap && community_bits);
+  const auto previous_community_bitmap = SelectObject(community_dc, community_bitmap);
+  DRAWITEMSTRUCT community_draw{};
+  community_draw.CtlType = ODT_STATIC; community_draw.CtlID = community_preview_image;
+  community_draw.hwndItem = GetDlgItem(body, community_preview_image); community_draw.hDC = community_dc;
+  community_draw.rcItem = RECT{0,0,600,228};
+  assert(SendMessageW(body, WM_DRAWITEM, community_preview_image, reinterpret_cast<LPARAM>(&community_draw)));
+  assert(GetPixel(community_dc, 300, 114) == RGB(255,0,0));
+  SelectObject(community_dc, previous_community_bitmap); DeleteObject(community_bitmap); DeleteDC(community_dc);
+  assert(community_data::preview(Json{{"ok", true}, {"value", {{"dataUrl", "https://invalid.example/preview.png"}}}}).bgra.empty());
+  assert(community_data::preview(Json{{"ok", true}, {"value", {{"dataUrl", "data:image/jpeg;base64," + preview_base64}}}}).bgra.empty());
+  community_click(community_install);
+  assert(installs == 1 && community_calls.back().at("replace") == false);
+  const auto before_denial = community_calls.size();
+  community_click(community_install);
+  assert(community_calls.size() == before_denial && community_confirmations == 1);
+  allow_community = true;
+  community_click(community_install);
+  assert(installs == 2 && community_calls.back().at("replace") == true);
+  SendMessageW(GetDlgItem(body, community_stars), CB_SETCURSEL, 3, 0);
+  community_click(community_rate);
+  assert(community_calls.back().at("stars") == 4);
+  SetWindowTextW(GetDlgItem(body, community_report_detail), L"合成举报说明");
+  allow_community = false;
+  auto call_count = community_calls.size();
+  community_click(community_report);
+  assert(community_calls.size() == call_count);
+  allow_community = true;
+  community_click(community_report);
+  assert(community_calls.back().at("detail") == "合成举报说明");
+  community_item["owned"] = true;
+  community_click(community_detail);
+  assert(IsWindowEnabled(GetDlgItem(body, community_unpublish)) && !IsWindowEnabled(GetDlgItem(body, community_rate)));
+  SendMessageW(GetDlgItem(body, community_visibility), CB_SETCURSEL, 1, 0);
+  community_click(community_visibility_save);
+  assert(community_item.at("visibility") == "private");
+  SendMessageW(GetDlgItem(body, community_category), CB_SETCURSEL, 3, 0);
+  community_click(community_category_save);
+  assert(community_item.at("category") == "cute");
+  allow_community = false;
+  call_count = community_calls.size();
+  community_click(community_sync);
+  community_click(community_unpublish);
+  assert(community_calls.size() == call_count);
+  allow_community = true;
+  community_click(community_sync);
+  assert(community_calls.back().at("operation") == "candidate_skin_sync");
+  community_click(community_unpublish);
+  assert(SendMessageW(GetDlgItem(body, community_list), LB_GETCOUNT, 0, 0) == 0);
+  assert(std::filesystem::is_directory(skins_root / L"synthetic-light"));
+  community_unauthorized = true;
+  community_click(community_reload);
+  assert(IsWindowEnabled(GetDlgItem(body, community_login)));
+  community_unauthorized = false;
+  malformed_community = true;
+  community_click(community_reload);
+  assert(SendMessageW(GetDlgItem(body, community_list), LB_GETCOUNT, 0, 0) == 0);
+  malformed_community = false;
+  community_click(community_reload);
+  assert(SendMessageW(GetDlgItem(body, community_list), LB_GETCOUNT, 0, 0) == 1);
+  assert(SendMessageW(GetDlgItem(body, community_publish_skin), CB_GETCOUNT, 0, 0) == 2);
+  // 未确认权利或名称无效时不请求发布；失败后重试沿用同一 UUID。
+  call_count = community_calls.size();
+  community_click(community_publish);
+  assert(community_calls.size() == call_count);
+  SetWindowTextW(GetDlgItem(body, community_publish_name), L"合成发布名称");
+  SetWindowTextW(GetDlgItem(body, community_publish_description), L"合成发布说明");
+  SendMessageW(GetDlgItem(body, community_publish_agree), BM_SETCHECK, BST_CHECKED, 0);
+  allow_community = false;
+  community_click(community_publish);
+  assert(community_calls.size() == call_count);
+  allow_community = true;
+  community_click(community_publish);
+  assert(community_calls.back().at("operation") == "candidate_skin_publish");
+  const auto publication_id = community_calls.back().at("id");
+  community_click(community_publish);
+  assert(community_calls.back().at("id") == publication_id);
+  SetWindowTextW(GetDlgItem(body, community_publish_license), L"CC0-1.0");
+  community_click(community_license_save);
+  assert(community_calls.back().at("operation") == "candidate_skin_add_license");
+  const auto publication_skin = community_calls.back().at("skin_id").get<std::string>();
+  const auto local_package = [&] {
+    return theme_data::value(theme_data::call(msime_client_skin_package, {{"directory", skins_root.u8string()}, {"id", publication_skin}})).value();
+  };
+  assert(local_package().at("license").at("assets") == "CC0-1.0");
+  preview_selection = true;
+  cancel_selection = true;
+  call_count = community_calls.size();
+  community_click(community_preview_add);
+  assert(community_calls.size() == call_count);
+  cancel_selection = false;
+  community_click(community_preview_add);
+  assert(community_calls.back().at("image") == preview_base64);
+  const auto preview_path = local_package().at("preview");
+  assert(preview_path.is_string());
+  assert(std::filesystem::is_regular_file(skins_root / std::filesystem::u8path(publication_skin) / std::filesystem::u8path(preview_path.get<std::string>())));
+  preview_selection = false;
+  community_click(community_pack_check);
+  assert(community_calls.back().at("operation") == "candidate_skin_pack_preview");
+  assert(control_text::read(GetDlgItem(body, community_notice))->find("检查通过") != std::string::npos);
+  const auto signed_out_sync = theme_data::call(msime_client_community,
+      {{"directory", (temporary.path / L"synthetic-account").u8string()}, {"skins_directory", skins_root.u8string()},
+       {"action", {{"operation", "candidate_skin_sync"}}}});
+  assert(signed_out_sync.at("ok") == false && signed_out_sync.at("error") == "community_unauthorized");
+  assert(store.load().snapshot->revision() == community_revision);
+  assert(store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  community_click(community_local);
+  assert(SendMessageW(GetDlgItem(host, page_selector), CB_GETCURSEL, 0, 0) == 8);
   select_page(0);
   TabCtrl_SetCurSel(tabs, 0);
   SendMessageW(host, WM_NOTIFY, page_tabs, reinterpret_cast<LPARAM>(&notification));

@@ -5,6 +5,7 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <string>
 
 namespace msime::settings::win7 {
 
@@ -56,6 +57,15 @@ enum ControlId {
   theme_preview, theme_skins, theme_skin_use, theme_skin_stop, theme_skin_refresh,
   theme_skin_import, theme_skin_directory, theme_skin_notice, theme_slot_summary,
   theme_color_first = 1640,
+  community_search = 1700, community_filter, community_mine, community_reload,
+  community_list, community_more, community_notice, community_detail_text, community_detail,
+  community_install, community_local, community_login, community_stars, community_rate,
+  community_visibility, community_visibility_save, community_category, community_category_save,
+  community_unpublish, community_sync, community_report_reason, community_report_detail,
+  community_report, community_preview_image, community_preview_load, community_publish_skin,
+  community_publish_name, community_publish_description, community_publish_visibility,
+  community_publish_category, community_publish_license, community_license_save,
+  community_preview_add, community_pack_check, community_publish_agree, community_publish,
 };
 
 class SettingsWindow {
@@ -64,7 +74,10 @@ public:
   using FilePicker = std::function<std::optional<std::filesystem::path>(HWND, bool)>;
   using Confirmation = std::function<bool(HWND, const wchar_t*, const wchar_t*)>;
   using FolderPicker = std::function<std::optional<std::filesystem::path>(HWND)>;
-  explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {}, FolderPicker folder_picker = {});
+  // 可注入社区传输以验证真实窗口与 worker；默认仍调用共享 Rust 服务。
+  using CommunityTransport = std::function<std::string(const std::string&)>;
+  explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {}, FolderPicker folder_picker = {},
+      CommunityTransport community_transport = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;
