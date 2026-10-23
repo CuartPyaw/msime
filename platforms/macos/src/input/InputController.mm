@@ -90,9 +90,12 @@
 #import <IOKit/hidsystem/IOHIDLib.h>
 #import <IOKit/hidsystem/IOLLEvent.h>
 #import <IOKit/hidsystem/IOHIDParameter.h>
+#import <IOKit/hid/IOHIDKeys.h>
+#import <IOKit/hid/IOHIDManager.h>
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 // Implemented by the Swift backend dylib loaded by input_method_main.mm. The account provider
 // keeps credentials and transport on the Swift side; this process receives only bounded glosses.
@@ -1028,8 +1031,121 @@ static bool MSIMEReleaseSystemCapsLock() {
 }
 // 在原生查询边界替换合成状态，回归必须经过生产的实体按住判定。
 static CGEventFlags (*MSIMEPhysicalModifierFlagsState)(CGEventSourceStateID) = &CGEventSourceFlagsState;
+// 外接键盘有时不把实体按住状态送进 Quartz 的 stateless 位；先从 HID 输入值读取，失败再退回系统位。
+static std::unordered_map<IOHIDDeviceRef, bool> MSIMECapsLockHIDDevices;
+static std::atomic<bool> MSIMECapsLockHIDStateKnown{false};
+static std::atomic<bool> MSIMECapsLockHIDStateHeld{false};
+
+static bool MSIMECapsLockHIDUsage(uint32_t usage) {
+    return usage == kHIDUsage_KeyboardCapsLock || usage == kHIDUsage_KeyboardLockingCapsLock;
+}
+
+static void MSIMERecomputeCapsLockHIDState() {
+    bool held = false;
+    for (const auto &entry : MSIMECapsLockHIDDevices) held = held || entry.second;
+    MSIMECapsLockHIDStateKnown.store(!MSIMECapsLockHIDDevices.empty(), std::memory_order_release);
+    MSIMECapsLockHIDStateHeld.store(held, std::memory_order_release);
+}
+
+static void MSIMERecordCapsLockHIDValue(IOHIDValueRef value) {
+    if (!value) return;
+    IOHIDElementRef element = IOHIDValueGetElement(value);
+    if (!element || IOHIDElementGetUsagePage(element) != kHIDPage_KeyboardOrKeypad ||
+        !MSIMECapsLockHIDUsage(IOHIDElementGetUsage(element))) return;
+    IOHIDDeviceRef device = IOHIDElementGetDevice(element);
+    if (!device) return;
+    MSIMECapsLockHIDDevices[device] = IOHIDValueGetIntegerValue(value) != 0;
+    MSIMERecomputeCapsLockHIDState();
+}
+
+static void MSIMECapsLockHIDInputValue(void *, IOReturn result, void *, IOHIDValueRef value) {
+    if (result == kIOReturnSuccess) MSIMERecordCapsLockHIDValue(value);
+}
+
+static void MSIMECapsLockHIDDeviceRemoved(void *, IOReturn, void *, IOHIDDeviceRef device) {
+    if (!device) return;
+    MSIMECapsLockHIDDevices.erase(device);
+    MSIMERecomputeCapsLockHIDState();
+}
+
+static void MSIMECapsLockHIDDeviceMatched(void *, IOReturn result, void *, IOHIDDeviceRef device) {
+    if (result != kIOReturnSuccess || !device) return;
+    CFArrayRef elements = IOHIDDeviceCopyMatchingElements(device, nullptr, kIOHIDOptionsTypeNone);
+    if (!elements) return;
+    bool found = false;
+    bool held = false;
+    for (CFIndex index = 0; index < CFArrayGetCount(elements); ++index) {
+        IOHIDElementRef element = static_cast<IOHIDElementRef>(const_cast<void *>(CFArrayGetValueAtIndex(elements, index)));
+        if (!element || IOHIDElementGetUsagePage(element) != kHIDPage_KeyboardOrKeypad ||
+            !MSIMECapsLockHIDUsage(IOHIDElementGetUsage(element))) continue;
+        IOHIDValueRef value = nullptr;
+        if (IOHIDDeviceGetValue(device, element, &value) == kIOReturnSuccess && value) {
+            found = true;
+            held = held || IOHIDValueGetIntegerValue(value) != 0;
+        }
+    }
+    CFRelease(elements);
+    if (found) {
+        MSIMECapsLockHIDDevices[device] = held;
+        MSIMERecomputeCapsLockHIDState();
+    }
+}
+
+static CFMutableDictionaryRef MSIMECapsLockHIDMatching(uint32_t usage) {
+    CFMutableDictionaryRef matching = CFDictionaryCreateMutable(kCFAllocatorDefault, 2,
+                                                                  &kCFTypeDictionaryKeyCallBacks,
+                                                                  &kCFTypeDictionaryValueCallBacks);
+    int32_t pageValue = kHIDPage_KeyboardOrKeypad;
+    int32_t usageValue = static_cast<int32_t>(usage);
+    CFNumberRef page = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &pageValue);
+    CFNumberRef usageNumber = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &usageValue);
+    CFDictionarySetValue(matching, CFSTR(kIOHIDElementUsagePageKey), page);
+    CFDictionarySetValue(matching, CFSTR(kIOHIDElementUsageKey), usageNumber);
+    CFRelease(page);
+    CFRelease(usageNumber);
+    return matching;
+}
+
+static void MSIMEEnsureCapsLockHIDTracking() {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        IOHIDManagerRef manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+        if (!manager) return;
+        CFMutableDictionaryRef capsLock = MSIMECapsLockHIDMatching(kHIDUsage_KeyboardCapsLock);
+        CFMutableDictionaryRef lockingCapsLock = MSIMECapsLockHIDMatching(kHIDUsage_KeyboardLockingCapsLock);
+        const void *matches[] = {capsLock, lockingCapsLock};
+        CFArrayRef matching = CFArrayCreate(kCFAllocatorDefault, matches, 2, &kCFTypeArrayCallBacks);
+        IOHIDManagerSetInputValueMatchingMultiple(manager, matching);
+        CFRelease(matching);
+        CFRelease(capsLock);
+        CFRelease(lockingCapsLock);
+        IOHIDManagerRegisterDeviceMatchingCallback(manager, &MSIMECapsLockHIDDeviceMatched, nullptr);
+        IOHIDManagerRegisterDeviceRemovalCallback(manager, &MSIMECapsLockHIDDeviceRemoved, nullptr);
+        IOHIDManagerRegisterInputValueCallback(manager, &MSIMECapsLockHIDInputValue, nullptr);
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+        if (IOHIDManagerOpen(manager, kIOHIDOptionsTypeNone) != kIOReturnSuccess) {
+            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+            CFRelease(manager);
+            return;
+        }
+    });
+}
+
+static bool MSIMEReadCapsLockHIDState(bool *known) {
+    MSIMEEnsureCapsLockHIDTracking();
+    const bool stateKnown = MSIMECapsLockHIDStateKnown.load(std::memory_order_acquire);
+    if (known) *known = stateKnown;
+    return MSIMECapsLockHIDStateHeld.load(std::memory_order_acquire);
+}
+static bool (*MSIMECapsLockHIDState)(bool *known) = &MSIMEReadCapsLockHIDState;
+
 // 键码 0x39 的查询跟随大写锁定，松手后仍可能为真；只读 stateless 位区分实体按住与逻辑锁定。
 static bool MSIMECapsLockPhysicallyHeld() {
+    bool hidStateKnown = false;
+    if (MSIMECapsLockHIDState && MSIMECapsLockHIDState(&hidStateKnown) && hidStateKnown) return true;
+    if (hidStateKnown) return false;
     return (MSIMEPhysicalModifierFlagsState(kCGEventSourceStateHIDSystemState) & NX_ALPHASHIFT_STATELESS_MASK) != 0;
 }
 // 和 NSEvent.timestamp 同一个开机后时钟，单位毫秒。

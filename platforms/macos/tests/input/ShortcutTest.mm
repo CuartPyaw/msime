@@ -6078,9 +6078,15 @@ static void TestInputModeStatusItem() {
 // 单按 Caps Lock 切换中英文。合成的时钟、按键状态和撤回大写锁定：单测不能动跑测试那台机器的真实大写锁定。
 static std::int64_t gCapsNow = 0;
 static bool gCapsHeld = false;
+static bool gCapsHIDKnown = false;
+static bool gCapsHIDHeld = false;
 static bool gCapsReleaseWorks = true;
 static NSUInteger gCapsReleases = 0;
 static std::int64_t SyntheticCapsNow() { return gCapsNow; }
+static bool SyntheticCapsHID(bool *known) {
+    if (known) *known = gCapsHIDKnown;
+    return gCapsHIDHeld;
+}
 static CGEventFlags SyntheticCapsFlags(CGEventSourceStateID state) {
     assert(state == kCGEventSourceStateHIDSystemState);
     // 松手后逻辑锁定位仍为真，只有实体按住位清除；不能把锁定当成长按。
@@ -6090,13 +6096,21 @@ static bool SyntheticCapsRelease() { ++gCapsReleases; return gCapsReleaseWorks; 
 
 static void TestCapsLockTap() {
     const auto realRelease = MSIMECapsLockRelease;
+    const auto realHID = MSIMECapsLockHIDState;
     const auto realFlags = MSIMEPhysicalModifierFlagsState;
     const auto realNow = MSIMECapsLockNow;
     MSIMECapsLockRelease = &SyntheticCapsRelease;
+    MSIMECapsLockHIDState = &SyntheticCapsHID;
     MSIMEPhysicalModifierFlagsState = &SyntheticCapsFlags;
     MSIMECapsLockNow = &SyntheticCapsNow;
     gCapsReleases = 0;
     gCapsReleaseWorks = true;
+    gCapsHIDKnown = true;
+    gCapsHIDHeld = true;
+    assert(MSIMECapsLockPhysicallyHeld());
+    gCapsHIDHeld = false;
+    assert(!MSIMECapsLockPhysicallyHeld());
+    gCapsHIDKnown = false;
 
     NSString *suite = [@"msime.caps-lock-tap." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
@@ -6272,6 +6286,7 @@ static void TestCapsLockTap() {
     assert(session.capsLock && !prefs.englishMode && gCapsReleases == releasesBefore);
 
     MSIMECapsLockRelease = realRelease;
+    MSIMECapsLockHIDState = realHID;
     MSIMEPhysicalModifierFlagsState = realFlags;
     MSIMECapsLockNow = realNow;
     MSIMERemoveTestPreferenceSuite(defaults, suite);
