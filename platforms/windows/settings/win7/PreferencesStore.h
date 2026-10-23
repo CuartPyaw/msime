@@ -48,11 +48,18 @@ public:
     for (const auto& change : changes) {
       if (change.path.empty()) return {Outcome::invalid_change, std::nullopt};
       Json* parent = &next.at("preferences");
-      // 修改明确存在的字段，不能因拼错路径而补造一棵配置树。
-      for (const auto& segment : change.path) {
+      // 仅放行共享格式明确省略的布尔叶字段；未知路径和缺少中间对象仍不能补造。
+      const bool optional_boolean = change.value.is_boolean() &&
+          (change.path == std::vector<std::string>{"navigation", "mouse_wheel"} ||
+           change.path == std::vector<std::string>{"backspace_reverts_selection"});
+      for (size_t index = 0; index < change.path.size(); ++index) {
+        const auto& segment = change.path[index];
         if (!parent->is_object()) return {Outcome::invalid_change, std::nullopt};
-        const auto child = parent->find(segment);
-        if (child == parent->end()) return {Outcome::invalid_change, std::nullopt};
+        auto child = parent->find(segment);
+        if (child == parent->end()) {
+          if (!optional_boolean || index + 1 != change.path.size()) return {Outcome::invalid_change, std::nullopt};
+          child = parent->emplace(segment, change.value).first;
+        }
         parent = &*child;
       }
       *parent = change.value;
