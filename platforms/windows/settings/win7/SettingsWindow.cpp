@@ -5,6 +5,7 @@
 #include "AdvancedInputForm.h"
 #include "SchemeForm.h"
 #include "GlossForm.h"
+#include "TranslationForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -38,15 +39,15 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss };
+enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
     {Surface::candidates, L"候选与联想"}, {Surface::output, L"输出设置"},
     {Surface::advanced, L"高级选项"},
 }};
-constexpr std::array<std::pair<Surface, const wchar_t*>, 2> expression_pages{{
-    {Surface::punctuation, L"标点设置"}, {Surface::gloss, L"候选释义"},
+constexpr std::array<std::pair<Surface, const wchar_t*>, 3> expression_pages{{
+    {Surface::punctuation, L"标点设置"}, {Surface::gloss, L"候选释义"}, {Surface::translation, L"翻译服务"},
 }};
 struct ToolbarCheck { int id; const char* field; const wchar_t* label; };
 constexpr std::array<ToolbarCheck, 11> toolbar_checks{{
@@ -228,12 +229,13 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
   std::filesystem::path file{};
   std::string text;
+  std::optional<Json> credential;
 };
 
 struct Completion {
@@ -243,6 +245,8 @@ struct Completion {
   std::filesystem::path directory;
   HelpcodeSources helpcodes;
   std::optional<Json> lookup;
+  std::optional<Json> credential_request;
+  std::optional<Json> credential_response;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
@@ -276,6 +280,7 @@ private:
     notice_.clear();
     folder_.clear();
     lookup_.reset();
+    credential_response_.reset();
     if (!store_) {
       directory_ = preferences_directory();
       if (directory_.empty()) return {Outcome::storage, std::nullopt};
@@ -284,6 +289,13 @@ private:
     if (job.reload || job.action == Job::Action::helpcode_sources) helpcodes_ = helpcode_sources(directory_);
     Result result;
     if (job.action == Job::Action::helpcode_sources) return {Outcome::loaded, snapshot_};
+    if (job.action == Job::Action::credential_test && job.credential) {
+      const auto request = job.credential->dump();
+      auto owned = msime::host_api::own_string(msime_client_test_api_credential(
+          reinterpret_cast<const uint8_t*>(request.data()), request.size()));
+      credential_response_ = owned ? Json::parse(owned.get(), nullptr, false) : Json();
+      return {Outcome::loaded, snapshot_};
+    }
     if (job.action == Job::Action::wubi_lookup) {
       const auto options = runtime_options();
       if (!options.is_object()) lookup_ = Json{{"ok", false}};
@@ -350,7 +362,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_)};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_)};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -376,6 +388,7 @@ private:
   std::wstring notice_;
   HelpcodeSources helpcodes_;
   std::optional<Json> lookup_;
+  std::optional<Json> credential_response_;
   std::thread thread_;
 };
 
@@ -428,6 +441,7 @@ struct SettingsWindow::State {
   AdvancedInputForm advanced_form;
   SchemeForm scheme_form;
   GlossForm gloss_form;
+  TranslationForm translation_form;
   Confirmation confirmation;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
@@ -514,6 +528,10 @@ struct SettingsWindow::State {
     gloss_height = gloss_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                             int id, int top, int height) {
       return surface_row(Surface::gloss, type, text, style, id, top, height);
+    });
+    translation_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+                                   int id, int top, int height) {
+      return surface_row(Surface::translation, type, text, style, id, top, height);
     });
     enable(false);
     layout();
@@ -783,6 +801,7 @@ struct SettingsWindow::State {
     advanced_form.enable(enabled);
     scheme_form.enable(enabled);
     gloss_form.enable(enabled);
+    translation_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -818,7 +837,7 @@ struct SettingsWindow::State {
     const int total = surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
-        surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
+        surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
         surface == Surface::mode ? mode_height : surface == Surface::scheme ? scheme_form.height() :
         surface == Surface::advanced ? advanced_height : content_height;
     info.nMax = reference ? 0 : dip(total) - 1;
@@ -830,7 +849,8 @@ struct SettingsWindow::State {
     scroll = info.nPos;
     GetClientRect(body, &client);
     for (const auto& item : items) {
-      const auto scheme_top = item.surface == Surface::scheme ? scheme_form.position(item.handle) : std::optional<int>(item.top);
+      const auto scheme_top = item.surface == Surface::scheme ? scheme_form.position(item.handle) :
+          item.surface == Surface::translation ? translation_form.position(item.handle) : std::optional<int>(item.top);
       ShowWindow(item.handle, surface == item.surface && scheme_top ? SW_SHOW : SW_HIDE);
       if (surface != item.surface || !scheme_top) continue;
       MoveWindow(item.handle, 0, reference ? 0 : dip(*scheme_top) - scroll,
@@ -873,6 +893,7 @@ struct SettingsWindow::State {
     case Job::Action::restart: message = L"正在请求重启…"; break;
     case Job::Action::data_directory:
     case Job::Action::logs_directory: message = L"正在打开目录…"; break;
+    case Job::Action::credential_test: message = L"正在测试服务配置…"; break;
     case Job::Action::wubi_lookup: message = L"正在查询编码…"; break;
     case Job::Action::helpcode_sources: message = L"正在读取辅助码方案…"; break;
     case Job::Action::preferences: break;
@@ -953,6 +974,7 @@ struct SettingsWindow::State {
     if (mixed.contains("first_page_count") && !mixed.at("first_page_count").is_number_integer()) return false;
     if (mixed.value("first_page_count", 1) < 1 || mixed.value("first_page_count", 1) > 3) return false;
     if (!CloudCandidateForm::valid(preferences.at("cloud_candidate_provider"))) return false;
+    if (!TranslationForm::valid(preferences)) return false;
     if (!GlossForm::valid(preferences)) return false;
     if (!InputModeForm::valid(preferences)) return false;
     if (!AdvancedInputForm::valid(preferences) || !SchemeForm::valid(preferences)) return false;
@@ -1106,6 +1128,7 @@ struct SettingsWindow::State {
       advanced_form.refresh(snapshot->preferences(), completed->helpcodes);
       scheme_form.refresh(snapshot->preferences());
       gloss_form.refresh(snapshot->preferences());
+      translation_form.refresh(snapshot->preferences());
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1115,6 +1138,8 @@ struct SettingsWindow::State {
     SetWindowTextW(GetDlgItem(body, data_directory_text), completed->directory.empty() ?
         L"未找到数据目录" : completed->directory.c_str());
     if (completed->lookup) scheme_form.lookup_result(*completed->lookup);
+    if (completed->credential_request && completed->credential_response)
+      translation_form.tested(*completed->credential_request, *completed->credential_response);
     enable(snapshot.has_value());
     layout_body();
     const wchar_t* message = L"读取设置失败，请重新读取后重试。";
@@ -1181,6 +1206,22 @@ struct SettingsWindow::State {
       return;
     }
     if (!snapshot) return;
+    auto translation_change = translation_form.command(command);
+    if (translation_change.handled) {
+      if (translation_change.test) {
+        Job job;
+        job.reload = false;
+        job.action = Job::Action::credential_test;
+        job.credential = std::move(translation_change.test);
+        submit(std::move(job));
+      } else if (!translation_change.changes.empty()) {
+        Job job;
+        job.reload = false;
+        job.changes = std::move(translation_change.changes);
+        submit(std::move(job));
+      }
+      return;
+    }
     if (gloss_form.handles(id)) {
       auto changes = gloss_form.command(command);
       if (!changes.empty()) {
