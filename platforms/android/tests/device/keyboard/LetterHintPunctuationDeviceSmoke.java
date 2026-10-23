@@ -342,13 +342,17 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
 
     /** 英文长按保持同一次触摸，拖到符号后松手提交；另验取消和逗号长按的 ASCII 句号。 */
     private void runEnglishSymbolDragChecks() throws Exception {
+        stage = "English drag prepare input method";
         shellDiscard("am start -W -n app.msime.android/app.msime.android.home.HomeActivity");
         restartIme();
+        stage = "English drag open editor";
         openSyntheticEditor();
         tap(field(PLAIN));
+        stage = "English drag await letter keyboard";
         await(key("q"));
         boolean restoreChinese = findAcrossWindows(described("切换到英文输入")) != null;
         try {
+            stage = "English drag enter English mode";
             if (restoreChinese) tap(described("切换到英文输入"));
             await(described("切换到所选输入方案"));
             englishSymbolDrag("a", "@", false);
