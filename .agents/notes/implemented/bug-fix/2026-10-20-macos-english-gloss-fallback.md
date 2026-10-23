@@ -4,11 +4,11 @@ Status: implemented
 
 ## Problem
 
-macOS 发布包把 `character-glosses` 和 `word-glosses` 放在外层 `MSIME.app` 的 `Contents/Resources` 中，但安装输入法时实际运行的是独立的 InputMethodKit bundle。输入法进程的 `EngineResources` 可能还来自旧配置目录，独立 bundle 又没有这两张表，因此 `酸奶` 这类不在小型 `msime-english.db` 里的中文候选没有英文释义。音标表也随 bundle 分发；旧配置仍指向用户目录时，若读音请求没有补充资源目录，开启 `candidate_pronunciation` 仍查不到音标（#9407）。
+macOS 发布包把 `character-glosses` 和 `word-glosses` 放在外层 `MSIME.app` 的 `Contents/Resources` 中，但安装输入法时实际运行的是独立的 InputMethodKit bundle。输入法进程的 `EngineResources` 可能还来自旧配置目录，独立 bundle 又没有这两张表，因此 `酸奶` 这类不在小型 `msime-english.db` 里的中文候选没有英文释义。音标表原先只在外层设置应用，独立输入法的打包循环漏了 `pronunciations`；旧配置仍指向用户目录时，读音请求也没有补充资源目录，开启 `candidate_pronunciation` 仍查不到音标（#9407）。
 
 ## Decision
 
-英文释义表同时复制到独立输入法 bundle 的 `Contents/Resources`。`InputController` 将该目录作为只读的 `supplementary_resources` 传给 Host API。Host API 查表时先使用 `EngineResources` 旁边的表；该表缺失时，再使用显式补充目录中的同名表。补充目录只接受绝对路径，并保持用户词典覆盖发布词典的现有优先级。
+两张英文释义表与 `pronunciations` 音标表同时复制到独立输入法 bundle 的 `Contents/Resources`；最终包检查确认内嵌音标数据库和 NOTICE 都存在。`InputController` 将该目录作为只读的 `supplementary_resources` 传给 Host API。Host API 查表时先使用 `EngineResources` 旁边的表；该表缺失时，再使用显式补充目录中的同名表。补充目录只接受绝对路径，并保持用户词典覆盖发布词典的现有优先级。
 
 补充目录通过候选释义和读音请求的 JSON 字段传递，不改变已有调用方的必填字段；字段缺失时行为保持不变。读音请求优先使用活动资源旁的 `pronunciations/en-phonetic.db`，只在文件缺失时回退到 `<supplementary_resources>/pronunciations/en-phonetic.db`；显式路径最多 4096 字节，空路径、相对路径和过长路径拒绝。两处都缺表时仍返回空读音，不改写配置或复制数据库。读取继续经过原有 SQLite 文件校验。打包检查同时确认外层设置应用和嵌入的输入法 bundle 都带有对应的 NOTICE 文件。
 
@@ -20,7 +20,7 @@ macOS 发布包把 `character-glosses` 和 `word-glosses` 放在外层 `MSIME.ap
 
 ## Consequences
 
-输入法 bundle 会多携带两张数据库及其 NOTICE，发布包体积略增，签名范围也包含新增资源。旧安装无需重新准备词库即可通过 bundle 资源获得 `酸奶 → yogurt` 等长尾释义；资源目录旁已有新表时仍优先使用它。Host API 的回退作用于英文候选释义和英文音标，逐词拆解等旧调用继续只读取其原有目录。
+输入法 bundle 会多携带两张释义数据库、一张音标数据库及其 NOTICE，发布包体积略增，签名范围也包含新增资源。旧安装无需重新准备词库即可通过 bundle 资源获得 `酸奶 → yogurt` 等长尾释义；资源目录旁已有新表时仍优先使用它。Host API 的回退作用于英文候选释义和英文音标，逐词拆解等旧调用继续只读取其原有目录。
 
 ## Verification
 
@@ -33,3 +33,5 @@ macOS 发布包把 `character-glosses` 和 `word-glosses` 放在外层 `MSIME.ap
 - 带固定词汇书的本分支 APK 在 API 28 安装成功，前三项设备冒烟通过，组字重启用例失败；单独重跑越过该断言，随后在放大拼写的长输入夹具处失败。两轮均不能记为完整冒烟通过，也尚未确定是基线问题还是回归。实际 macOS 输入法候选行尚未装机验收。
 
 - Android 完整冒烟尚未通过：修复版首次停在组字重启，单独重跑通过原失败点后停在长拼写夹具。随后从本分支原始基线 `70debe5b77da269d5c00b740328ae63bb9c66762` 独立构建 APK，完整冒烟通过组字重启及长拼写等前 18 项，停在剪贴板导出选择器的合成控件检查（`issue-9407-api28-exact-baseline-smoke.log`）。失败位置不同，不能据此将修复版失败全部归为基线；已通过的 2035 项设备核心测试和 4 项 macOS 原生测试也不代表完整宿主验收。
+
+- #9407 打包回归提取并执行真实的补充表复制循环，以合成数据库和 NOTICE 验证独立输入法包；未补 `pronunciations` 时明确失败，修复后通过。此检查不替代签名完整发布包或已安装输入法验收。
