@@ -2229,7 +2229,10 @@ static NSString *SkinFilesIdentity(const std::vector<std::string> &paths) {
         _applicationInputModeRulesAwaitPublication = PublishableInputModeRules(legacy).count > 0;
     }
     id spacing = preferences[@"cross_commit_spacing"];
-    _sharedCrossCommitSpacing = [spacing isKindOfClass:NSDictionary.class] ? [spacing copy] : nil;
+    id excluded = preferences[@"cross_commit_spacing_excluded_apps"];
+    _sharedCrossCommitSpacing = @{
+        @"enabled":@([spacing isKindOfClass:NSNumber.class] && [spacing boolValue]),
+        @"excluded_apps":[excluded isKindOfClass:NSArray.class] ? [excluded copy] : @[]};
     // vim_mode_apps 是字符串数组，标识认法与应用例外相同；文档缺这个键就是空名单，没有要迁移的旧键。
     id vimApps = preferences[@"vim_mode_apps"];
     _sharedVimModeApps = [vimApps isKindOfClass:NSArray.class] ? ValidVimModeApps(vimApps) : nil;

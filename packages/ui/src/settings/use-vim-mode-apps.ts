@@ -13,9 +13,9 @@ import {
 import { useAsyncGeneration } from "./use-async-generation";
 
 export interface UseVimModeAppsOptions {
-  value?: string[];
-  /** 复用名单编辑时用于错误提示的名称。 */
+  /** 复用应用名单交互时，在选择错误中显示的名单名称。 */
   listName?: string;
+  value?: string[];
   /** Windows 使用进程基名，macOS 使用 Bundle ID；决定规范化与提示。 */
   windows: boolean;
   /** 宿主的选择对话框；取消时返回 null，缺省时由调用方提供手填输入。 */
@@ -112,7 +112,7 @@ export function useVimModeApps(options: UseVimModeAppsOptions): VimModeAppsState
         {
           formatError: (error) =>
             errorCode(error) === "not_application"
-              ? `所选项目不是应用程序，无法加入${latest.current.listName ?? "Vim 模式名单"}。`
+              ? `所选项目不是应用程序，无法加入${latest.current.listName ?? " Vim 模式名单"}。`
               : "无法打开选择应用的对话框，请稍后再试。",
         },
       );

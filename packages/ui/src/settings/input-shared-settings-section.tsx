@@ -57,11 +57,8 @@ export interface InputSharedSettingsSectionProps {
   paging?: ReactNode;
   /** 「输出」组直接显示的附加行（全角输入的起始状态）。 */
   outputExtra?: ReactNode;
-  /** macOS 提供跨次空格开关和应用排除。 */
-  crossCommitSpacingApps?: Pick<
-    import("./chinese-english-spacing-section").ChineseEnglishSpacingSectionProps,
-    "pickApplication" | "applicationNames"
-  >;
+  /** 已接入跨次空格的宿主提供独立开关和应用排除名单。 */
+  crossCommitSpacing?: ReactNode;
   beforeFrequency?: ReactNode;
   afterFrequency?: ReactNode;
   /** 鸿蒙手机的「输入」页只把主要分组留在视野内：这里的每个分组都放进末尾「更多」分组的同一个「更多选项」折叠中，「中文输出」单选不放，因为该页以「中文字符集」提供它。 */
@@ -94,7 +91,7 @@ export function InputSharedSettingsSection({
   modeExtra,
   paging,
   outputExtra,
-  crossCommitSpacingApps,
+  crossCommitSpacing,
   beforeFrequency,
   afterFrequency,
   foldIntoMore = false,
@@ -268,15 +265,9 @@ export function InputSharedSettingsSection({
           {!foldIntoMore && traditionalOutputRow}
           <ChineseEnglishSpacingSection
             value={preferences.chinese_english_spacing}
-            crossCommit={preferences.cross_commit_spacing}
-            onCrossCommitChange={
-              crossCommitSpacingApps
-                ? (cross_commit_spacing) => onPreferencesChange({ cross_commit_spacing })
-                : undefined
-            }
-            {...crossCommitSpacingApps}
             onChange={(chinese_english_spacing) => onPreferencesChange({ chinese_english_spacing })}
           />
+          {crossCommitSpacing}
           {!foldIntoMore && outputExtra}
         </GroupList>,
       )}

@@ -6090,10 +6090,10 @@ static bool SyntheticCapsRelease() { ++gCapsReleases; return gCapsReleaseWorks; 
 
 static void TestCapsLockTap() {
     const auto realRelease = MSIMECapsLockRelease;
-    const auto realFlags = MSIMECapsLockFlagsState;
+    const auto realFlags = MSIMEPhysicalModifierFlagsState;
     const auto realNow = MSIMECapsLockNow;
     MSIMECapsLockRelease = &SyntheticCapsRelease;
-    MSIMECapsLockFlagsState = &SyntheticCapsFlags;
+    MSIMEPhysicalModifierFlagsState = &SyntheticCapsFlags;
     MSIMECapsLockNow = &SyntheticCapsNow;
     gCapsReleases = 0;
     gCapsReleaseWorks = true;
@@ -6272,7 +6272,7 @@ static void TestCapsLockTap() {
     assert(session.capsLock && !prefs.englishMode && gCapsReleases == releasesBefore);
 
     MSIMECapsLockRelease = realRelease;
-    MSIMECapsLockFlagsState = realFlags;
+    MSIMEPhysicalModifierFlagsState = realFlags;
     MSIMECapsLockNow = realNow;
     MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
@@ -11722,7 +11722,7 @@ static void TestCrossCommitSpacingReentrancy() {
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
     MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
     [prefs activateInputModeForApplication:@"com.example.Writer"];
-    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@{@"enabled":@YES, @"excluded_apps":@[]}}];
+    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@YES, @"cross_commit_spacing_excluded_apps":@[]}];
     prefs.inputScheme = @"quanpin";
     prefs.englishMode = YES;
     prefs.fullWidthInput = NO;
@@ -11802,7 +11802,7 @@ static void TestCrossCommitSpacingReentrancy() {
     client.duringContextRead = ^{ [prefs applySharedInputPreferences:@{}]; };
     [controller apply:@{@"commit":@"写", @"commit_context":@{@"scheme":@0, @"local_mode":@"none"}, @"view":idleAfterCommit}];
     assert([client.document isEqual:@"Rust写"]);
-    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@{@"enabled":@YES, @"excluded_apps":@[]}}];
+    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@YES, @"cross_commit_spacing_excluded_apps":@[]}];
     // 安全或焦点变化只取消格式化，已经落地的原文保留。
     client.document = @"Rust";
     client.selection = NSMakeRange(4, 0);
@@ -11843,7 +11843,7 @@ static void TestCrossCommitSpacingInTextView() {
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
     MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
     [prefs activateInputModeForApplication:@"com.example.Writer"];
-    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@{@"enabled":@YES, @"excluded_apps":@[]}}];
+    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@YES, @"cross_commit_spacing_excluded_apps":@[]}];
     prefs.inputScheme = @"quanpin";
     prefs.englishMode = YES;
     prefs.fullWidthInput = NO;
@@ -11874,7 +11874,7 @@ static void TestCrossCommitSpacing() {
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
     MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
     [prefs activateInputModeForApplication:@"com.example.Writer"];
-    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@{@"enabled":@YES, @"excluded_apps":@[]}}];
+    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@YES, @"cross_commit_spacing_excluded_apps":@[]}];
     prefs.englishMode = YES;
     prefs.fullWidthInput = NO;
     ApplicationShortcutClient *client = [ApplicationShortcutClient new];
@@ -11897,7 +11897,7 @@ static void TestCrossCommitSpacing() {
     assert([client.document isEqual:@"用 Rust 写"]);
     [controller apply:@{@"commit":@"Rust", @"commit_context":@{@"scheme":@0, @"local_mode":@"temporary_english"}, @"view":idle}];
     assert([client.document isEqual:@"用 Rust 写 Rust"]);
-    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@{@"enabled":@YES, @"excluded_apps":@[@"COM.EXAMPLE.WRITER"]}}];
+    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@YES, @"cross_commit_spacing_excluded_apps":@[@"COM.EXAMPLE.WRITER"]}];
     NSUInteger reads = client.documentReads;
     [controller apply:@{@"commit":@"字", @"commit_context":@{@"scheme":@0, @"local_mode":@"none"}, @"view":idle}];
     assert([client.document hasSuffix:@"Rust字"] && client.documentReads == reads);
@@ -11905,7 +11905,7 @@ static void TestCrossCommitSpacing() {
     assert(![controller handleEvent:LayoutKey(15, @"R", NSEventModifierFlagShift) client:client]);
     assert(client.documentReads == reads);
     prefs.englishMode = NO;
-    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@{@"enabled":@YES, @"excluded_apps":@[]}}];
+    [prefs applySharedInputPreferences:@{@"cross_commit_spacing":@YES, @"cross_commit_spacing_excluded_apps":@[]}];
     for (NSString *mode in @[@"url", @"date_time", @"calculator", @"temporary_japanese"]) {
         reads = client.documentReads;
         [controller apply:@{@"commit":@"A", @"commit_context":@{@"scheme":@0, @"local_mode":mode}, @"view":idle}];

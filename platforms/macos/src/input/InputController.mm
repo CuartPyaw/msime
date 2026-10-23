@@ -1027,10 +1027,10 @@ static bool MSIMEReleaseSystemCapsLock() {
     return released;
 }
 // 在原生查询边界替换合成状态，回归必须经过生产的实体按住判定。
-static CGEventFlags (*MSIMECapsLockFlagsState)(CGEventSourceStateID) = &CGEventSourceFlagsState;
+static CGEventFlags (*MSIMEPhysicalModifierFlagsState)(CGEventSourceStateID) = &CGEventSourceFlagsState;
 // 键码 0x39 的查询跟随大写锁定，松手后仍可能为真；只读 stateless 位区分实体按住与逻辑锁定。
 static bool MSIMECapsLockPhysicallyHeld() {
-    return (MSIMECapsLockFlagsState(kCGEventSourceStateHIDSystemState) & NX_ALPHASHIFT_STATELESS_MASK) != 0;
+    return (MSIMEPhysicalModifierFlagsState(kCGEventSourceStateHIDSystemState) & NX_ALPHASHIFT_STATELESS_MASK) != 0;
 }
 // 和 NSEvent.timestamp 同一个开机后时钟，单位毫秒。
 static std::int64_t MSIMEUptimeMilliseconds() {
@@ -6755,7 +6755,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [panel presentEffect:packed commit:commit caretRect:caret candidateView:card cardRect:cardRect cornerRadius:card.cornerRadius];
 }
 
-// Every key down leaves through here, so the smart punctuation shadow sees each one exactly once, after it has been handled and with what became of it. Events this host posted itself (the voice sendinput route and the smart punctuation rewrite) are skipped: whoever posted them has already recorded what they carry.
+// 每个按键按下都会从这里离开，因此智能标点影子只在按键处理完、结果确定后看到一次。宿主自己派发的事件（语音 sendinput 路径和智能标点重写）会跳过：派发者已经记录了它们携带的内容。
 - (BOOL)handleEvent:(NSEvent *)event client:(id)sender {
     ++_spacingInputSequence;
     const bool timed = msime_macos_diagnostic_enabled();
@@ -6939,13 +6939,15 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     }
     const BOOL voiceEnabled = MSIMEVoiceInputEnabled(voiceDefaults);
     if (!voiceEnabled) _voiceHoldShortcut.reset();
+    const NSEventModifierFlags physicalModifierFlags = voiceEnabled && event.type == NSEventTypeFlagsChanged
+        ? MSIMEPhysicalModifierFlagsState(kCGEventSourceStateHIDSystemState) : 0;
     const auto voiceShortcut = voiceEnabled ? _voiceHoldShortcut.observe(event, {
         [voiceDefaults boolForKey:@"MSIMEClientVoiceHotkeyRightAlt"] != NO,
         [voiceDefaults boolForKey:@"MSIMEClientVoiceHotkeyCtrlCommand"] != NO,
         [voiceDefaults boolForKey:@"MSIMEClientVoiceHotkeyCtrlOption"] != NO,
         // 空格锁定固定为开：空格只在按住录音组合键期间才被拦下，平常打字不受影响。设置页不再给这个开关（`voice_space_lock_switch`），存下的 false 也不再读。
         true
-    }, _voiceService.active) : MSIMEVoiceHoldShortcut::Result{};
+    }, _voiceService.active, physicalModifierFlags) : MSIMEVoiceHoldShortcut::Result{};
     if (voiceShortcut.consumed || voiceShortcut.action != MSIMEVoiceHoldShortcut::Action::None) _modifierTap.reset();
     // MSIME-Windows shows the overlay's cancel and confirm buttons once the hold is locked (ControlCommand::Lock).
     if (voiceShortcut.consumed && _voiceHoldShortcut.locked() && _voiceService.active) [_voiceOverlay setRecordingLocked:YES];
@@ -7821,7 +7823,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
             BOOL (^canFormat)(void) = ^BOOL {
                 return isCurrent() && inputSequence == self->_spacingInputSequence;
             };
-            [self formatCrossCommitText:text context:transition[@"commit_context"] client:textClient isCurrent:canFormat];
+            if (sourceOverride == msime::mac::TypingSource::Unknown)
+                [self formatCrossCommitText:text context:transition[@"commit_context"] client:textClient isCurrent:canFormat];
         });
     if (isCurrent() && openedClosing) {
         _clientHasMarkedText = YES;

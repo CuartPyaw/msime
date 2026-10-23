@@ -31,39 +31,3 @@ test("Chinese-English spacing says what it leaves alone", () => {
     ),
   ).toBeTruthy();
 });
-
-test("跨次上屏独立开关保留原有开关", () => {
-  const changed = vi.fn();
-  render(<ChineseEnglishSpacingSection onChange={vi.fn()} onCrossCommitChange={changed} />);
-  expect((screen.getByLabelText("跨次上屏中英文空格") as HTMLInputElement).checked).toBe(false);
-  fireEvent.click(screen.getByLabelText("跨次上屏中英文空格"));
-  expect(changed).toHaveBeenCalledWith({ enabled: true, excluded_apps: [] });
-  expect((screen.getByLabelText("中英文之间加空格") as HTMLInputElement).checked).toBe(false);
-});
-
-test("跨次空格排除应用可以添加和移除", () => {
-  const changed = vi.fn();
-  const { rerender } = render(
-    <ChineseEnglishSpacingSection
-      onChange={vi.fn()}
-      crossCommit={{ enabled: true, excluded_apps: [] }}
-      onCrossCommitChange={changed}
-    />,
-  );
-  fireEvent.change(screen.getByLabelText("应用 Bundle ID"), {
-    target: { value: "com.example.Editor" },
-  });
-  fireEvent.click(screen.getByRole("button", { name: "添加" }));
-  expect(changed).toHaveBeenCalledWith({ enabled: true, excluded_apps: ["com.example.Editor"] });
-  rerender(
-    <ChineseEnglishSpacingSection
-      onChange={vi.fn()}
-      crossCommit={{ enabled: true, excluded_apps: ["com.example.Editor"] }}
-      onCrossCommitChange={changed}
-    />,
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "把 com.example.Editor 从跨次空格排除名单移除" }),
-  );
-  expect(changed).toHaveBeenLastCalledWith({ enabled: true, excluded_apps: [] });
-});

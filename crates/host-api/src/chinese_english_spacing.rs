@@ -153,6 +153,15 @@ mod plan_tests {
             );
         }
         request["context"]["local_mode"] = json!("none");
+        request["context"]["plugin_row"] = json!(true);
+        assert_eq!(
+            cross_commit_plan(request.clone()).unwrap()["enabled"],
+            false
+        );
+        request["context"]
+            .as_object_mut()
+            .unwrap()
+            .remove("plugin_row");
         for field in ["secure", "full_width"] {
             request[field] = json!(true);
             assert_eq!(
@@ -190,6 +199,8 @@ pub(crate) fn cross_commit_plan(request: serde_json::Value) -> Result<serde_json
     struct Context {
         scheme: u8,
         local_mode: String,
+        #[serde(default)]
+        plugin_row: bool,
     }
     #[derive(serde::Deserialize)]
     #[serde(deny_unknown_fields)]
@@ -215,7 +226,8 @@ pub(crate) fn cross_commit_plan(request: serde_json::Value) -> Result<serde_json
         && !request.full_width
         && request.config.enabled_for_application(&request.application)
         && request.context.is_some_and(|context| {
-            SchemeType::from_u8(context.scheme).is_some_and(SchemeType::is_chinese)
+            !context.plugin_row
+                && SchemeType::from_u8(context.scheme).is_some_and(SchemeType::is_chinese)
                 && matches!(
                     context.local_mode.as_str(),
                     "none"

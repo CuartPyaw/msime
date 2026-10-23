@@ -7285,28 +7285,35 @@ fn sentence_collocation_tuning_rejects_non_finite_values() {
 }
 
 #[test]
-fn cross_commit_spacing_is_optional_and_validates_app_exclusions() {
-    let mut value = serde_json::to_value(Preferences::default()).unwrap();
-    assert!(value.get("cross_commit_spacing").is_none());
-    value["cross_commit_spacing"] =
-        serde_json::json!({"enabled": true, "excluded_apps": ["com.example.Editor"]});
-    let preferences: Preferences = serde_json::from_value(value.clone()).unwrap();
-    assert_eq!(
-        serde_json::to_value(&preferences).unwrap()["cross_commit_spacing"],
-        value["cross_commit_spacing"]
-    );
+fn cross_commit_spacing_is_independent_and_validates_excluded_apps() {
+    let mut preferences = Preferences::default();
+    let defaults = serde_json::to_value(&preferences).unwrap();
+    assert!(!preferences.cross_commit_spacing);
+    assert!(defaults.get("cross_commit_spacing").is_none());
+    assert!(defaults.get("cross_commit_spacing_excluded_apps").is_none());
+    preferences.cross_commit_spacing = true;
+    preferences.cross_commit_spacing_excluded_apps = vec!["app.example.Editor".into()];
     assert!(preferences.validate().is_ok());
-    for apps in [
-        serde_json::json!(["com.example.Editor", "COM.EXAMPLE.EDITOR"]),
-        serde_json::json!(["../Editor"]),
-        serde_json::json!([""]),
-        serde_json::json!(["a".repeat(65)]),
-        serde_json::json!((0..33)
-            .map(|i| format!("com.example.App{i}"))
-            .collect::<Vec<_>>()),
+    assert!(!preferences.chinese_english_spacing);
+    let written = serde_json::to_value(&preferences).unwrap();
+    assert_eq!(
+        serde_json::from_value::<Preferences>(written).unwrap(),
+        preferences
+    );
+    for invalid in [
+        vec!["".into()],
+        vec![" app.example.Editor".into()],
+        vec!["app/example/Editor".into()],
+        vec!["app.example.Editor".into(), "APP.EXAMPLE.EDITOR".into()],
+        vec!["x".repeat(65)],
+        (0..33)
+            .map(|index| format!("app.example.Editor{index}"))
+            .collect(),
     ] {
-        value["cross_commit_spacing"]["excluded_apps"] = apps;
-        let parsed = serde_json::from_value::<Preferences>(value.clone());
-        assert!(parsed.is_err() || parsed.unwrap().validate().is_err());
+        preferences.cross_commit_spacing_excluded_apps = invalid;
+        assert!(matches!(
+            preferences.validate(),
+            Err(PreferencesError::InvalidCrossCommitSpacingApps)
+        ));
     }
 }
