@@ -13,7 +13,7 @@ struct DpiApi {
   using ProcessContext = BOOL(WINAPI *)(DPI_AWARENESS_CONTEXT);
   using WindowContext = DPI_AWARENESS_CONTEXT(WINAPI *)(HWND);
   using Awareness = DPI_AWARENESS(WINAPI *)(DPI_AWARENESS_CONTEXT);
-  using LegacyProcess = BOOL(WINAPI *)();
+  using SystemAwareProcess = BOOL(WINAPI *)();
 
   WindowDpi query_window = nullptr;
   SystemDpi query_system = nullptr;
@@ -21,7 +21,7 @@ struct DpiApi {
   ProcessContext set_process = nullptr;
   WindowContext query_context = nullptr;
   Awareness query_awareness = nullptr;
-  LegacyProcess set_legacy_process = ::SetProcessDPIAware;
+  SystemAwareProcess set_system_aware_process = ::SetProcessDPIAware;
 
   static UINT gdi_dpi(HWND window) {
     const HDC dc = GetDC(window);
@@ -56,7 +56,7 @@ struct DpiApi {
     if (context == DPI_AWARENESS_CONTEXT_SYSTEM_AWARE ||
         context == DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE ||
         context == DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
-      return set_legacy_process();
+      return set_system_aware_process();
     SetLastError(ERROR_NOT_SUPPORTED);
     return FALSE;
   }
@@ -130,7 +130,7 @@ private:
 };
 
 // 只供独立宿主在创建窗口前调用。现代 Windows 继续依赖窗口自己的线程上下文；Win7 进程一次性启用系统 DPI，不能在临时线程作用域中切换它。
-inline void initialize_legacy_process_dpi() {
+inline void initialize_windows7_process_dpi() {
   const auto &api = dpi_api();
   if (!api.set_thread && !IsProcessDPIAware())
     api.process_context(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);

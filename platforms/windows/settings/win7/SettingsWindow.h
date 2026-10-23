@@ -1,9 +1,12 @@
 #pragma once
 
 #include <windows.h>
+#include <filesystem>
+#include <functional>
 #include <memory>
+#include <optional>
 
-namespace msime::settings::legacy {
+namespace msime::settings::win7 {
 
 // 控件标识也用于原生验收，操作实际 HWND 和工作线程，不绕过窗口事件。
 enum ControlId {
@@ -12,11 +15,15 @@ enum ControlId {
   toolbar_enabled = 200, toolbar_language, toolbar_scheme, toolbar_fullwidth,
   toolbar_punctuation, toolbar_character_set, toolbar_emoji, toolbar_handwriting,
   toolbar_keyboard, toolbar_voice, toolbar_settings, toolbar_size, toolbar_summary,
+  diagnostic_server = 300, diagnostic_tsf, restart_service, open_data_directory,
+  open_logs_directory, export_settings, import_settings, data_directory_text,
 };
 
 class SettingsWindow {
 public:
-  SettingsWindow();
+  // 默认使用系统文件选择器；原生集成测试可注入合成路径，继续走正式文件与存储流程。
+  using FilePicker = std::function<std::optional<std::filesystem::path>(HWND, bool)>;
+  explicit SettingsWindow(FilePicker file_picker = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;
@@ -29,4 +36,4 @@ private:
   std::unique_ptr<State> state_;
 };
 
-} // namespace msime::settings::legacy
+} // namespace msime::settings::win7

@@ -889,7 +889,7 @@ std::optional<DWORD> candidate_window_band(HWND window) {
 }
 } // namespace
 int wmain(int argc, wchar_t **argv) {
-  msime::windows::compat::initialize_legacy_process_dpi();
+  msime::windows::compat::initialize_windows7_process_dpi();
   // Before any thread exists: libcurl's global init is not thread-safe, and the online workers use it.
   curl_global_init(CURL_GLOBAL_DEFAULT);
   // Crash capture only writes this session's crash record to disk, and only once telemetry::begin armed it with the user's consent; the next start reports it.

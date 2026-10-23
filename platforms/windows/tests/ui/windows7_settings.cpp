@@ -1,16 +1,17 @@
-#include "../../settings/legacy/SettingsWindow.h"
-#include "../../settings/legacy/PreferencesStore.h"
+#include "../../settings/win7/SettingsWindow.h"
+#include "../../settings/win7/PreferencesStore.h"
 #include "../../../../shared/contracts/msime_edition.h"
 
 #include <commctrl.h>
 #include <cassert>
 #include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <functional>
 #include <string>
 
 namespace {
-using namespace msime::settings::legacy;
+using namespace msime::settings::win7;
 
 struct TemporaryDirectory {
   TemporaryDirectory() {
@@ -74,7 +75,10 @@ std::wstring caption(HWND window) {
 } // namespace
 
 int main() {
-  using namespace msime::settings::legacy;
+#ifdef _MSC_VER
+  _set_error_mode(_OUT_TO_STDERR);
+#endif
+  using namespace msime::settings::win7;
   TemporaryDirectory temporary;
   InjectedDirectory injected(temporary.path);
   PreferencesStore store(temporary.path.u8string());
@@ -95,15 +99,40 @@ int main() {
   auto conflict = store.save(*peer.snapshot, {{{"keybindings", "switch_language_caps_lock"}, false}});
   assert(conflict.outcome == Outcome::conflict && !conflict.snapshot);
   assert(store.load().snapshot->revision() == changed.snapshot->revision());
+  const auto exported = store.export_document();
+  assert(exported && exported->find("synthetic-token-not-a-real-credential") == std::string::npos);
+  auto local_only = store.save(*changed.snapshot, {{{"keybindings", "switch_language_caps_lock"}, false},
+      {{"diagnostic_log", "server"}, true}});
+  assert(local_only.outcome == Outcome::saved && local_only.snapshot);
+  auto restored = store.import_document(*local_only.snapshot, *exported);
+  assert(restored.outcome == Outcome::saved && restored.snapshot);
+  assert(restored.snapshot->preferences().at("keybindings").at("switch_language_caps_lock") == true);
+  assert(restored.snapshot->preferences().at("diagnostic_log").at("server") == true);
+  assert(restored.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  const auto import_conflict = store.import_document(*changed.snapshot, *exported);
+  assert(import_conflict.outcome == Outcome::conflict && import_conflict.error == "settings_conflict");
+  assert(store.import_document(*restored.snapshot, "{}").outcome == Outcome::storage);
+  assert(store.load().snapshot->revision() == restored.snapshot->revision());
   assert(store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
-  auto invalid = store.save(*changed.snapshot, {{{"keybindings", "synthetic_unknown_key"}, true}});
+  auto invalid = store.save(*restored.snapshot, {{{"keybindings", "synthetic_unknown_key"}, true}});
   assert(invalid.outcome == Outcome::invalid_change);
-  auto rejected = store.save(*changed.snapshot, {{{"keybindings", "switch_language_caps_lock"}, "invalid"}});
+  auto rejected = store.save(*restored.snapshot, {{{"keybindings", "switch_language_caps_lock"}, "invalid"}});
   assert(rejected.outcome == Outcome::storage);
-  assert(store.load().snapshot->revision() == changed.snapshot->revision());
+  assert(store.load().snapshot->revision() == restored.snapshot->revision());
 
   // 真实 HWND、系统控件通知和工作线程贯通到同源 Rust，不触碰测试目录之外的数据。
-  SettingsWindow window;
+  const auto file = temporary.path / L"synthetic-settings.json";
+  unsigned selections = 0;
+  bool cancel_selection = false;
+  SettingsWindow window([&](HWND owner, bool save) -> std::optional<std::filesystem::path> {
+    DWORD process = 0;
+    GetWindowThreadProcessId(owner, &process);
+    assert(process == GetCurrentProcessId());
+    if (cancel_selection) return std::nullopt;
+    assert(save == (selections == 0));
+    ++selections;
+    return file;
+  });
   assert(window.create(GetModuleHandleW(nullptr)));
   const HWND host = window.handle();
   const HWND body = GetDlgItem(host, page_body);
@@ -193,6 +222,52 @@ int main() {
   saved = store.load();
   assert(saved.snapshot->preferences().at("floating_toolbar").at("emoji").get<bool>() != previous_emoji);
   assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  select_page(2);
+  const HWND server_log = GetDlgItem(body, diagnostic_server);
+  const HWND tsf_log = GetDlgItem(body, diagnostic_tsf);
+  assert(server_log && tsf_log);
+  assert((GetWindowLongPtrW(server_log, GWL_STYLE) & WS_VISIBLE) != 0);
+  assert(caption(GetDlgItem(body, data_directory_text)) == temporary.path.wstring());
+  const bool previous_server = saved.snapshot->preferences().at("diagnostic_log").at("server").get<bool>();
+  SendMessageW(server_log, BM_CLICK, 0, 0);
+  pump_until([&] { return IsWindowEnabled(server_log) != FALSE; });
+  saved = store.load();
+  assert(saved.snapshot->preferences().at("diagnostic_log").at("server").get<bool>() != previous_server);
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(export_settings, BN_CLICKED),
+      reinterpret_cast<LPARAM>(GetDlgItem(body, export_settings)));
+  pump_until([&] { return IsWindowEnabled(server_log) != FALSE; });
+  if (!std::filesystem::is_regular_file(file)) {
+    std::fwprintf(stderr, L"Export status: %ls\n", caption(GetDlgItem(host, status_text)).c_str());
+    std::abort();
+  }
+  const auto exported_revision = saved.snapshot->revision();
+  assert(store.load().snapshot->revision() == exported_revision);
+  const bool exported_caps = saved.snapshot->preferences().at("keybindings").at("switch_language_caps_lock").get<bool>();
+  select_page(0);
+  SendMessageW(caps, BM_CLICK, 0, 0);
+  pump_until([&] { return IsWindowEnabled(caps) != FALSE; });
+  assert(store.load().snapshot->preferences().at("keybindings").at("switch_language_caps_lock").get<bool>() != exported_caps);
+  select_page(2);
+  // 文件选择边界使用合成路径；实际导入不能恢复文件中不应携带的本机日志开关。
+  SendMessageW(tsf_log, BM_CLICK, 0, 0);
+  pump_until([&] { return IsWindowEnabled(tsf_log) != FALSE; });
+  saved = store.load();
+  const bool current_tsf = saved.snapshot->preferences().at("diagnostic_log").at("tsf").get<bool>();
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(import_settings, BN_CLICKED),
+      reinterpret_cast<LPARAM>(GetDlgItem(body, import_settings)));
+  pump_until([&] { return IsWindowEnabled(tsf_log) != FALSE; });
+  saved = store.load();
+  assert(saved.snapshot->revision() == exported_revision + 3);
+  assert(saved.snapshot->preferences().at("keybindings").at("switch_language_caps_lock").get<bool>() == exported_caps);
+  assert(saved.snapshot->preferences().at("diagnostic_log").at("tsf").get<bool>() == current_tsf);
+  assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  assert(selections == 2);
+  cancel_selection = true;
+  const auto before_cancel = saved.snapshot->revision();
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(import_settings, BN_CLICKED),
+      reinterpret_cast<LPARAM>(GetDlgItem(body, import_settings)));
+  assert(selections == 2 && IsWindowEnabled(tsf_log));
+  assert(store.load().snapshot->revision() == before_cancel);
   select_page(0);
   TabCtrl_SetCurSel(tabs, 0);
   SendMessageW(host, WM_NOTIFY, page_tabs, reinterpret_cast<LPARAM>(&notification));
@@ -206,5 +281,5 @@ int main() {
   assert(saved.snapshot->preferences().at("keybindings").at("switch_language_ctrl").get<bool>());
   assert(!saved.snapshot->preferences().at("keybindings").at("switch_language_shift").get<bool>());
   assert(!saved.snapshot->preferences().at("keybindings").at("switch_language_ctrl_alt_space").get<bool>());
-  std::puts("Legacy settings: real CAS, native control saves, conflicts and reference passed");
+  std::puts("Windows 7 settings: native controls, CAS, file roundtrip, local state retention and cancellation passed");
 }

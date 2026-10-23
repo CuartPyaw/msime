@@ -3,10 +3,16 @@
 #include "../InputSettingsModel.h"
 #include "../FloatingToolbarSizeModel.h"
 #include "../SettingsStateDirectory.h"
+#include "../SettingsDocumentFile.h"
 #include "../../common/StateDirectory.h"
 #include "../../compat/WindowsDpi.h"
+#include "../../tsf/IPC/AuxNamedpipeSender.h"
+#include "../../../../shared/contracts/windows_ipc.h"
 
 #include <commctrl.h>
+#include <objbase.h>
+#include <shobjidl.h>
+#include <shellapi.h>
 #include <algorithm>
 #include <array>
 #include <condition_variable>
@@ -19,13 +25,13 @@
 #include <utility>
 #include <vector>
 
-namespace msime::settings::legacy {
+namespace msime::settings::win7 {
 namespace {
 constexpr UINT completed_message = WM_APP + 71;
-constexpr wchar_t window_class[] = L"MSIME.LegacySettings" MSIME_EDITION_NAME_SUFFIX;
-constexpr wchar_t body_class[] = L"MSIME.LegacySettings.Body" MSIME_EDITION_NAME_SUFFIX;
+constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_SUFFIX;
+constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
-enum class Surface { shortcuts, reference, toolbar };
+enum class Surface { shortcuts, reference, toolbar, developer };
 struct ToolbarCheck { int id; const char* field; const wchar_t* label; };
 constexpr std::array<ToolbarCheck, 11> toolbar_checks{{
     {toolbar_enabled, "enabled", L"在桌面显示悬浮工具栏"},
@@ -94,8 +100,18 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory };
   bool reload = true;
   std::vector<Change> changes;
+  Action action = Action::preferences;
+  std::filesystem::path file{};
+};
+
+struct Completion {
+  Result result;
+  std::wstring notice;
+  std::filesystem::path folder;
+  std::filesystem::path directory;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
@@ -119,20 +135,50 @@ public:
     ready_.notify_one();
   }
 
-  std::optional<Result> take() {
+  std::optional<Completion> take() {
     std::lock_guard<std::mutex> guard(lock_);
     return std::exchange(completed_, std::nullopt);
   }
 
 private:
   Result execute(const Job& job) {
+    notice_.clear();
+    folder_.clear();
     if (!store_) {
-      const auto directory = preferences_directory();
-      if (directory.empty()) return {Outcome::storage, std::nullopt};
-      store_.emplace(directory.u8string());
+      directory_ = preferences_directory();
+      if (directory_.empty()) return {Outcome::storage, std::nullopt};
+      store_.emplace(directory_.u8string());
     }
     Result result;
-    if (job.reload) {
+    if (job.action == Job::Action::export_file) {
+      const auto document = store_->export_document();
+      notice_ = document && write_settings_document(job.file, *document) ?
+          L"设置已导出到 " + job.file.wstring() + L"。" : L"导出设置未能完成：无法读取当前设置或写入所选位置。";
+      return {Outcome::loaded, snapshot_};
+    } else if (job.action == Job::Action::restart) {
+      notice_ = msime::windows::detail::SendToAuxNamedpipe(FANY_IME_AUX_NAMED_PIPE, L"RestartServer", false) ?
+          L"已发送重启请求。" : L"重启输入法服务失败，请稍后重试。";
+      return {Outcome::loaded, snapshot_};
+    } else if (job.action == Job::Action::data_directory || job.action == Job::Action::logs_directory) {
+      std::error_code error;
+      auto target = directory_;
+      if (job.action == Job::Action::logs_directory && std::filesystem::is_directory(directory_ / L"logs", error))
+        target /= L"logs";
+      if (std::filesystem::is_directory(target, error)) folder_ = target;
+      else notice_ = L"数据目录还不存在，请先完成输入法安装。";
+      return {Outcome::loaded, snapshot_};
+    } else if (job.action == Job::Action::import_file) {
+      const auto contents = read_settings_document(job.file);
+      if (!contents || !snapshot_) {
+        notice_ = L"无法导入这个文件：读取失败，或者文件太大，不是水杉输入法导出的设置文件。";
+        return {Outcome::loaded, snapshot_};
+      }
+      result = store_->import_document(*snapshot_, *contents);
+      notice_ = result.outcome == Outcome::saved ?
+          L"设置已导入并立即生效。本机的服务配置与密钥、诊断日志、使用统计和剪贴板历史开关保持不变。" :
+          settings_import_error_message(result.error);
+      if (!result.snapshot) result.snapshot = store_->load().snapshot;
+    } else if (job.reload) {
       result = store_->load();
     } else if (snapshot_) {
       result = store_->save(*snapshot_, job.changes);
@@ -159,7 +205,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = std::move(result);
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -177,9 +223,12 @@ private:
   std::condition_variable ready_;
   bool stopping_ = false;
   std::optional<Job> pending_;
-  std::optional<Result> completed_;
+  std::optional<Completion> completed_;
   std::optional<PreferencesStore> store_;
   std::optional<Snapshot> snapshot_;
+  std::filesystem::path directory_;
+  std::filesystem::path folder_;
+  std::wstring notice_;
   std::thread thread_;
 };
 
@@ -205,12 +254,15 @@ struct SettingsWindow::State {
   int scroll = 0;
   int content_height = 0;
   int toolbar_height = 0;
+  int developer_height = 0;
   Surface surface = Surface::shortcuts;
   bool busy = true;
   bool failed = false;
+  bool com_initialized = false;
   std::vector<Item> items;
   std::unique_ptr<Worker> worker;
   std::optional<Snapshot> snapshot;
+  FilePicker file_picker;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
 
@@ -234,7 +286,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -275,6 +327,7 @@ struct SettingsWindow::State {
         reference_text);
     items.push_back({reference_control, 0, 0, Surface::reference});
     toolbar_controls();
+    developer_controls();
     enable(false);
     layout();
     return !failed;
@@ -316,12 +369,78 @@ struct SettingsWindow::State {
     toolbar_height = top + 56;
   }
 
+  void developer_controls() {
+    const auto item = [this](const wchar_t* type, const wchar_t* text, DWORD style,
+                            int id, int top, int height) {
+      const auto control = row(type, text, style, id, top, height);
+      items.back().surface = Surface::developer;
+      return control;
+    };
+    item(L"STATIC", L"输入法服务", SS_LEFT, -1, 0, 24);
+    item(L"STATIC", L"请求受监督的输入法服务重新启动。", SS_LEFT, -1, 30, 28);
+    item(L"BUTTON", L"立即重启输入法服务", WS_TABSTOP | BS_PUSHBUTTON, restart_service, 66, 32);
+    item(L"STATIC", L"诊断日志", SS_LEFT, -1, 120, 24);
+    item(L"BUTTON", L"Server 端日志", WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY, diagnostic_server, 154, 28);
+    item(L"STATIC", L"排查 Server 启动和通信问题时开启。记录启停原因和组件状态，限量轮转，不记录按键、输入内容或候选文本。日志为数据目录下的 logs\\server.log，TSF 日志也汇总在此。", SS_LEFT, -1, 188, 66);
+    item(L"BUTTON", L"打开日志目录", WS_TABSTOP | BS_PUSHBUTTON, open_logs_directory, 266, 32);
+    item(L"BUTTON", L"TSF 端日志", WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY, diagnostic_tsf, 312, 28);
+    item(L"STATIC", L"排查应用内预编辑和输入延迟时开启。日志在内存中限量缓冲，通过独立管道批量汇总，不记录按键、输入内容或候选文本。", SS_LEFT, -1, 348, 62);
+    item(L"STATIC", L"数据目录", SS_LEFT, -1, 430, 24);
+    item(L"STATIC", L"词库、学习记录、皮肤、剪贴板历史和设置共用此位置。要迁移，请重新运行完整安装包，在「选择数据位置」一步选择空文件夹。", SS_LEFT, -1, 466, 62);
+    item(L"EDIT", L"", WS_TABSTOP | ES_READONLY | ES_AUTOHSCROLL, data_directory_text, 540, 28);
+    item(L"BUTTON", L"打开数据目录", WS_TABSTOP | BS_PUSHBUTTON, open_data_directory, 580, 32);
+    item(L"STATIC", L"设置文件", SS_LEFT, -1, 638, 24);
+    item(L"STATIC", L"导出当前设置，换电脑或重装后可以导入。服务配置与密钥、诊断日志、使用统计和剪贴板历史开关只属于本机，不写进文件；词库和学习记录也不在其中。", SS_LEFT, -1, 674, 66);
+    item(L"BUTTON", L"导出设置…", WS_TABSTOP | BS_PUSHBUTTON, export_settings, 752, 32);
+    item(L"STATIC", L"导入文件里的设置并立即生效。本机的服务配置与密钥、诊断日志、使用统计和剪贴板历史开关保持不变。", SS_LEFT, -1, 796, 50);
+    item(L"BUTTON", L"导入设置…", WS_TABSTOP | BS_PUSHBUTTON, import_settings, 858, 32);
+    developer_height = 906;
+  }
+
+  std::optional<std::filesystem::path> pick_settings_file(bool save) const {
+    if (file_picker) return file_picker(window, save);
+    // 与现代原生设置使用相同的系统文件选择接口；此 COM 接口从 Vista 起可用。
+    IFileDialog* raw = nullptr;
+    const auto failure = [this] {
+      SetWindowTextW(status, L"无法打开文件选择窗口，请稍后重试。");
+      return std::optional<std::filesystem::path>{};
+    };
+    if (FAILED(CoCreateInstance(save ? CLSID_FileSaveDialog : CLSID_FileOpenDialog,
+        nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&raw)))) return failure();
+    const auto release_dialog = [](IFileDialog* value) { value->Release(); };
+    const std::unique_ptr<IFileDialog, decltype(release_dialog)> dialog(raw, release_dialog);
+    const COMDLG_FILTERSPEC filter{L"设置文件 (*.json)", L"*.json"};
+    FILEOPENDIALOGOPTIONS options = 0;
+    if (FAILED(dialog->SetFileTypes(1, &filter)) || FAILED(dialog->SetDefaultExtension(L"json")) ||
+        FAILED(dialog->SetTitle(save ? L"导出设置" : L"导入设置")) ||
+        FAILED(dialog->SetOkButtonLabel(save ? L"导出" : L"导入")) ||
+        FAILED(dialog->GetOptions(&options)) || FAILED(dialog->SetOptions(options | FOS_FORCEFILESYSTEM |
+            FOS_DONTADDTORECENT | (save ? FOS_OVERWRITEPROMPT : FOS_FILEMUSTEXIST)))) return failure();
+    if (save && FAILED(dialog->SetFileName(MSIME_EDITION_DISPLAY_NAME L"设置.json"))) return failure();
+    const HRESULT shown = dialog->Show(window);
+    if (shown == HRESULT_FROM_WIN32(ERROR_CANCELLED)) return std::nullopt;
+    if (FAILED(shown)) return failure();
+    IShellItem* selected = nullptr;
+    if (FAILED(dialog->GetResult(&selected))) return failure();
+    PWSTR path = nullptr;
+    const HRESULT resolved = selected->GetDisplayName(SIGDN_FILESYSPATH, &path);
+    selected->Release();
+    if (FAILED(resolved) || !path) return failure();
+    const std::filesystem::path result(path);
+    CoTaskMemFree(path);
+    return result;
+  }
+
   void enable(bool enabled) {
     for (int id : {language_switch, caps_lock, japanese_toggle, traditional_toggle, fullwidth_toggle})
       if (HWND control = GetDlgItem(body, id)) EnableWindow(control, enabled);
     for (const auto& field : toolbar_checks)
       if (HWND control = GetDlgItem(body, field.id)) EnableWindow(control, enabled);
     EnableWindow(GetDlgItem(body, toolbar_size), enabled);
+    for (int id : {diagnostic_server, diagnostic_tsf, export_settings, import_settings})
+      EnableWindow(GetDlgItem(body, id), enabled);
+    for (int id : {restart_service, open_data_directory, open_logs_directory})
+      EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
   }
 
@@ -333,9 +452,10 @@ struct SettingsWindow::State {
     const int height = client.bottom;
     MoveWindow(selector_label, dip(24), dip(18), dip(80), dip(26), TRUE);
     MoveWindow(selector, dip(112), dip(12), std::max(width - dip(136), 1), dip(160), TRUE);
-    ShowWindow(tabs, surface == Surface::toolbar ? SW_HIDE : SW_SHOW);
+    const bool has_tabs = surface == Surface::shortcuts || surface == Surface::reference;
+    ShowWindow(tabs, has_tabs ? SW_SHOW : SW_HIDE);
     MoveWindow(tabs, dip(24), dip(52), std::max(width - dip(48), 1), dip(30), TRUE);
-    const int body_top = surface == Surface::toolbar ? 58 : 94;
+    const int body_top = has_tabs ? 94 : 58;
     MoveWindow(body, dip(24), dip(body_top), std::max(width - dip(48), 1), std::max(height - dip(body_top + 86), 1), TRUE);
     MoveWindow(status, dip(24), height - dip(76), std::max(width - dip(48), 1), dip(38), TRUE);
     MoveWindow(reload, width - dip(144), height - dip(34), dip(120), dip(28), TRUE);
@@ -349,7 +469,9 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    info.nMax = reference ? 0 : dip(surface == Surface::toolbar ? toolbar_height : content_height) - 1;
+    const int total = surface == Surface::toolbar ? toolbar_height :
+        surface == Surface::developer ? developer_height : content_height;
+    info.nMax = reference ? 0 : dip(total) - 1;
     info.nPage = static_cast<UINT>(std::max(client.bottom, 0L));
     info.nPos = reference ? 0 : scroll;
     SetScrollInfo(body, SB_VERT, &info, TRUE);
@@ -387,7 +509,16 @@ struct SettingsWindow::State {
     if (busy) return;
     busy = true;
     enable(false);
-    SetWindowTextW(status, job.reload ? L"正在读取设置…" : L"正在保存…");
+    const wchar_t* message = job.reload ? L"正在读取设置…" : L"正在保存…";
+    switch (job.action) {
+    case Job::Action::export_file: message = L"正在导出设置…"; break;
+    case Job::Action::import_file: message = L"正在导入设置…"; break;
+    case Job::Action::restart: message = L"正在请求重启…"; break;
+    case Job::Action::data_directory:
+    case Job::Action::logs_directory: message = L"正在打开目录…"; break;
+    case Job::Action::preferences: break;
+    }
+    SetWindowTextW(status, message);
     worker->submit(std::move(job));
   }
 
@@ -410,6 +541,12 @@ struct SettingsWindow::State {
     for (const auto* field : {"scale_percent", "font_size"}) {
       const auto value = toolbar->find(field);
       if (value == toolbar->end() || !value->is_number_integer()) return false;
+    }
+    const auto diagnostics = preferences.find("diagnostic_log");
+    if (diagnostics == preferences.end() || !diagnostics->is_object()) return false;
+    for (const auto* field : {"server", "tsf"}) {
+      const auto value = diagnostics->find(field);
+      if (value == diagnostics->end() || !value->is_boolean()) return false;
     }
     return true;
   }
@@ -473,8 +610,9 @@ struct SettingsWindow::State {
   }
 
   void complete() {
-    auto result = worker->take();
-    if (!result) return;
+    auto completed = worker->take();
+    if (!completed) return;
+    auto result = std::make_optional(std::move(completed->result));
     busy = false;
     snapshot = std::move(result->snapshot);
     if (snapshot && !valid_settings(*snapshot)) {
@@ -493,7 +631,14 @@ struct SettingsWindow::State {
           SendMessageW(control, BM_SETCHECK, keys.at(field.second).get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
       refresh_reference();
       refresh_toolbar();
+      const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
+      SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
+          diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
+      SendMessageW(GetDlgItem(body, diagnostic_tsf), BM_SETCHECK,
+          diagnostics.at("tsf").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
     }
+    SetWindowTextW(GetDlgItem(body, data_directory_text), completed->directory.empty() ?
+        L"未找到数据目录" : completed->directory.c_str());
     enable(snapshot.has_value());
     const wchar_t* message = L"读取设置失败，请重新读取后重试。";
     switch (result->outcome) {
@@ -504,13 +649,19 @@ struct SettingsWindow::State {
     case Outcome::invalid_response: message = L"设置返回内容无法读取，请重新读取后重试。"; break;
     case Outcome::storage: message = L"读写设置失败，请重新读取后重试。"; break;
     }
-    SetWindowTextW(status, message);
+    if (!completed->folder.empty()) {
+      const auto opened = reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"open",
+          completed->folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
+      if (opened <= 32) completed->notice = L"无法打开目录，可能是文件管理器不可用。";
+    }
+    SetWindowTextW(status, completed->notice.empty() ? message : completed->notice.c_str());
   }
 
   void command(WPARAM command) {
     const int id = LOWORD(command);
     if (id == page_selector && HIWORD(command) == CBN_SELCHANGE) {
-      surface = SendMessageW(selector, CB_GETCURSEL, 0, 0) == 1 ? Surface::toolbar :
+      const auto selected = SendMessageW(selector, CB_GETCURSEL, 0, 0);
+      surface = selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           TabCtrl_GetCurSel(tabs) == 1 ? Surface::reference : Surface::shortcuts;
       scroll = 0;
       layout();
@@ -518,7 +669,24 @@ struct SettingsWindow::State {
     }
     if (busy) return;
     if (id == reload_settings && HIWORD(command) == BN_CLICKED) { submit(Job{}); return; }
+    if (HIWORD(command) == BN_CLICKED &&
+        (id == restart_service || id == open_data_directory || id == open_logs_directory)) {
+      Job job;
+      job.action = id == restart_service ? Job::Action::restart :
+          id == open_logs_directory ? Job::Action::logs_directory : Job::Action::data_directory;
+      submit(std::move(job));
+      return;
+    }
     if (!snapshot) return;
+    if (HIWORD(command) == BN_CLICKED && (id == export_settings || id == import_settings)) {
+      if (const auto file = pick_settings_file(id == export_settings)) {
+        Job job;
+        job.action = id == export_settings ? Job::Action::export_file : Job::Action::import_file;
+        job.file = *file;
+        submit(std::move(job));
+      }
+      return;
+    }
     Job job;
     job.reload = false;
     if (id == language_switch && HIWORD(command) == CBN_SELCHANGE) {
@@ -533,6 +701,9 @@ struct SettingsWindow::State {
       job.changes.push_back({{"floating_toolbar", "scale_percent"}, choice.scale_percent});
       job.changes.push_back({{"floating_toolbar", "font_size"}, choice.font_size});
     } else if (HIWORD(command) == BN_CLICKED) {
+      if (id == diagnostic_server || id == diagnostic_tsf)
+        job.changes.push_back({{"diagnostic_log", id == diagnostic_server ? "server" : "tsf"},
+            SendMessageW(GetDlgItem(body, id), BM_GETCHECK, 0, 0) == BST_CHECKED});
       for (const auto& field : check_fields)
         if (id == field.first)
           job.changes.push_back({{"keybindings", field.second},
@@ -555,7 +726,9 @@ struct SettingsWindow::State {
     if (message == WM_COMMAND) {
       if (((LOWORD(wparam) == language_switch || LOWORD(wparam) == toolbar_size) && HIWORD(wparam) == CBN_SETFOCUS) ||
           ((LOWORD(wparam) >= caps_lock && LOWORD(wparam) <= fullwidth_toggle) && HIWORD(wparam) == BN_SETFOCUS) ||
-          ((LOWORD(wparam) >= toolbar_enabled && LOWORD(wparam) <= toolbar_settings) && HIWORD(wparam) == BN_SETFOCUS))
+          ((LOWORD(wparam) >= toolbar_enabled && LOWORD(wparam) <= toolbar_settings) && HIWORD(wparam) == BN_SETFOCUS) ||
+          ((LOWORD(wparam) >= diagnostic_server && LOWORD(wparam) <= import_settings) && HIWORD(wparam) == BN_SETFOCUS) ||
+          (LOWORD(wparam) == data_directory_text && HIWORD(wparam) == EN_SETFOCUS))
         self->reveal(reinterpret_cast<HWND>(lparam));
       else self->command(wparam);
       return 0;
@@ -622,15 +795,21 @@ struct SettingsWindow::State {
   }
 };
 
-SettingsWindow::SettingsWindow() : state_(std::make_unique<State>()) {}
+SettingsWindow::SettingsWindow(FilePicker file_picker) : state_(std::make_unique<State>()) {
+  state_->file_picker = std::move(file_picker);
+}
 
 SettingsWindow::~SettingsWindow() {
   if (state_->window) DestroyWindow(state_->window);
   state_->worker.reset();
   if (state_->font) DeleteObject(state_->font);
+  if (state_->com_initialized) CoUninitialize();
 }
 
 bool SettingsWindow::create(HINSTANCE instance) {
+  if (state_->window || state_->com_initialized) return false;
+  if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return false;
+  state_->com_initialized = true;
   state_->instance = instance;
   INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_TAB_CLASSES | ICC_STANDARD_CLASSES};
   if (!InitCommonControlsEx(&controls)) return false;
@@ -668,4 +847,4 @@ int SettingsWindow::run(int show) {
   return result < 0 ? 1 : static_cast<int>(message.wParam);
 }
 
-} // namespace msime::settings::legacy
+} // namespace msime::settings::win7

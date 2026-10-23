@@ -1,19 +1,27 @@
 # Windows Server 会话适配
 
-## 兼容设置窗口（开发中）
+## Windows 7 设置窗口（开发中）
 
-`settings/legacy` 是使用 Win32 标准控件的原生兼容宿主，目前接通快捷键页，以及工具栏显示、按钮与尺寸控件的真实读取、保存与并发冲突处理；工具栏图形预览和主题跳转仍未完成。其余设置页仍未完成，普通设置启动器和安装包继续使用 WinUI 3。不能将此目标作为完整 Win7 产品安装。
+`settings/win7` 是使用 Win32 标准控件的原生兼容宿主，目前接通快捷键页，工具栏显示、按钮与尺寸控件，以及维护与诊断页的日志开关、重启请求、目录打开和设置文件导入导出；配置使用同源 Rust 持久化与并发冲突处理；工具栏图形预览和主题跳转仍未完成。其余设置页仍未完成，普通设置启动器和安装包继续使用 WinUI 3。不能将此目标作为完整 Win7 产品安装。
 
 在 Windows MSVC 开发环境中，使用同一提交、同一架构的核心与原生依赖前缀构建：
 
 ```powershell
-cmake -S platforms/windows/settings/legacy -B target/windows-full/x64/legacy-settings -A x64 "-DCMAKE_PREFIX_PATH=<x64 原生依赖前缀>" "-DMSIME_HOST_LIBRARY=$PWD/target/windows7-core/x64/msime_host_api.dll.lib"
-cmake --build target/windows-full/x64/legacy-settings --config RelWithDebInfo --parallel 2
-Copy-Item target/windows7-core/x64/msime_host_api.dll target/windows-full/x64/legacy-settings/RelWithDebInfo/
-ctest --test-dir target/windows-full/x64/legacy-settings -C RelWithDebInfo --output-on-failure
+cmake -S platforms/windows/settings/win7 -B target/windows-full/x64/win7-settings -A x64 "-DCMAKE_PREFIX_PATH=<x64 原生依赖前缀>" "-DMSIME_HOST_LIBRARY=$PWD/target/windows7-core/x64/msime_host_api.dll.lib"
+cmake --build target/windows-full/x64/win7-settings --config RelWithDebInfo --parallel 2
+Copy-Item target/windows7-core/x64/msime_host_api.dll target/windows-full/x64/win7-settings/RelWithDebInfo/
+ctest --test-dir target/windows-full/x64/win7-settings -C RelWithDebInfo --output-on-failure
 ```
 
-32 位构建把 `x64` 路径改成 `x86`，`-A x64` 改成 `-A Win32`，依赖前缀也必须为 x86。没有预备依赖前缀时，可用 vcpkg 工具链与此目录的最小清单安装锁定的 `nlohmann-json`；安装目录仍放在 `target/windows-native-deps` 下。测试使用独立合成数据，经实际窗口通知与工作线程调用 Rust 配置存储，覆盖修订号冲突、未修改字段保留和退出时的待保存修改。CI 使用同源普通核心覆盖原生控件与持久化，不代表 Win7 实机或整个产品验证通过。
+32 位构建把 `x64` 路径改成 `x86`，`-A x64` 改成 `-A Win32`，依赖前缀也必须为 x86。没有预备依赖前缀时，可用 vcpkg 工具链与此目录的最小清单安装锁定的 `nlohmann-json`；安装目录仍放在 `target/windows-native-deps` 下。测试使用独立合成数据，经实际窗口通知与工作线程调用 Rust 配置存储，覆盖修订号冲突、未修改字段保留和退出时的待保存修改，以及实际设置文件的导出、修改、导入恢复与取消选择。测试仅在系统文件选择边界注入合成路径，不代替系统对话框的桌面验收。CI 使用同源普通核心覆盖原生控件与持久化，不代表 Win7 实机或整个产品验证通过。
+
+在交互桌面另外验证默认系统文件选择器的打开与取消：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File platforms/windows/tests/tools/windows7_settings.ps1 -Program "$PWD/target/windows-full/x64/win7-settings/RelWithDebInfo/msime-client-settings-win7.exe" -Edition full
+```
+
+此脚本只启动这份原生宿主、操作该进程自己的窗口，使用独立合成状态，取消两个系统对话框后检查设置文件没有变化。无交互桌面的 SSH 或服务会话不能代替这条桌面验收。
 
 ## 目录结构
 
@@ -39,6 +47,20 @@ Rust 使用 `x86_64-win7-windows-msvc` / `i686-win7-windows-msvc` 与 `build-std
 32 位构建使用 64 位宿主的交叉编译器（`vcvarsall.bat x64_x86`）。服务账号的 Cargo 缓存可能位于 `C:\Windows\System32\config\systemprofile`；32 位宿主编译器会受 WOW64 文件系统重定向影响，把已有的源文件报成不存在。切换宿主编译器即可，不要修改依赖源码或清空缓存。
 
 `compat/Windows7DelayLoad.cpp` 仅链接进 Win7 核心：对已确认不兼容的三个系统 DLL 使用 MSVC 延迟加载，系统模块从系统目录探测；可用 API 仍调用系统实现，旧 COM 使用 `ole32.dll`，默认音频设备用传统 WASAPI 异步激活。`Test-Windows7CoreImports.ps1` 同时检查普通和延迟导入，拒绝未覆盖的延迟接口并输出清单；它只检查已发现的兼容障碍，不能代替 Win7 系统导出与全部随包运行库的验证。
+
+## Win7 本地语音运行库（开发中）
+
+普通语音运行库的版本与锁文件保持原状。兼容构建在对应架构的 VS 2022 MSVC 环境中执行以下命令，先检查至少 50 GB 可用空间，再从固定提交构建同版本 ONNX Runtime 1.28.2 和 sherpa-onnx 1.13.8：
+
+```powershell
+.\platforms\windows\Build-Windows7VoiceRuntime.ps1 -Architecture x64
+# 32 位构建在 vcvarsall.bat x64_x86 环境中单独执行。
+.\platforms\windows\Build-Windows7VoiceRuntime.ps1 -Architecture x86
+```
+
+源码缓存为 `target/tooling/onnxruntime-windows7-1.28.2` 与 `target/tooling/sherpa-onnx-windows7-1.13.8`，构建为 `target/windows7-voice/<arch>`。只有导入审计、合成 Add 与优化卷积推理、sherpa 版本及实际缓冲操作全部通过后，`bin/voice-runtime.build.json` 才记录本次来源和 DLL 摘要。保留完整 CPU 运算集合，使用静态 CRT，不启用 CUDA、DirectML 或原包同样未提供的 TTS。相邻 ONNX 的实际装载路径也参与验证，不能用系统的另一版同名 DLL 替代。
+
+x64 和 x86 的源码构建与这些运行测试已在 Windows 11 上通过，尚未完成 Win7 SP1 上的真实语音模型、麦克风、完整安装和更新验收；此目录目前不接普通发布打包。
 
 ## 产品版本（edition）
 

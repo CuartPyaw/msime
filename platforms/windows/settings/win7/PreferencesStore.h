@@ -10,7 +10,7 @@
 #include <utility>
 #include <vector>
 
-namespace msime::settings::legacy {
+namespace msime::settings::win7 {
 
 using Json = nlohmann::json;
 
@@ -25,6 +25,7 @@ enum class Outcome { loaded, saved, conflict, storage, invalid_response, invalid
 struct Result {
   Outcome outcome = Outcome::storage;
   std::optional<Snapshot> snapshot;
+  std::string error{};
 };
 
 struct Change {
@@ -61,6 +62,24 @@ public:
         bytes(body), body.size()), Outcome::saved);
   }
 
+  std::optional<std::string> export_document() const {
+    auto owned = msime::host_api::own_string(msime_client_export_settings(bytes(directory_), directory_.size()));
+    if (!owned) return std::nullopt;
+    const auto body = Json::parse(owned.get(), nullptr, false);
+    if (!body.is_object()) return std::nullopt;
+    const auto ok = body.find("ok");
+    const auto value = body.find("value");
+    if (ok == body.end() || !ok->is_boolean() || !ok->get<bool>() ||
+        value == body.end() || !value->is_string()) return std::nullopt;
+    return value->get<std::string>();
+  }
+
+  Result import_document(const Snapshot& previous, const std::string& document) const {
+    if (!valid(previous.document)) return {Outcome::invalid_change, std::nullopt, {}};
+    return response(msime_client_import_settings(bytes(directory_), directory_.size(), previous.revision(),
+        bytes(document), document.size()), Outcome::saved);
+  }
+
 private:
   static const uint8_t* bytes(const std::string& value) {
     return reinterpret_cast<const uint8_t*>(value.data());
@@ -85,9 +104,10 @@ private:
     if (ok == body.end() || !ok->is_boolean()) return {Outcome::invalid_response, std::nullopt};
     if (!ok->get<bool>()) {
       const auto error = body.find("error");
-      // 此 C ABI 返回 PreferencesError 的描述，尚未提供独立错误码字段。
-      return {error != body.end() && *error == "preferences changed; reload before saving" ?
-          Outcome::conflict : Outcome::storage, std::nullopt};
+      // 普通保存返回错误描述，设置文件导入返回稳定错误码，两者均不能覆盖并发修改。
+      const auto code = error != body.end() && error->is_string() ? error->get<std::string>() : std::string{};
+      return {code == "preferences changed; reload before saving" || code == "settings_conflict" ?
+          Outcome::conflict : Outcome::storage, std::nullopt, code};
     }
     const auto value = body.find("value");
     if (value == body.end() || !valid(*value)) return {Outcome::invalid_response, std::nullopt};
@@ -97,4 +117,4 @@ private:
   std::string directory_;
 };
 
-} // namespace msime::settings::legacy
+} // namespace msime::settings::win7

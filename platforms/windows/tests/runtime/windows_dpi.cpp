@@ -4,7 +4,7 @@
 #include <cstdio>
 
 namespace {
-int legacy_calls = 0;
+int system_aware_calls = 0;
 DPI_AWARENESS_CONTEXT received_context = nullptr;
 HWND received_window = nullptr;
 
@@ -27,8 +27,8 @@ BOOL WINAPI native_process_context(DPI_AWARENESS_CONTEXT context) {
   SetLastError(ERROR_ACCESS_DENIED);
   return FALSE;
 }
-BOOL WINAPI legacy_process() {
-  ++legacy_calls;
+BOOL WINAPI system_aware_process() {
+  ++system_aware_calls;
   return TRUE;
 }
 DPI_AWARENESS_CONTEXT WINAPI native_window_context(HWND window) {
@@ -49,38 +49,38 @@ int main() {
                                       0, 0, 64, 64, nullptr, nullptr,
                                       GetModuleHandleW(nullptr), nullptr);
   assert(window);
-  DpiApi legacy;
-  legacy.set_legacy_process = legacy_process;
-  assert(legacy.window_dpi(nullptr) == 0);
-  assert(legacy.window_context(nullptr) == nullptr);
+  DpiApi windows7;
+  windows7.set_system_aware_process = system_aware_process;
+  assert(windows7.window_dpi(nullptr) == 0);
+  assert(windows7.window_context(nullptr) == nullptr);
   const HDC dc = GetDC(window);
   assert(dc);
   const UINT expected = static_cast<UINT>(GetDeviceCaps(dc, LOGPIXELSX));
   ReleaseDC(window, dc);
   assert(expected > 0);
-  assert(legacy.window_dpi(window) == expected);
-  assert(legacy.system_dpi() > 0);
-  assert(legacy.window_context(window) ==
+  assert(windows7.window_dpi(window) == expected);
+  assert(windows7.system_dpi() > 0);
+  assert(windows7.window_context(window) ==
          (IsProcessDPIAware() ? DPI_AWARENESS_CONTEXT_SYSTEM_AWARE
                              : DPI_AWARENESS_CONTEXT_UNAWARE));
   const BOOL original_awareness = IsProcessDPIAware();
-  assert(legacy.thread_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) == nullptr);
+  assert(windows7.thread_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) == nullptr);
   assert(GetLastError() == ERROR_CALL_NOT_IMPLEMENTED);
   assert(IsProcessDPIAware() == original_awareness);
-  assert(legacy_calls == 0);
+  assert(system_aware_calls == 0);
   {
-    msime::windows::compat::ThreadDpiScope scope(legacy);
+    msime::windows::compat::ThreadDpiScope scope(windows7);
     assert(IsProcessDPIAware() == original_awareness);
-    assert(legacy_calls == 0);
+    assert(system_aware_calls == 0);
   }
-  assert(legacy.process_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
-  assert(legacy_calls == 1);
-  assert(!legacy.process_context(nullptr));
-  assert(legacy_calls == 1);
-  assert(legacy.awareness(nullptr) == DPI_AWARENESS_INVALID);
-  assert(legacy.awareness(DPI_AWARENESS_CONTEXT_UNAWARE) == DPI_AWARENESS_UNAWARE);
-  assert(legacy.awareness(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE) == DPI_AWARENESS_SYSTEM_AWARE);
-  assert(legacy.awareness(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) == DPI_AWARENESS_PER_MONITOR_AWARE);
+  assert(windows7.process_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
+  assert(system_aware_calls == 1);
+  assert(!windows7.process_context(nullptr));
+  assert(system_aware_calls == 1);
+  assert(windows7.awareness(nullptr) == DPI_AWARENESS_INVALID);
+  assert(windows7.awareness(DPI_AWARENESS_CONTEXT_UNAWARE) == DPI_AWARENESS_UNAWARE);
+  assert(windows7.awareness(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE) == DPI_AWARENESS_SYSTEM_AWARE);
+  assert(windows7.awareness(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) == DPI_AWARENESS_PER_MONITOR_AWARE);
 
   // 新系统分支必须保留错误、零结果及上下文令牌；新 API 调用失败时不能再改一次进程状态。
   DpiApi modern;
@@ -90,7 +90,7 @@ int main() {
   modern.set_process = native_process_context;
   modern.query_context = native_window_context;
   modern.query_awareness = native_awareness;
-  modern.set_legacy_process = legacy_process;
+  modern.set_system_aware_process = system_aware_process;
   assert(modern.window_dpi(window) == 0);
   assert(received_window == window);
   assert(GetLastError() == ERROR_ACCESS_DENIED);
@@ -100,7 +100,7 @@ int main() {
   assert(received_context == DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
   assert(!modern.process_context(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2));
   assert(GetLastError() == ERROR_ACCESS_DENIED);
-  assert(legacy_calls == 1);
+  assert(system_aware_calls == 1);
   assert(modern.window_context(window) == DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
   assert(received_window == window);
   assert(modern.awareness(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE) == DPI_AWARENESS_PER_MONITOR_AWARE);
@@ -131,6 +131,6 @@ int main() {
            GetLastError() == ERROR_INVALID_PARAMETER);
 
   assert(DestroyWindow(window));
-  assert(legacy.window_dpi(window) == 0);
-  std::puts("Windows DPI native forwarding and legacy fallback passed");
+  assert(windows7.window_dpi(window) == 0);
+  std::puts("Windows DPI native forwarding and Windows 7 fallback passed");
 }
