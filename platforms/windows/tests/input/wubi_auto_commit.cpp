@@ -1,7 +1,7 @@
 #include "ipc/ReplyComposer.h"
 #include "../../tsf/HostCharacterResult.h"
 #include "../core/TestHostOptions.h"
-#include "PipeMetadata.h"
+#include "../../tsf/WubiCommitOwner.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -54,6 +54,7 @@ void scenario(const std::filesystem::path &fixture, TsfPreeditStyle style,
           "TIP session created");
   std::size_t insertions = 0, observations = 0;
   uint64_t request = 0;
+  msime::tsf::WubiCommitOwner owner;
   const auto check_views = [&] {
     require(tip.view(&raw, &error), "TIP view available");
     const auto view = nlohmann::json::parse(raw).at("value");
@@ -71,31 +72,39 @@ void scenario(const std::filesystem::path &fixture, TsfPreeditStyle style,
     packet.wch = letter;
     packet.modifiers_down = (shift ? 1u : 0u) |
         (uiless ? FanyImePipeFlags::UiLess : 0u);
-    packet.modifiers_down = PipeMetadata::local_character_commit_modifiers(
-        packet, FanyImeProtocol::Capabilities | FanyImeProtocol::LocalCharacterCommit, true);
+    owner.begin(request, 100);
     const auto reply = composer.basic_key(server, packet, 1, style);
     require(reply.has_value(), "Server accepts the character");
     require(tip.character(letter, shift, &raw, &error), "TIP accepts the character");
     msime::tsf::EngineResult result;
     require(tip.parse_result(raw, &result, &error), "TIP character result parsed");
-    require(msime::tsf::ApplyHostCharacterResult(result,
-        [&](const std::string &text) { inserted += text; ++insertions; return true; },
-        [] { return true; }, [] { return true; }) == msime::tsf::CharacterResultStatus::Applied,
-        "production TIP result application succeeds");
-    // 真正的 TIP 已插入自动提交。无论 worker 在本地结束组字前后送达，
-    // 都不能再发送第二份文字；此处直接检查生产投影，避免靠时序掩盖重复。
-    require(!reply->worker, "#9452: local Wubi commits must not also emit a commit worker");
-    if (result.has_commit) {
-      require(reply->committed_text == result.commit,
-              "Server observes exactly the text TIP inserted");
-      require(!reply->encoded || (static_cast<bool>(*reply->encoded) &&
-          (reply->encoded->packet.msg_type == FanyImeReplyType::Preedit ||
-           reply->encoded->packet.msg_type == FanyImeReplyType::UiLessComposition ||
-           reply->encoded->packet.msg_type == FanyImeReplyType::NavigationIgnored)),
-          "character reply only projects the remaining composition");
+    const auto apply = [&](const msime::tsf::EngineResult &value) {
+      return msime::tsf::ApplyHostCharacterResult(value,
+          [&](const std::string &text) { inserted += text; ++insertions; return true; },
+          [] { return true; }, [] { return true; });
+    };
+    const bool deferred = owner.observe(result);
+    if (!deferred)
+      require(apply(result) == msime::tsf::CharacterResultStatus::Applied,
+              "ordinary TIP result application succeeds");
+    require(owner.finish_local() == deferred, "local ownership matches the actual commit");
+    // 保留原 PR 的 86/98 与偏好矩阵，最终写入改由 Server 的结果负责。
+    if (deferred) {
+      require(reply->worker && reply->committed_text &&
+              reply->worker->at(0) == FanyImeWorkerReplyType::CommitCandidateAndContinue,
+              "Server retains the final commit worker");
+      require(owner.worker(1) == msime::tsf::WubiCommitOwner::Worker::Ready,
+              "worker waits for the local character edit");
+      require(tip.view(&raw, &error) && tip.parse_result(raw, &result, &error),
+              "worker reads the live remaining composition");
+      require(apply(msime::tsf::ServerWubiCommit(std::move(result), *reply->committed_text)) ==
+              msime::tsf::CharacterResultStatus::Applied,
+              "Server final text is inserted once");
     } else {
-      require(!reply->committed_text, "no commit means no statistics observation");
+      require(!reply->worker && !reply->committed_text,
+              "ordinary code has no commit worker or observation");
     }
+    owner.clear();
     if (reply->committed_text) {
       counted += *reply->committed_text;
       ++observations;
@@ -129,8 +138,7 @@ void scenario(const std::filesystem::path &fixture, TsfPreeditStyle style,
     composer.confirm_delivery(42, 1, request);
   }
 }
-void fallback_scenario(const std::filesystem::path &fixture,
-                       std::uint32_t capabilities, bool has_local_session) {
+void fallback_scenario(const std::filesystem::path &fixture) {
   const auto root = std::filesystem::temp_directory_path() /
       ("msime-wubi-fallback-" + std::to_string(
           std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -154,10 +162,6 @@ void fallback_scenario(const std::filesystem::path &fixture,
     packet.request_id = ++request;
     packet.keycode = letter - 'a' + 'A';
     packet.wch = letter;
-    packet.modifiers_down = PipeMetadata::local_character_commit_modifiers(
-        packet, capabilities, has_local_session);
-    require(!(packet.modifiers_down & FanyImePipeFlags::LocalCharacterCommit),
-            "legacy or missing local session must not claim a local commit");
     const auto reply = composer.basic_key(server, packet, 1, TsfPreeditStyle::Local);
     require(reply.has_value(), "legacy Server accepts the character");
     if (reply->committed_text) {
@@ -172,38 +176,12 @@ void fallback_scenario(const std::filesystem::path &fixture,
           "legacy path commits once and finishes its code");
 }
 
-void negotiation_tests(const std::filesystem::path &fixture) {
-  const auto modern = FanyImeProtocol::Capabilities | FanyImeProtocol::LocalCharacterCommit;
-  const auto hello = FanyImeProtocol::Hello(42, 1, modern);
-  const auto old_server = FanyImeProtocol::Negotiate(hello, FanyImeProtocol::Capabilities);
-  const auto old_tip = FanyImeProtocol::Negotiate(FanyImeProtocol::Hello(42, 1), modern);
-  const auto both = FanyImeProtocol::Negotiate(hello, modern);
-  require(old_server.accepted && old_tip.accepted && both.accepted,
-          "optional commit ownership keeps old peers compatible");
-  fallback_scenario(fixture, old_server.capabilities, true);
-  fallback_scenario(fixture, old_tip.capabilities, false);
-  fallback_scenario(fixture, both.capabilities, false);
-  FanyImeNamedpipeData packet{};
-  packet.event_type = FanyImePipeEventType::KeyEvent;
-  packet.modifiers_down = 1u | FanyImePipeFlags::UiLess | PipeMetadata::CandidateActive;
-  packet.modifiers_down = PipeMetadata::local_character_commit_modifiers(packet, both.capabilities, true);
-  require((packet.modifiers_down & FanyImePipeFlags::LocalCharacterCommit) &&
-          PipeMetadata::key_modifiers(packet.modifiers_down) == 1u,
-          "ownership metadata does not change keyboard modifiers");
-  const auto previous = packet.modifiers_down & ~FanyImePipeFlags::LocalCharacterCommit;
-  require(PipeMetadata::local_character_commit_modifiers(packet, old_server.capabilities, true) == previous &&
-          PipeMetadata::local_character_commit_modifiers(packet, both.capabilities, false) == previous,
-          "retries clear stale ownership after losing capability or session");
-  packet.event_type = FanyImePipeEventType::StatusSnapshot;
-  require(PipeMetadata::local_character_commit_modifiers(packet, both.capabilities, true) == previous,
-          "non-key packets do not carry character commit ownership");
-}
 } // namespace
 
 int main(int argc, char **argv) {
   require(argc == 2, "synthetic Wubi fixture required");
   try {
-    negotiation_tests(argv[1]);
+    fallback_scenario(argv[1]);
     for (auto style : {TsfPreeditStyle::Local, TsfPreeditStyle::Pinyin, TsfPreeditStyle::Empty})
       for (bool uiless : {false, true})
         for (bool wubi98 : {false, true}) {
@@ -218,6 +196,6 @@ int main(int argc, char **argv) {
     std::fprintf(stderr, "FAIL: %s\n", error.what());
     return EXIT_FAILURE;
   }
-  std::puts("Wubi auto commit: TIP insertion, Server observation and continuation passed");
+  std::puts("Wubi auto commit: 86/98, preferences, Server final text and legacy continuation passed");
   return EXIT_SUCCESS;
 }

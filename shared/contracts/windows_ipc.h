@@ -158,8 +158,6 @@ namespace FanyImePipeFlags
 constexpr std::uint32_t UiLess = 0x80000000u;
 // 仅在协商到 UiLessCandidates 后设置：TIP 没有有效的本地引擎会话，请 Server 推送候选页。
 constexpr std::uint32_t ServerUiLessCandidates = 0x08000000u;
-// 仅在协商到 LocalCharacterCommit 且 TIP 有有效本地宿主会话时设置，只用于 KeyEvent。
-constexpr std::uint32_t LocalCharacterCommit = 0x04000000u;
 } // namespace FanyImePipeFlags
 
 namespace FanyImePipeRole

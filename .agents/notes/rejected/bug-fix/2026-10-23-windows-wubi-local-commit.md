@@ -1,12 +1,12 @@
 # Agent Note: Windows 五笔自动提交只写一次
 
-Status: implemented
+Status: rejected — 真实双会话证明本地文本会丢失 Server 的繁体投影和插件改写，改用 Server 最终文本。
 
 ## Problem
 
 #9452 报告部分五笔词组自动上屏两份。TIP 的字符路径已调用自己的 Host API，并经 `ApplyHostCharacterResult` 写入自动提交；Server 的 `ReplyComposer::edit` 却继续把同一次五笔提交投影成 `AutoCommitAndContinue` worker 消息。worker 入队时才捕获当前组字代次，本地提交已经完成时它会携带新的代次，代次检查不能保证消除重复。
 
-## Decision
+## Proposal
 
 TIP 与 Server 通过可选能力 `FanyImeProtocol::LocalCharacterCommit`（第 11 位）协商逐键提交归属。TIP 在最终 Main 写入边界确认当前存在有效的本地宿主会话，再给 `KeyEvent.modifiers_down` 加 `FanyImePipeFlags::LocalCharacterCommit`（`0x04000000`）；重连到旧 Server、失去本地会话或非按键包都会清掉这一位。它不是键盘修饰键，`PipeMetadata::key_modifiers` 统一剥离。
 
@@ -32,3 +32,7 @@ TIP 与 Server 通过可选能力 `FanyImeProtocol::LocalCharacterCommit`（第 
 声明本地归属的字符自动提交只有 TIP 写入，Server 保留统计和后续组字投影；普通候选选择仍走原来的选词回复。逐键元数据增加一项可选协议能力，兼容旧客户端与本地会话不可用的输入；旧 Server 协商不到能力时仍沿用原语义，完整修复依赖新版 TIP 和 Server 配对。
 
 本机没有 Windows 桌面，真实 TSF 编辑器输入验收仍需 Windows；可移植回归验证生产会话、结果应用与回复投影，不声称完整 COM 系统验收。
+
+## 替代决定
+
+原方案的优点是减少一次 worker 编辑并复用 TIP 已有的结果应用，但 `17befb822a1b4cccb6a5df80e2dfbb0e5c52db81` 的真实双会话复现显示：繁体 Server 输出“測試詞組”，TIP 插入“测试词组”；实际导入并授权的 `before_commit` 插件也只改写 Server 文本。前述原验证未覆盖这两处差异，其通过不能支持最终提交文本一致。改用[Server 最终提交所有权](../../implemented/bug-fix/2026-10-23-windows-wubi-commit-owner.md)，本篇保留被放弃方案与原验证的历史记录。

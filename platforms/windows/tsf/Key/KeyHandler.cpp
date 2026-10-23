@@ -902,6 +902,15 @@ HRESULT CMetasequoiaIME::_HandleCommitCandidateAndContinue(TfEditCookie ec, _In_
     }
 
     CCompositionProcessorEngine *engine = _pCompositionProcessorEngine;
+    if (auto *host = engine ? engine->GetHostEngineAdapter() : nullptr; host && host->valid())
+    {
+        std::string raw, error;
+        msime::tsf::EngineResult live;
+        if (!host->view(&raw, &error) || !msime::tsf::EngineSessionAdapter::parse_result(raw, &live, &error))
+            return E_FAIL;
+        return _ApplyHostCompositionResult(ec, pContext,
+            msime::tsf::ServerWubiCommit(std::move(live), FanyUtils::wstring_to_string(commitText)), true);
+    }
     const std::wstring buffer = engine ? engine->GetKeystrokeBuffer().ToWString() : std::wstring{};
     if (_pComposition == nullptr)
     {
@@ -1118,6 +1127,8 @@ HRESULT CMetasequoiaIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContex
         {
             DebugTsfIssue47(L"composition-selection-outside", requestId, 0, wch, CATEGORY_COMPOSING, FUNCTION_INPUT, 1,
                             _IsComposing(), pCompositionProcessorEngine->GetVirtualKeyLength(), S_FALSE);
+            // 字符尚未交给本地会话，回放槽必须走失败恢复。
+            workerResult = S_FALSE;
             goto Exit;
         }
     }
@@ -1180,8 +1191,10 @@ Exit:
 }
 
 HRESULT CMetasequoiaIME::_ApplyHostCompositionResult(TfEditCookie ec, ITfContext *pContext,
-                                                       const msime::tsf::EngineResult &result)
+                                                       const msime::tsf::EngineResult &result, bool serverCommit)
 {
+    // 在线五笔先推进会话，文档等待同一回放 token 的 Server 最终文本。
+    if (!serverCommit && _wubiCommitOwner.observe(result)) return S_OK;
     HRESULT outcome = S_OK;
     const auto status = msime::tsf::ApplyHostCharacterResult(result, [&](const std::string &text) {
         if (text.size() > static_cast<size_t>((std::numeric_limits<int>::max)())) return false;

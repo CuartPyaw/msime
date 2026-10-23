@@ -538,14 +538,10 @@ ReplyComposer::edit(ServerSession &session, const FanyImeNamedpipeData &packet,
       !result.transition.at("commit").is_null() &&
       (scheme::AlwaysInlinePreedit(view_scheme(result.transition.at("view"))) ||
        (runtime_phrase_ && kind == EditKind::Erase));
-  // 有本地会话的 TIP 已写入五笔自动提交，Server 只观察；未声明时保留旧管道提交。
-  // 再发提交 worker 会在本地结束组字后入队时携带新代次，造成同一词上屏两次。
-  const bool tip_wubi_commit = auto_wubi_commit &&
-      (packet.modifiers_down & FanyImePipeFlags::LocalCharacterCommit) != 0;
   return stage(result,
-               auto_wubi_commit && !tip_wubi_commit ? ReplyPath::AutoCommitAndContinue
-               : tip_wubi_commit || tip_commit     ? ReplyPath::SyllableCommit
-                                                   : path,
+               auto_wubi_commit ? ReplyPath::AutoCommitAndContinue
+               : tip_commit     ? ReplyPath::SyllableCommit
+                                : path,
                uiless, std::nullopt,
                wubi_continue_consumed(
                    before.at("editing_text").get<std::string>().size(),

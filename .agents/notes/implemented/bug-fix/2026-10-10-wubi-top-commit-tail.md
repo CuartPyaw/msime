@@ -12,8 +12,6 @@ Status: implemented
 
 四码与拼音读音前缀碰撞时，第五码先由引擎判断是否可续输，见[五笔拼音续输](../bug-fix/2026-10-18-wubi-mixed-pinyin-continuation.md)。可续输时保留组字，其余顶字规则不变。
 
-Windows 双会话的文档写入归属见[五笔本地提交](2026-10-23-windows-wubi-local-commit.md)：TIP 声明本地提交归属后，Server 只观察，不再为同一次字符提交额外发送 worker；旧客户端和无本地会话的路径继续使用原 worker。
-
 ## Alternatives considered
 
 - 只在宿主层重放第五个按键：各宿主对 Shift 状态和本地模式的判断不同，无法保证与引擎状态一致。
@@ -27,3 +25,5 @@ Windows 双会话的文档写入归属见[五笔本地提交](2026-10-23-windows
 ## Verification
 
 先让大写后续按键回归测试在旧实现上失败，再实现尾部合并。`cargo test -p msime-input-runtime --lib --locked`：160 passed；`cargo fmt --all -- --check`、`cargo clippy -p msime-input-runtime --all-targets --locked -- -D warnings`、`git diff --check` 和 `bash scripts/verify-local.sh --quick` 均通过。
+
+Windows 双会话写入归属见[五笔最终提交文本](2026-10-23-windows-wubi-commit-owner.md)，本篇继续持有引擎的顶字尾部规则。

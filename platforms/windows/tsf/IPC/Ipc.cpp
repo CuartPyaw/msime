@@ -543,7 +543,6 @@ bool WritePipeHello(HANDLE hPipeHandle, UINT pipeRole)
                       FanyImeProtocol::HostOnlineCandidates |
                                        FanyImeProtocol::KeyboardCompositionCancel |
                                        FanyImeProtocol::GameHostCandidate | FanyImeProtocol::FieldTraits |
-                                       FanyImeProtocol::LocalCharacterCommit |
                                        FanyImeProtocol::JapaneseToggleShortcut);
         BOOL ret = WriteFile(hPipeHandle, &hello, sizeof(hello), &bytesWritten, NULL);
         // Never authorize keys from merely writing a hello. An old Server
@@ -1246,15 +1245,6 @@ bool SendToNamedpipe(bool *deliveryAmbiguous = nullptr)
         auto *host = engine ? engine->GetHostEngineAdapter() : nullptr;
         if (!host || !host->valid())
             packet.modifiers_down |= FanyImePipeFlags::ServerUiLessCandidates;
-    }
-
-    if (packet.event_type == FanyImePipeEventType::KeyEvent)
-    {
-        const auto *service = static_cast<const CMetasequoiaIME *>(boundFocusStateOwner);
-        auto *engine = service ? service->GetCompositionProcessorEngine() : nullptr;
-        auto *host = engine ? engine->GetHostEngineAdapter() : nullptr;
-        packet.modifiers_down = msime::windows::PipeMetadata::local_character_commit_modifiers(
-            packet, negotiatedServerCapabilities, host && host->valid());
     }
 
     // 强制叠加的游戏会话。放在最终的重连和确认检查之后：Main 管道在 EnsureNamedpipeFocusSessionActivated 里才打开并协商，放在前面的话，首次按键和 Server 重启后的第一次按键都拿不到协商结果。
