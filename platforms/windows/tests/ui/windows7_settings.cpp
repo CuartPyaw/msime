@@ -921,6 +921,36 @@ int main() {
   assert(store.load().snapshot->preferences().at("translation_account") == false);
   assert(store.load().snapshot->preferences().at("tencent_tmt").at("secret_id") == "SYNTHETIC_ID");
   assert(store.load().snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  // AI 输入辅助的原生控件复用地址校验和 CAS 存储；测试只写合成地址与密钥，不发网络请求。
+  select_page(6);
+  assert((GetWindowLongPtrW(GetDlgItem(body, ai_enabled), GWL_STYLE) & WS_VISIBLE) != 0);
+  const auto ai_revision = store.load().snapshot->revision();
+  SetWindowTextW(GetDlgItem(body, ai_endpoint), L"https://ai.example.invalid/v1/chat/completions");
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(ai_endpoint, EN_CHANGE), reinterpret_cast<LPARAM>(GetDlgItem(body, ai_endpoint)));
+  assert(IsWindowEnabled(GetDlgItem(body, ai_service_save)) != FALSE);
+  SetWindowTextW(GetDlgItem(body, ai_model), L"synthetic-model");
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(ai_model, CBN_EDITCHANGE), reinterpret_cast<LPARAM>(GetDlgItem(body, ai_model)));
+  click(ai_service_save);
+  saved = store.load();
+  assert(saved.snapshot->revision() == ai_revision + 1);
+  assert(saved.snapshot->preferences().at("ai_assistant").at("endpoint") == "https://ai.example.invalid/v1/chat/completions");
+  assert(saved.snapshot->preferences().at("ai_assistant").at("model") == "synthetic-model");
+  SetWindowTextW(GetDlgItem(body, ai_token), L"synthetic-ai-token");
+  SendMessageW(body, WM_COMMAND, MAKEWPARAM(ai_token, EN_CHANGE), reinterpret_cast<LPARAM>(GetDlgItem(body, ai_token)));
+  click(ai_token_save);
+  saved = store.load();
+  const auto ai_origin = saved.snapshot->preferences().at("ai_assistant").at("tokens");
+  assert(!ai_origin.empty());
+  assert(std::any_of(ai_origin.begin(), ai_origin.end(), [](const auto& entry) { return entry.value() == "synthetic-ai-token"; }));
+  assert(saved.snapshot->preferences().at("ai_assistant").at("token") == "");
+  assert(IsWindowEnabled(GetDlgItem(body, ai_models_fetch)) != FALSE);
+  assert(IsWindowEnabled(GetDlgItem(body, ai_test)) == FALSE); // AI 总开关仍按原偏好控制测试按钮。
+  const auto ai_before_toggle = saved.snapshot->revision();
+  click(ai_enabled);
+  saved = store.load();
+  assert(saved.snapshot->revision() == ai_before_toggle + 1);
+  assert(saved.snapshot->preferences().at("ai_assistant").at("enabled") == true);
+  assert(IsWindowEnabled(GetDlgItem(body, ai_test)) != FALSE);
   saved = store.load();
   // 候选外观的可选字段及已有范围外展示值不能因页面切换被静默归一。
   const auto appearance_seed = store.save(*saved.snapshot, {{{"candidate_page_size"}, 2},

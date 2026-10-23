@@ -7,6 +7,7 @@
 #include "GlossForm.h"
 #include "TranslationForm.h"
 #include "CandidateAppearanceForm.h"
+#include "AiForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -41,7 +42,7 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance };
+enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -231,13 +232,14 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, font_catalog, game_profile };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, font_catalog, game_profile };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
   std::filesystem::path file{};
   std::string text;
   std::optional<Json> credential;
+  bool ai_models = false;
 };
 
 struct Completion {
@@ -249,6 +251,8 @@ struct Completion {
   std::optional<Json> lookup;
   std::optional<Json> credential_request;
   std::optional<Json> credential_response;
+  std::optional<Json> ai_models_response;
+  bool ai_models = false;
   std::optional<Json> fonts;
   bool game_profile_enabled = false;
 };
@@ -285,6 +289,7 @@ private:
     folder_.clear();
     lookup_.reset();
     credential_response_.reset();
+    ai_models_response_.reset();
     fonts_.reset();
     if (!store_) {
       directory_ = preferences_directory();
@@ -309,6 +314,13 @@ private:
       auto owned = msime::host_api::own_string(msime_client_test_api_credential(
           reinterpret_cast<const uint8_t*>(request.data()), request.size()));
       credential_response_ = owned ? Json::parse(owned.get(), nullptr, false) : Json();
+      return {Outcome::loaded, snapshot_};
+    }
+    if (job.action == Job::Action::ai_models && job.credential) {
+      const auto request = job.credential->dump();
+      auto owned = msime::host_api::own_string(msime_client_ai_models(
+          reinterpret_cast<const uint8_t*>(request.data()), request.size()));
+      ai_models_response_ = owned ? Json::parse(owned.get(), nullptr, false) : Json();
       return {Outcome::loaded, snapshot_};
     }
     if (job.action == Job::Action::wubi_lookup) {
@@ -378,7 +390,7 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(fonts_), msime::windows::game_profile::enabled()};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(ai_models_response_), job.ai_models, std::move(fonts_), msime::windows::game_profile::enabled()};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
@@ -405,6 +417,7 @@ private:
   HelpcodeSources helpcodes_;
   std::optional<Json> lookup_;
   std::optional<Json> credential_response_;
+  std::optional<Json> ai_models_response_;
   std::optional<Json> fonts_;
   std::thread thread_;
 };
@@ -440,6 +453,7 @@ struct SettingsWindow::State {
   int mode_height = 0;
   int advanced_height = 0;
   int appearance_height = 0;
+  int ai_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
   int expression_tab = 0;
@@ -461,6 +475,7 @@ struct SettingsWindow::State {
   GlossForm gloss_form;
   TranslationForm translation_form;
   CandidateAppearanceForm appearance_form;
+  AiForm ai_form;
   Confirmation confirmation;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
@@ -486,7 +501,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -555,6 +570,10 @@ struct SettingsWindow::State {
     appearance_height = appearance_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                    int id, int top, int height) {
       return surface_row(Surface::appearance, type, text, style, id, top, height);
+    });
+    ai_height = ai_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+                                      int id, int top, int height) {
+      return surface_row(Surface::ai, type, text, style, id, top, height);
     });
     enable(false);
     layout();
@@ -826,6 +845,7 @@ struct SettingsWindow::State {
     gloss_form.enable(enabled);
     translation_form.enable(enabled);
     appearance_form.enable(enabled);
+    ai_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -858,7 +878,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -1002,7 +1022,7 @@ struct SettingsWindow::State {
     if (!CandidateAppearanceForm::valid(preferences)) return false;
     if (!GlossForm::valid(preferences)) return false;
     if (!InputModeForm::valid(preferences)) return false;
-    if (!AdvancedInputForm::valid(preferences) || !SchemeForm::valid(preferences)) return false;
+    if (!AdvancedInputForm::valid(preferences) || !SchemeForm::valid(preferences) || !AiForm::valid(preferences)) return false;
     return true;
   }
 
@@ -1155,6 +1175,7 @@ struct SettingsWindow::State {
       gloss_form.refresh(snapshot->preferences());
       translation_form.refresh(snapshot->preferences());
       appearance_form.refresh(snapshot->preferences());
+      ai_form.refresh(snapshot->preferences());
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1164,9 +1185,15 @@ struct SettingsWindow::State {
     SetWindowTextW(GetDlgItem(body, data_directory_text), completed->directory.empty() ?
         L"未找到数据目录" : completed->directory.c_str());
     if (completed->lookup) scheme_form.lookup_result(*completed->lookup);
-    if (completed->credential_request && completed->credential_response)
-      translation_form.tested(*completed->credential_request, *completed->credential_response);
+    if (completed->credential_request && completed->credential_response) {
+      if (completed->credential_request->value("service", std::string{}) == "ai.assistant")
+        ai_form.completed(*completed->credential_request, *completed->credential_response, false);
+      else
+        translation_form.tested(*completed->credential_request, *completed->credential_response);
+    }
     if (completed->fonts) appearance_form.font_catalog(*completed->fonts);
+    if (completed->ai_models_response && completed->credential_request)
+      ai_form.completed(*completed->credential_request, *completed->ai_models_response, completed->ai_models);
     appearance_form.game_profile(completed->game_profile_enabled);
     enable(snapshot.has_value());
     layout_body();
@@ -1209,7 +1236,7 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
@@ -1242,6 +1269,21 @@ struct SettingsWindow::State {
         job.reload = false;
         job.action = appearance_change.fonts ? Job::Action::font_catalog : appearance_change.game_profile ? Job::Action::game_profile : Job::Action::preferences;
         job.changes = std::move(appearance_change.changes);
+        submit(std::move(job));
+      }
+      return;
+    }
+    auto ai_change = ai_form.command(command);
+    if (ai_change.handled) {
+      if (!ai_change.changes.empty() || ai_change.request) {
+        Job job;
+        job.reload = false;
+        if (!ai_change.changes.empty()) job.changes = std::move(ai_change.changes);
+        if (ai_change.request) {
+          job.credential = std::move(ai_change.request);
+          job.action = ai_change.models ? Job::Action::ai_models : Job::Action::credential_test;
+          job.ai_models = ai_change.models;
+        }
         submit(std::move(job));
       }
       return;
