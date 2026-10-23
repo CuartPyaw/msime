@@ -276,7 +276,7 @@ int main() {
     pump_until([&] { return IsWindowEnabled(GetDlgItem(body, punctuation_mode)) != FALSE; });
   };
   // 输入页的标签切换不落盘；繁简只修改对应开关，不改其他宿主的繁体变体。
-  select_tab(1);
+  select_tab(2);
   assert((GetWindowLongPtrW(GetDlgItem(body, traditional_output), GWL_STYLE) & WS_VISIBLE) != 0);
   assert(store.load().snapshot->revision() == saved.snapshot->revision());
   const auto before_output = saved.snapshot->preferences();
@@ -348,6 +348,86 @@ int main() {
   assert(saved.snapshot->preferences().at("smart_punctuation_direct_letter") == true);
   assert(saved.snapshot->preferences().at("smart_punctuation_repeat") == repeat);
   assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  // 混输总开关仅改变可用状态，保留子项与其他宿主使用的最短触发长度。
+  select_page(3);
+  select_tab(1);
+  assert((GetWindowLongPtrW(GetDlgItem(body, mixed_enabled), GWL_STYLE) & WS_VISIBLE) != 0);
+  assert(store.load().snapshot->revision() == saved.snapshot->revision());
+#if MSIME_EDITION_TEMPORARY_JAPANESE
+  assert(GetDlgItem(body, mixed_japanese));
+#else
+  assert(!GetDlgItem(body, mixed_japanese));
+#endif
+  const auto before_mixed = saved.snapshot->preferences().at("mixed_input");
+  const bool was_mixed = before_mixed.value("enabled", true);
+  click(mixed_enabled);
+  saved = store.load();
+  assert(saved.snapshot->preferences().at("mixed_input").value("enabled", true) != was_mixed);
+  assert(saved.snapshot->preferences().at("mixed_input").at("english") == before_mixed.at("english"));
+  assert(saved.snapshot->preferences().at("mixed_input").at("emoji") == before_mixed.at("emoji"));
+  assert(saved.snapshot->preferences().at("mixed_input").at("minimum_prefix") == before_mixed.at("minimum_prefix"));
+  assert((IsWindowEnabled(GetDlgItem(body, mixed_english)) != FALSE) == !was_mixed);
+  if (was_mixed) click(mixed_enabled);
+  select_value(mixed_first_page_count, 2);
+  assert(store.load().snapshot->preferences().at("mixed_input").at("first_page_count") == 3);
+  select_value(mixed_first_page_count, 0);
+  assert(!store.load().snapshot->preferences().at("mixed_input").contains("first_page_count"));
+  const bool old_symbols = store.load().snapshot->preferences().at("mixed_input").value("symbols", true);
+  click(mixed_symbols);
+  assert(store.load().snapshot->preferences().at("mixed_input").value("symbols", true) != old_symbols);
+  click(mixed_symbols);
+  assert(store.load().snapshot->preferences().at("mixed_input").value("symbols", true) == old_symbols);
+  // 选择来源和编辑文本只改草稿；失败后无关偏好保存也不能把草稿抹掉。
+  saved = store.load();
+  const auto before_draft = saved.snapshot->revision();
+  select_value(cloud_source, 1);
+  assert(store.load().snapshot->revision() == before_draft);
+  assert(IsWindowEnabled(GetDlgItem(body, cloud_endpoint)));
+  assert(!IsWindowEnabled(GetDlgItem(body, cloud_body)));
+  SetWindowTextW(GetDlgItem(body, cloud_endpoint), L"https://synthetic.example.invalid/candidates");
+  SetWindowTextW(GetDlgItem(body, cloud_headers), L"{");
+  click(cloud_save);
+  assert(store.load().snapshot->revision() == before_draft);
+  assert(caption(GetDlgItem(host, status_text)).find(L"未保存的内容已保留") != std::wstring::npos);
+  assert(caption(GetDlgItem(body, cloud_headers)) == L"{");
+  click(learn_candidates);
+  assert(caption(GetDlgItem(body, cloud_headers)) == L"{");
+  assert(SendMessageW(GetDlgItem(body, cloud_source), CB_GETCURSEL, 0, 0) == 1);
+  select_value(cloud_method, 1);
+  select_value(cloud_response_format, 2);
+  assert(IsWindowEnabled(GetDlgItem(body, cloud_body)));
+  assert(IsWindowEnabled(GetDlgItem(body, cloud_response_path)));
+  SetWindowTextW(GetDlgItem(body, cloud_headers), L"{\"X-Synthetic\":\"synthetic-value\"}");
+  SetWindowTextW(GetDlgItem(body, cloud_body), L"{\"query\":\"{query}\",\"test\":\"合成\"}");
+  SetWindowTextW(GetDlgItem(body, cloud_response_path), L"choices.0.message.content");
+  SetWindowTextW(GetDlgItem(body, cloud_timeout), L"2500");
+  const auto before_cloud_save = store.load().snapshot->revision();
+  click(cloud_save);
+  saved = store.load();
+  assert(saved.snapshot->revision() == before_cloud_save + 1);
+  const auto cloud_config = saved.snapshot->preferences().at("cloud_candidate_provider");
+  assert(cloud_config.at("source") == "custom" && cloud_config.at("method") == "POST");
+  assert(cloud_config.at("headers_json") == "{\"X-Synthetic\":\"synthetic-value\"}");
+  assert(cloud_config.at("body_template") == "{\"query\":\"{query}\",\"test\":\"合成\"}");
+  assert(cloud_config.at("response_path") == "choices.0.message.content");
+  assert(cloud_config.at("timeout_ms") == 2500);
+  assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  SetWindowTextW(GetDlgItem(body, cloud_timeout), L"invalid");
+  click(cloud_save);
+  assert(store.load().snapshot->revision() == saved.snapshot->revision());
+  assert(caption(GetDlgItem(body, cloud_timeout)) == L"invalid");
+  // 新的服务快照胜过过期草稿，CAS 冲突不能静默覆盖别处的选择。
+  auto external_cloud = cloud_config;
+  external_cloud["timeout_ms"] = 3500;
+  const auto cloud_peer = store.save(*saved.snapshot, {{{"cloud_candidate_provider"}, external_cloud}});
+  assert(cloud_peer.outcome == Outcome::saved);
+  SetWindowTextW(GetDlgItem(body, cloud_timeout), L"3000");
+  click(cloud_save);
+  saved = store.load();
+  assert(saved.snapshot->revision() == cloud_peer.snapshot->revision());
+  assert(saved.snapshot->preferences().at("cloud_candidate_provider").at("timeout_ms") == 3500);
+  assert(caption(GetDlgItem(body, cloud_timeout)) == L"3500");
+  assert(caption(GetDlgItem(host, status_text)).find(L"其他窗口") != std::wstring::npos);
   // 原有自定义尺寸只在用户选择标准档位后才改变；两个尺寸字段原子保存。
   select_page(1);
   const HWND size = GetDlgItem(body, toolbar_size);

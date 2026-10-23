@@ -1,5 +1,6 @@
 #include "SettingsWindow.h"
 #include "PreferencesStore.h"
+#include "CloudCandidateForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -33,7 +34,7 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation };
+enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates };
 struct ToolbarCheck { int id; const char* field; const wchar_t* label; };
 constexpr std::array<ToolbarCheck, 11> toolbar_checks{{
     {toolbar_enabled, "enabled", L"在桌面显示悬浮工具栏"},
@@ -73,6 +74,26 @@ constexpr std::array<NavigationCheck, 6> punctuation_checks{{
 }};
 constexpr std::array<const char*, 3> quote_values{{"curly", "corner", "corner_when_traditional"}};
 constexpr std::array<const char*, 2> bracket_values{{"solid", "hollow"}};
+struct CandidateCheck {
+  int id;
+  const char* group;
+  const char* field;
+  const wchar_t* title;
+  const wchar_t* description;
+  bool fallback;
+};
+constexpr std::array<CandidateCheck, 10> candidate_checks{{
+    {cloud_candidates, "", "cloud_candidates", L"云候选", L"仅将当前正在组的拼写发送给所选云候选服务，不发送已上屏内容、词库或历史。", false},
+    {mixed_enabled, "mixed_input", "enabled", L"候选混输", L"关闭后保留各项设置，再开启时恢复。", true},
+    {mixed_english, "mixed_input", "english", L"中英混输", L"中文输入时在候选项中补充英文单词。", true},
+    {mixed_emoji, "mixed_input", "emoji", L"emoji 混输", L"在对应中文词后补充匹配的 emoji，对不上候选词的排在末尾。", false},
+    {mixed_symbols, "mixed_input", "symbols", L"符号混输", L"完整输入符号名称时，在对应词后加入符号，例如「正负」后面是 ±。", true},
+    {mixed_kaomoji, "mixed_input", "kaomoji", L"颜文字混输", L"在对应中文词后补充匹配的颜文字，排在同一个词的 emoji 之后。", false},
+    {mixed_japanese, "mixed_input", "japanese", L"日文混输（实验）", L"全拼、双拼里完整输入日文罗马字时补充日文候选；词典不在时不生效。", false},
+    {learn_candidates, "", "learning", L"学习选词习惯", L"根据选词调整候选顺序。", true},
+    {single_character_only, "", "single_character_only", L"只出单字", L"候选只列单个汉字，不出词组和整句；选一个字后接着拼下一个字。", false},
+    {word_lattice, "sentence_association", "word_lattice", L"本地整句联想", L"把词库组合出的整句加入候选；关闭后仍保留单词候选。", true},
+}};
 
 // 这些标识来自共享配置的枚举，不用于转换用户文本。
 std::wstring wide_id(const std::string& value) { return {value.begin(), value.end()}; }
@@ -288,17 +309,20 @@ struct SettingsWindow::State {
   int selection_height = 0;
   int output_height = 0;
   int punctuation_height = 0;
+  int candidates_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
   std::vector<std::string> word_choices;
   Surface surface = Surface::shortcuts;
   bool busy = true;
+  bool saving_cloud = false;
   bool failed = false;
   bool com_initialized = false;
   std::vector<Item> items;
   std::unique_ptr<Worker> worker;
   std::optional<Snapshot> snapshot;
   FilePicker file_picker;
+  CloudCandidateForm cloud_form;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
 
@@ -367,6 +391,7 @@ struct SettingsWindow::State {
     selection_controls();
     output_controls();
     punctuation_controls();
+    candidates_controls();
     enable(false);
     layout();
     return !failed;
@@ -566,6 +591,48 @@ struct SettingsWindow::State {
     punctuation_height = top + 16;
   }
 
+  void candidates_controls() {
+    const auto item = [this](const wchar_t* type, const wchar_t* text, DWORD style,
+                            int id, int top, int height) {
+      return surface_row(Surface::candidates, type, text, style, id, top, height);
+    };
+    item(L"STATIC", L"候选与联想", SS_LEFT, -1, 0, 28);
+    int top = 44;
+    for (const auto& field : candidate_checks) {
+      if (field.id == mixed_japanese && !MSIME_EDITION_TEMPORARY_JAPANESE) continue;
+      item(L"BUTTON", field.title, WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY, field.id, top, 28);
+      item(L"STATIC", field.description, SS_LEFT, -1, top + 36, 48);
+      top += 100;
+      if (field.id == mixed_english) {
+        item(L"STATIC", L"首页英文候选数", SS_LEFT, -1, top, 24);
+        item(L"STATIC", L"首页有空间时优先排列的英文候选数。", SS_LEFT, -1, top + 32, 28);
+        const auto count = item(WC_COMBOBOXW, L"首页英文候选数", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+            mixed_first_page_count, top + 70, 160);
+        for (const auto* title : {L"1", L"2", L"3"})
+          SendMessageW(count, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
+        top += 120;
+      }
+    }
+    item(L"STATIC", L"云候选服务", SS_LEFT, -1, top + 12, 28);
+    candidates_height = cloud_form.create(item, top + 60);
+  }
+
+  static const Json& candidate_group(const Json& preferences, const CandidateCheck& field) {
+    return *field.group ? preferences.at(field.group) : preferences;
+  }
+
+  void refresh_candidates() {
+    if (!snapshot) return;
+    const auto& preferences = snapshot->preferences();
+    for (const auto& field : candidate_checks)
+      if (const auto control = GetDlgItem(body, field.id))
+        SendMessageW(control, BM_SETCHECK,
+            candidate_group(preferences, field).value(field.field, field.fallback) ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(GetDlgItem(body, mixed_first_page_count), CB_SETCURSEL,
+        preferences.at("mixed_input").value("first_page_count", 1) - 1, 0);
+    cloud_form.refresh(preferences.at("cloud_candidate_provider"));
+  }
+
   void enable(bool enabled) {
     for (int id : {language_switch, caps_lock, japanese_toggle, traditional_toggle, fullwidth_toggle})
       if (HWND control = GetDlgItem(body, id)) EnableWindow(control, enabled);
@@ -582,6 +649,13 @@ struct SettingsWindow::State {
     for (const auto& field : punctuation_checks)
       EnableWindow(GetDlgItem(body, field.id), enabled &&
           (field.id == paired_punctuation || field.id == smart_punctuation || smart));
+    const bool mixed = snapshot && snapshot->preferences().at("mixed_input").value("enabled", true);
+    for (const auto& field : candidate_checks)
+      if (const auto control = GetDlgItem(body, field.id))
+        EnableWindow(control, enabled && (field.id == mixed_enabled || std::string_view(field.group) != "mixed_input" || mixed));
+    EnableWindow(GetDlgItem(body, mixed_first_page_count), enabled && mixed && snapshot &&
+        snapshot->preferences().at("mixed_input").at("english").get<bool>());
+    cloud_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -596,7 +670,7 @@ struct SettingsWindow::State {
     MoveWindow(selector_label, dip(24), dip(18), dip(80), dip(26), TRUE);
     MoveWindow(selector, dip(112), dip(12), std::max(width - dip(136), 1), dip(160), TRUE);
     const bool has_tabs = surface == Surface::shortcuts || surface == Surface::reference ||
-        surface == Surface::selection || surface == Surface::output;
+        surface == Surface::selection || surface == Surface::output || surface == Surface::candidates;
     ShowWindow(tabs, has_tabs ? SW_SHOW : SW_HIDE);
     MoveWindow(tabs, dip(24), dip(52), std::max(width - dip(48), 1), dip(30), TRUE);
     const int body_top = has_tabs ? 94 : 58;
@@ -616,7 +690,7 @@ struct SettingsWindow::State {
     const int total = surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
-        surface == Surface::punctuation ? punctuation_height : content_height;
+        surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height : content_height;
     info.nMax = reference ? 0 : dip(total) - 1;
     info.nPage = static_cast<UINT>(std::max(client.bottom, 0L));
     info.nPos = reference ? 0 : scroll;
@@ -648,7 +722,9 @@ struct SettingsWindow::State {
     if (GetDlgCtrlID(control) == language_switch || GetDlgCtrlID(control) == toolbar_size ||
         GetDlgCtrlID(control) == word_character_keys || GetDlgCtrlID(control) == traditional_output ||
         GetDlgCtrlID(control) == punctuation_mode || GetDlgCtrlID(control) == quote_style ||
-        GetDlgCtrlID(control) == bracket_style)
+        GetDlgCtrlID(control) == bracket_style || GetDlgCtrlID(control) == mixed_first_page_count ||
+        GetDlgCtrlID(control) == cloud_source || GetDlgCtrlID(control) == cloud_method ||
+        GetDlgCtrlID(control) == cloud_response_format)
       rectangle.bottom = rectangle.top + dip(32);
     if (rectangle.top < 0) scroll_to(scroll + rectangle.top);
     else if (rectangle.bottom > viewport.bottom) scroll_to(scroll + rectangle.bottom - viewport.bottom);
@@ -656,6 +732,8 @@ struct SettingsWindow::State {
 
   void submit(Job job) {
     if (busy) return;
+    saving_cloud = job.changes.size() == 1 &&
+        job.changes.front().path == std::vector<std::string>{"cloud_candidate_provider"};
     busy = true;
     enable(false);
     const wchar_t* message = job.reload ? L"正在读取设置…" : L"正在保存…";
@@ -728,6 +806,21 @@ struct SettingsWindow::State {
     if (std::find(quote_values.begin(), quote_values.end(), quote) == quote_values.end()) return false;
     const auto bracket = preferences.value("bracket_style", std::string("solid"));
     if (std::find(bracket_values.begin(), bracket_values.end(), bracket) == bracket_values.end()) return false;
+    for (const auto* group : {"mixed_input", "sentence_association", "cloud_candidate_provider"})
+      if (!preferences.contains(group) || !preferences.at(group).is_object()) return false;
+    for (const auto& field : candidate_checks) {
+      const auto& group = candidate_group(preferences, field);
+      const bool optional = field.id == mixed_enabled || field.id == mixed_symbols || field.id == mixed_japanese;
+      if (!group.contains(field.field)) {
+        if (optional) continue;
+        return false;
+      }
+      if (!group.at(field.field).is_boolean()) return false;
+    }
+    const auto& mixed = preferences.at("mixed_input");
+    if (mixed.contains("first_page_count") && !mixed.at("first_page_count").is_number_integer()) return false;
+    if (mixed.value("first_page_count", 1) < 1 || mixed.value("first_page_count", 1) > 3) return false;
+    if (!CloudCandidateForm::valid(preferences.at("cloud_candidate_provider"))) return false;
     return true;
   }
 
@@ -873,6 +966,7 @@ struct SettingsWindow::State {
       refresh_toolbar();
       refresh_selection();
       refresh_output_and_punctuation();
+      refresh_candidates();
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -891,6 +985,8 @@ struct SettingsWindow::State {
     case Outcome::invalid_response: message = L"设置返回内容无法读取，请重新读取后重试。"; break;
     case Outcome::storage: message = L"读写设置失败，请重新读取后重试。"; break;
     }
+    if (saving_cloud && result->outcome == Outcome::storage)
+      message = L"保存云候选服务失败，请检查地址、请求头 JSON、请求体模板、响应路径和超时；未保存的内容已保留。";
     if (!completed->folder.empty()) {
       const auto opened = reinterpret_cast<INT_PTR>(ShellExecuteW(window, L"open",
           completed->folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL));
@@ -907,7 +1003,7 @@ struct SettingsWindow::State {
       if (selected == 0 || selected == 3) {
         const std::vector<const wchar_t*> titles = selected == 0 ?
             std::vector<const wchar_t*>{L"按键设置", L"按键速查"} :
-            std::vector<const wchar_t*>{L"选词与翻页", L"输出设置"};
+            std::vector<const wchar_t*>{L"选词与翻页", L"候选与联想", L"输出设置"};
         for (size_t index = 0; index < titles.size(); ++index) {
           TCITEMW tab{};
           tab.mask = TCIF_TEXT;
@@ -917,7 +1013,7 @@ struct SettingsWindow::State {
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : input_tab);
       }
       surface = selected == 4 ? Surface::punctuation : selected == 3 ?
-          (input_tab == 1 ? Surface::output : Surface::selection) :
+          (input_tab == 2 ? Surface::output : input_tab == 1 ? Surface::candidates : Surface::selection) :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
       scroll = 0;
@@ -935,6 +1031,22 @@ struct SettingsWindow::State {
       return;
     }
     if (!snapshot) return;
+    if ((id == cloud_source || id == cloud_method || id == cloud_response_format) && HIWORD(command) == CBN_SELCHANGE) {
+      cloud_form.enable(true);
+      return;
+    }
+    if (id == cloud_save && HIWORD(command) == BN_CLICKED) {
+      const auto config = cloud_form.document();
+      if (!config) {
+        SetWindowTextW(status, L"请检查云候选文本和超时，超时需填写整数。");
+        return;
+      }
+      Job job;
+      job.reload = false;
+      job.changes.push_back({{"cloud_candidate_provider"}, *config});
+      submit(std::move(job));
+      return;
+    }
     if (HIWORD(command) == BN_CLICKED && (id == export_settings || id == import_settings)) {
       if (const auto file = pick_settings_file(id == export_settings)) {
         Job job;
@@ -955,6 +1067,10 @@ struct SettingsWindow::State {
       const auto selected = SendMessageW(GetDlgItem(body, id), CB_GETCURSEL, 0, 0);
       if (selected < 0 || selected > 1) return;
       job.changes.push_back({{"traditional_chinese_output"}, selected == 1});
+    } else if (id == mixed_first_page_count && HIWORD(command) == CBN_SELCHANGE) {
+      const auto selected = SendMessageW(GetDlgItem(body, id), CB_GETCURSEL, 0, 0);
+      if (selected < 0 || selected > 2) return;
+      job.changes.push_back({{"mixed_input", "first_page_count"}, selected + 1});
     } else if (id == punctuation_mode && HIWORD(command) == CBN_SELCHANGE) {
       const auto selected = SendMessageW(GetDlgItem(body, id), CB_GETCURSEL, 0, 0);
       if (selected < 0 || static_cast<size_t>(selected) >= ps::mode_choices.size()) return;
@@ -982,6 +1098,13 @@ struct SettingsWindow::State {
       job.changes.push_back({{"floating_toolbar", "scale_percent"}, choice.scale_percent});
       job.changes.push_back({{"floating_toolbar", "font_size"}, choice.font_size});
     } else if (HIWORD(command) == BN_CLICKED) {
+      for (const auto& field : candidate_checks) {
+        if (id != field.id || !GetDlgItem(body, id)) continue;
+        const bool checked = SendMessageW(GetDlgItem(body, id), BM_GETCHECK, 0, 0) == BST_CHECKED;
+        const auto path = *field.group ? std::vector<std::string>{field.group, field.field} :
+            std::vector<std::string>{field.field};
+        job.changes.push_back({path, checked});
+      }
       if (id == chinese_english_spacing || id == fullwidth_output) {
         const bool checked = SendMessageW(GetDlgItem(body, id), BM_GETCHECK, 0, 0) == BST_CHECKED;
         if (id == chinese_english_spacing) job.changes.push_back({{"chinese_english_spacing"}, checked});
@@ -1040,6 +1163,10 @@ struct SettingsWindow::State {
               LOWORD(wparam) == quote_style || LOWORD(wparam) == bracket_style) && HIWORD(wparam) == CBN_SETFOCUS) ||
           ((LOWORD(wparam) == chinese_english_spacing || LOWORD(wparam) == fullwidth_output ||
               (LOWORD(wparam) >= paired_punctuation && LOWORD(wparam) <= smart_direct_letter)) && HIWORD(wparam) == BN_SETFOCUS) ||
+          ((LOWORD(wparam) >= cloud_candidates && LOWORD(wparam) <= cloud_save) &&
+              (HIWORD(wparam) == CBN_SETFOCUS || HIWORD(wparam) == EN_SETFOCUS || HIWORD(wparam) == BN_SETFOCUS)) ||
+          ((LOWORD(wparam) >= mixed_enabled && LOWORD(wparam) <= word_lattice) &&
+              (HIWORD(wparam) == BN_SETFOCUS || HIWORD(wparam) == CBN_SETFOCUS)) ||
           (LOWORD(wparam) == data_directory_text && HIWORD(wparam) == EN_SETFOCUS))
         self->reveal(reinterpret_cast<HWND>(lparam));
       else self->command(wparam);
@@ -1092,13 +1219,15 @@ struct SettingsWindow::State {
       if (notification->idFrom == page_tabs && notification->code == TCN_SELCHANGE) {
         const auto page = SendMessageW(self->selector, CB_GETCURSEL, 0, 0);
         const auto tab = TabCtrl_GetCurSel(self->tabs);
-        if (tab < 0 || tab > 1) return 0;
+        if (tab < 0) return 0;
         if (page == 0) {
+          if (tab > 1) return 0;
           self->shortcut_tab = tab;
           self->surface = tab == 1 ? Surface::reference : Surface::shortcuts;
         } else if (page == 3) {
+          if (tab > 2) return 0;
           self->input_tab = tab;
-          self->surface = tab == 1 ? Surface::output : Surface::selection;
+          self->surface = tab == 2 ? Surface::output : tab == 1 ? Surface::candidates : Surface::selection;
         } else return 0;
         self->scroll = 0;
         self->layout();

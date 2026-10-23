@@ -22,6 +22,10 @@ enum ControlId {
   traditional_output = 500, output_description, chinese_english_spacing, fullwidth_output,
   punctuation_mode = 600, quote_style, bracket_style, paired_punctuation, smart_punctuation,
   smart_description, smart_repeat, smart_space_convert, smart_direct_digit, smart_direct_letter,
+  cloud_candidates = 700, cloud_source, cloud_endpoint, cloud_method, cloud_headers, cloud_body,
+  cloud_response_format, cloud_response_path, cloud_timeout, cloud_cache, cloud_save,
+  mixed_enabled = 750, mixed_english, mixed_first_page_count, mixed_emoji, mixed_symbols,
+  mixed_kaomoji, mixed_japanese, learn_candidates, single_character_only, word_lattice,
 };
 
 class SettingsWindow {
