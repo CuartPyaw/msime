@@ -794,6 +794,44 @@ int main() {
   }
   saved = store.load();
   assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  select_page(4);
+  select_tab(L"候选释义");
+  saved = store.load();
+  auto gloss_seed = store.save(*saved.snapshot, {{{"candidate_english_gloss"}, false},
+      {{"candidate_translations"}, false}, {{"candidate_pronunciation"}, true},
+      {{"translation_target_language"}, "en"}, {{"translation_secondary_language"}, nullptr}});
+  assert(gloss_seed.outcome == Outcome::saved);
+  SendMessageW(host, WM_COMMAND, MAKEWPARAM(reload_settings, BN_CLICKED), 0);
+  pump_until([&] { return IsWindowEnabled(language) != FALSE; });
+  assert(!IsWindowEnabled(GetDlgItem(body, gloss_target)));
+  assert(!IsWindowEnabled(GetDlgItem(body, gloss_pronunciation)));
+  click(gloss_english);
+  assert(IsWindowEnabled(GetDlgItem(body, gloss_target)));
+  assert(IsWindowEnabled(GetDlgItem(body, gloss_pronunciation)));
+  select_value(gloss_target, 2);
+  select_value(gloss_secondary, 7);
+  saved = store.load();
+  assert(saved.snapshot->preferences().at("translation_target_language") == "ja");
+  assert(saved.snapshot->preferences().at("translation_secondary_language") == "ko");
+  click(gloss_english);
+  assert(!IsWindowEnabled(GetDlgItem(body, gloss_secondary)));
+  assert(store.load().snapshot->preferences().at("candidate_pronunciation") == true);
+  assert(store.load().snapshot->preferences().at("translation_secondary_language") == "ko");
+  click(gloss_translations);
+  assert(IsWindowEnabled(GetDlgItem(body, gloss_secondary)));
+  click(gloss_pronunciation);
+  select_value(gloss_secondary, 0);
+  saved = store.load();
+  assert(saved.snapshot->preferences().at("candidate_pronunciation") == false);
+  assert(!saved.snapshot->preferences().contains("translation_secondary_language"));
+  assert(saved.snapshot->preferences().at("ai_assistant").at("tokens") == tokens);
+  const auto expression_revision = saved.snapshot->revision();
+  select_page(0);
+  select_page(4);
+  assert((GetWindowLongPtrW(GetDlgItem(body, gloss_target), GWL_STYLE) & WS_VISIBLE) != 0);
+  select_tab(L"标点设置");
+  assert((GetWindowLongPtrW(GetDlgItem(body, punctuation_mode), GWL_STYLE) & WS_VISIBLE) != 0);
+  assert(store.load().snapshot->revision() == expression_revision);
   // 原有自定义尺寸只在用户选择标准档位后才改变；两个尺寸字段原子保存。
   select_page(1);
   const HWND size = GetDlgItem(body, toolbar_size);

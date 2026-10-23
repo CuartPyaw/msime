@@ -66,6 +66,8 @@ public:
            change.path == std::vector<std::string>{"last_chinese_scheme"});
       const bool optional_count = change.value.is_number_integer() &&
           change.path == std::vector<std::string>{"mixed_input", "first_page_count"};
+      const bool optional_language = (change.value.is_string() || change.value.is_null()) &&
+          change.path == std::vector<std::string>{"translation_secondary_language"};
       const bool optional_object = change.value.is_object() &&
           (change.path == std::vector<std::string>{"app_input_mode_rules"} ||
            change.path == std::vector<std::string>{"plugins"} ||
@@ -75,7 +77,7 @@ public:
         if (!parent->is_object()) return {Outcome::invalid_change, std::nullopt};
         auto child = parent->find(segment);
         if (child == parent->end()) {
-          if ((!optional_boolean && !optional_style && !optional_count && !optional_object) || index + 1 != change.path.size())
+          if ((!optional_boolean && !optional_style && !optional_count && !optional_language && !optional_object) || index + 1 != change.path.size())
             return {Outcome::invalid_change, std::nullopt};
           child = parent->emplace(segment, change.value).first;
         }

@@ -4,6 +4,7 @@
 #include "InputModeForm.h"
 #include "AdvancedInputForm.h"
 #include "SchemeForm.h"
+#include "GlossForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
@@ -37,12 +38,15 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme };
+enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
     {Surface::candidates, L"候选与联想"}, {Surface::output, L"输出设置"},
     {Surface::advanced, L"高级选项"},
+}};
+constexpr std::array<std::pair<Surface, const wchar_t*>, 2> expression_pages{{
+    {Surface::punctuation, L"标点设置"}, {Surface::gloss, L"候选释义"},
 }};
 struct ToolbarCheck { int id; const char* field; const wchar_t* label; };
 constexpr std::array<ToolbarCheck, 11> toolbar_checks{{
@@ -401,11 +405,13 @@ struct SettingsWindow::State {
   int selection_height = 0;
   int output_height = 0;
   int punctuation_height = 0;
+  int gloss_height = 0;
   int candidates_height = 0;
   int mode_height = 0;
   int advanced_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
+  int expression_tab = 0;
   std::vector<std::string> word_choices;
   Surface surface = Surface::shortcuts;
   bool busy = true;
@@ -421,6 +427,7 @@ struct SettingsWindow::State {
   InputModeForm mode_form;
   AdvancedInputForm advanced_form;
   SchemeForm scheme_form;
+  GlossForm gloss_form;
   Confirmation confirmation;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
@@ -503,6 +510,10 @@ struct SettingsWindow::State {
     scheme_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                               int id, int top, int height) {
       return surface_row(Surface::scheme, type, text, style, id, top, height);
+    });
+    gloss_height = gloss_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+                                            int id, int top, int height) {
+      return surface_row(Surface::gloss, type, text, style, id, top, height);
     });
     enable(false);
     layout();
@@ -771,6 +782,7 @@ struct SettingsWindow::State {
     mode_form.enable(enabled);
     advanced_form.enable(enabled);
     scheme_form.enable(enabled);
+    gloss_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -785,7 +797,8 @@ struct SettingsWindow::State {
     MoveWindow(selector_label, dip(24), dip(18), dip(80), dip(26), TRUE);
     MoveWindow(selector, dip(112), dip(12), std::max(width - dip(136), 1), dip(160), TRUE);
     const bool has_tabs = surface == Surface::shortcuts || surface == Surface::reference ||
-        std::any_of(input_pages.begin(), input_pages.end(), [this](const auto& page) { return page.first == surface; });
+        std::any_of(input_pages.begin(), input_pages.end(), [this](const auto& page) { return page.first == surface; }) ||
+        std::any_of(expression_pages.begin(), expression_pages.end(), [this](const auto& page) { return page.first == surface; });
     ShowWindow(tabs, has_tabs ? SW_SHOW : SW_HIDE);
     MoveWindow(tabs, dip(24), dip(52), std::max(width - dip(48), 1), dip(30), TRUE);
     const int body_top = has_tabs ? 94 : 58;
@@ -805,7 +818,7 @@ struct SettingsWindow::State {
     const int total = surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
-        surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
+        surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
         surface == Surface::mode ? mode_height : surface == Surface::scheme ? scheme_form.height() :
         surface == Surface::advanced ? advanced_height : content_height;
     info.nMax = reference ? 0 : dip(total) - 1;
@@ -940,6 +953,7 @@ struct SettingsWindow::State {
     if (mixed.contains("first_page_count") && !mixed.at("first_page_count").is_number_integer()) return false;
     if (mixed.value("first_page_count", 1) < 1 || mixed.value("first_page_count", 1) > 3) return false;
     if (!CloudCandidateForm::valid(preferences.at("cloud_candidate_provider"))) return false;
+    if (!GlossForm::valid(preferences)) return false;
     if (!InputModeForm::valid(preferences)) return false;
     if (!AdvancedInputForm::valid(preferences) || !SchemeForm::valid(preferences)) return false;
     return true;
@@ -1091,6 +1105,7 @@ struct SettingsWindow::State {
       mode_form.refresh(snapshot->preferences());
       advanced_form.refresh(snapshot->preferences(), completed->helpcodes);
       scheme_form.refresh(snapshot->preferences());
+      gloss_form.refresh(snapshot->preferences());
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1128,19 +1143,20 @@ struct SettingsWindow::State {
     if (id == page_selector && HIWORD(command) == CBN_SELCHANGE) {
       const auto selected = SendMessageW(selector, CB_GETCURSEL, 0, 0);
       TabCtrl_DeleteAllItems(tabs);
-      if (selected == 0 || selected == 3) {
+      if (selected == 0 || selected == 3 || selected == 4) {
         std::vector<const wchar_t*> titles;
         if (selected == 0) titles = {L"按键设置", L"按键速查"};
-        else for (const auto& page : input_pages) titles.push_back(page.second);
+        else if (selected == 3) for (const auto& page : input_pages) titles.push_back(page.second);
+        else for (const auto& page : expression_pages) titles.push_back(page.second);
         for (size_t index = 0; index < titles.size(); ++index) {
           TCITEMW tab{};
           tab.mask = TCIF_TEXT;
           tab.pszText = const_cast<wchar_t*>(titles[index]);
           TabCtrl_InsertItem(tabs, static_cast<int>(index), &tab);
         }
-        TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : input_tab);
+        TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 4 ? Surface::punctuation : selected == 3 ?
+      surface = selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
@@ -1165,6 +1181,16 @@ struct SettingsWindow::State {
       return;
     }
     if (!snapshot) return;
+    if (gloss_form.handles(id)) {
+      auto changes = gloss_form.command(command);
+      if (!changes.empty()) {
+        Job job;
+        job.reload = false;
+        job.changes = std::move(changes);
+        submit(std::move(job));
+      }
+      return;
+    }
     auto scheme_change = scheme_form.command(command);
     if (scheme_change.handled) {
       if (!scheme_change.message.empty()) SetWindowTextW(status, scheme_change.message.c_str());
@@ -1398,6 +1424,10 @@ struct SettingsWindow::State {
           if (static_cast<size_t>(tab) >= input_pages.size()) return 0;
           self->input_tab = tab;
           self->surface = input_pages[static_cast<size_t>(tab)].first;
+        } else if (page == 4) {
+          if (static_cast<size_t>(tab) >= expression_pages.size()) return 0;
+          self->expression_tab = tab;
+          self->surface = expression_pages[static_cast<size_t>(tab)].first;
         } else return 0;
         self->scroll = 0;
         self->layout();
