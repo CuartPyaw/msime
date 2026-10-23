@@ -31,6 +31,8 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
     }
 
     @Override protected String successDescription() {
+        if (arguments != null && "true".equals(arguments.getString("english-symbol-drag")))
+            return "English symbol drag commits once, cancellation inserts nothing and comma hold inserts ASCII period";
         if (arguments != null && "true".equals(arguments.getString("letter-swipe")))
             return "letter option drag, release/cancel, engine punctuation and swipe direction/disable";
         return "letter hints and comma hold route punctuation once, commit composition and preserve the symbol panel entry";
@@ -41,9 +43,14 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
             runConfiguredChecks(true);
             return;
         }
+        if (arguments != null && "true".equals(arguments.getString("english-symbol-drag"))) {
+            runEnglishSymbolDragChecks();
+            return;
+        }
         if (arguments != null && ("true".equals(arguments.getString("english-hold"))
                 || "true".equals(arguments.getString("unicode18-hold")))) {
             runEnglishHoldChecks();
+            if ("true".equals(arguments.getString("english-hold"))) runEnglishSymbolDragChecks();
             return;
         }
         if (arguments != null && "true".equals(arguments.getString("letter-hold"))) {
@@ -327,9 +334,63 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
         MotionEvent event = MotionEvent.obtain(started, SystemClock.uptimeMillis(), action, x, y, 0);
         event.setSource(InputDevice.SOURCE_TOUCHSCREEN);
         try {
-            if (!automation.injectInputEvent(event, true)) throw new AssertionError("触摸事件未送达");
+            if (!automation.injectInputEvent(event, true))
+                throw new AssertionError("触摸事件未送达，action=" + action);
         } finally { event.recycle(); }
         SystemClock.sleep(40);
+    }
+
+    /** 英文长按保持同一次触摸，拖到符号后松手提交；另验取消和逗号长按的 ASCII 句号。 */
+    private void runEnglishSymbolDragChecks() throws Exception {
+        shellDiscard("am start -W -n app.msime.android/app.msime.android.home.HomeActivity");
+        restartIme();
+        openSyntheticEditor();
+        tap(field(PLAIN));
+        await(key("q"));
+        boolean restoreChinese = findAcrossWindows(described("切换到英文输入")) != null;
+        try {
+            if (restoreChinese) tap(described("切换到英文输入"));
+            await(described("切换到所选输入方案"));
+            englishSymbolDrag("a", "@", false);
+            expect("@");
+            englishSymbolDrag("v", "?", true);
+            expect("@");
+            englishSymbolDrag("v", "?", false);
+            expect("@?");
+            stage = "English comma hold inserts ASCII period";
+            holdComma();
+            expect("@?.");
+        } finally {
+            try {
+                if (restoreChinese && findAcrossWindows(described("切换到所选输入方案")) != null) {
+                    tap(described("切换到所选输入方案"));
+                    await(described("切换到英文输入"));
+                }
+            } finally {
+                shellDiscard("am start -W -n app.msime.android/app.msime.android.home.HomeActivity");
+                restartIme();
+            }
+        }
+    }
+
+    private void englishSymbolDrag(String letter, String symbol, boolean cancel) throws Exception {
+        stage = "English hold drag " + letter + " to " + symbol + (cancel ? " cancel" : " commit");
+        Rect anchor = bounds(awaitStableBounds(key(letter)));
+        long started = SystemClock.uptimeMillis();
+        inject(started, MotionEvent.ACTION_DOWN, anchor.centerX(), anchor.centerY());
+        boolean finished = false;
+        try {
+            Rect option = bounds(awaitStableBounds(described("输入 " + symbol)));
+            inject(started, MotionEvent.ACTION_MOVE, option.centerX(), option.centerY());
+            await(described("输入 " + symbol).and(AccessibilityNodeInfo::isSelected));
+            inject(started, cancel ? MotionEvent.ACTION_CANCEL : MotionEvent.ACTION_UP,
+                option.centerX(), option.centerY());
+            finished = true;
+            assertNoOptions();
+        } finally {
+            // 终止事件成功后触摸序列已结束，不能再向消失的弹窗补发取消。
+            if (!finished) inject(started, MotionEvent.ACTION_CANCEL, anchor.centerX(), anchor.centerY());
+        }
     }
 
     /** 通过真实触屏长按覆盖三排英文键与多行弹窗，不用产品字符表生成期望值。 */
@@ -438,14 +499,15 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
         holdLetter("q");
         tap(described("输入 Q"));
         await(field(PLAIN).and(node -> equalsText("Q", node.getText())));
-        stage = "long press symbol choice";
-        holdLetter("a");
-        tap(described("输入 @"));
-        await(field(PLAIN).and(node -> equalsText("Q@", node.getText())));
         stage = "upward swipe uppercase choice";
         swipeUpLetter("w");
         tap(described("输入 W"));
-        await(field(PLAIN).and(node -> equalsText("Q@W", node.getText())));
+        await(field(PLAIN).and(node -> equalsText("QW", node.getText())));
+        // @ 会打开邮箱候选，候选态按设计禁用字母手势，所以最后检查此符号。
+        stage = "long press symbol choice";
+        holdLetter("a");
+        tap(described("输入 @"));
+        await(field(PLAIN).and(node -> equalsText("QW@", node.getText())));
     }
 
     private void holdLetter(String value) throws Exception {
