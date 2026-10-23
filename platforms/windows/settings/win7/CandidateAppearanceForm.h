@@ -34,6 +34,8 @@ public:
       return handle;
     };
     note(L"候选窗口布局", 28);
+    control(appearance_preview, L"STATIC", L"", SS_OWNERDRAW | WS_BORDER, 156);
+    note(L"预览使用固定样例展示候选排列、字号和预编辑位置；实际颜色与皮肤由候选宿主绘制。", 42);
     for (const auto& field : enum_fields) {
       if (field.id != appearance_layout) continue;
       note(field.title, 24);

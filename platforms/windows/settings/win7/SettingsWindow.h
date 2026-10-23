@@ -45,7 +45,7 @@ enum ControlId {
   appearance_scale, appearance_opacity, appearance_radius, appearance_preedit, appearance_inline,
   appearance_game_overlay, appearance_game_always, appearance_game_always_remove,
   appearance_game_never, appearance_game_never_remove, appearance_game_name, appearance_game_list,
-  appearance_game_add, appearance_game_profile,
+  appearance_game_add, appearance_game_profile, appearance_preview,
 };
 
 class SettingsWindow {

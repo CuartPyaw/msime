@@ -1453,6 +1453,27 @@ struct SettingsWindow::State {
       self->scroll_to(self->scroll - MulDiv(GET_WHEEL_DELTA_WPARAM(wparam), self->dip(48), WHEEL_DELTA));
       return 0;
     }
+    if (message == WM_DRAWITEM) {
+      const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
+      if (draw && draw->CtlID == appearance_preview) {
+        RECT rect = draw->rcItem;
+        const auto background = CreateSolidBrush(RGB(248, 248, 248));
+        FillRect(draw->hDC, &rect, background);
+        DeleteObject(background);
+        const auto border = CreateSolidBrush(RGB(210, 210, 210));
+        FrameRect(draw->hDC, &rect, border);
+        DeleteObject(border);
+        SetBkMode(draw->hDC, TRANSPARENT);
+        SetTextColor(draw->hDC, RGB(35, 35, 35));
+        RECT title = rect;
+        title.left += 14; title.top += 10; title.right -= 14;
+        DrawTextW(draw->hDC, L"候选预览　ni'mf", -1, &title, DT_SINGLELINE | DT_LEFT);
+        RECT choices = rect;
+        choices.left += 14; choices.top += 46; choices.right -= 14; choices.bottom -= 14;
+        DrawTextW(draw->hDC, L"1 你们　 2 你们的　 3 你们俩　 4 你们好", -1, &choices, DT_SINGLELINE | DT_LEFT);
+        return TRUE;
+      }
+    }
     if (message == WM_VSCROLL) {
       SCROLLINFO info{};
       info.cbSize = sizeof(info);
