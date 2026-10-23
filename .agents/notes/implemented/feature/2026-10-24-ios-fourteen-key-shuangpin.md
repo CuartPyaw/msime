@@ -45,6 +45,8 @@ iOS 已有全拼 14 键和多种 26 键双拼方案，但双拼只能使用 26 �
 - `bash platforms/ios/build-native.sh simulator` 在远端编译当前源码通过，静态库拉回本机后运行模拟器测试。
 - iOS 27 arm64 模拟器运行 `FourteenKeyKeyboardTests` 全部 15 项通过，覆盖四种 profile 与会话重建、空闲和组字中的设置热加载、微软分号、手机键面和 iPad 横屏。多义组码的首选读音受词频影响，桥接测试明确选择 `ni` 后检查读音及「你好」候选。
 - 同次运行 `LanguageSchemesTests`：共 26 项，21 项通过，5 项因模拟器缺少对应语言词库跳过；无失败。验收层级为原生键盘控制器在模拟器测试宿主中运行，尚未覆盖真机系统键盘入口。
+- 系统编辑器专项 `testFourteenKeyShuangpinProfilesCommitIntoTheSystemEditor` 从原生设置选择 14 键，在系统加载的扩展里逐一切换小鹤、自然码、微软和首道，点按合成组码并显式选择读音行的 `readingSpelling_ni`，检查「你好」连续上屏、微软分号读屏及数字页往返，结束恢复原方案和布局。未签名的模拟器构建缺少 App Group 权限，首轮只得到共享目录错误和跳过；验收必须启用模拟器 ad-hoc 签名（`CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=- CODE_SIGN_STYLE=Manual`）。模拟器权限在 `Entitlements-Simulated.plist` 和可执行文件的模拟权限段中，不能仅凭 `codesign` 打印的空字典断定签名构建仍没有 App Group。共享目录错误属于已加载扩展的失败，不再按未启用键盘跳过。最终签名构建在 iOS 27 arm64 专用模拟器通过该专项（221 秒，1 通过、0 失败、0 跳过）：独立编辑器依次收到四段「你好」，原有文本没有被覆盖，数字页往返仍保留 14 键；四张方案截图已逐一检查，微软显示 `L;`，结束恢复原方案和布局。该结果覆盖模拟器系统键盘入口，尚未覆盖实体设备。
+- 最终远端 quick（`20261024-061655`）exit 0：Rust workspace、Android/WASM、Android Java/JNI、Linux 设置壳、Linux 原生、五笔版构建、macOS 和 Apple 桥接阶段通过。Linux 原生注册 111 项，110 通过、1 项 `linux-ibus-demand-activation` 因环境条件跳过、0 失败；三项真实 classicui 主题检查实际执行。Windows MinGW、pipe-only 与 HarmonyOS 因前置条件缺失跳过；远端未安装 Node，笔记校验在本机单独通过。更早的 run `20261024-044819` 因磁盘不足主动停止（exit 143），不作为整套通过证据。最终轮同步了系统编辑器专项，运行期间没有再改生产或测试源码。
 - `python3 scripts/test-fourteen-key-table.py` 通过。
 - 原生产品 `MSIMEApp` 与内嵌键盘扩展的 arm64 模拟器构建通过，包含设置页的真实 SwiftUI 编译；构建前按锁文件校验并准备本地语音运行库。模拟器库只有 arm64，构建命令显式传入 `ARCHS=arm64 ONLY_ACTIVE_ARCH=YES`。
 - `pnpm run verify-notes`、本次改动的 Rust 格式检查和差异检查在提交前执行。
