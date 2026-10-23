@@ -6,12 +6,14 @@
 #include "SchemeForm.h"
 #include "GlossForm.h"
 #include "TranslationForm.h"
+#include "CandidateAppearanceForm.h"
 #include "../InputSettingsModel.h"
 #include "../PunctuationSettings.h"
 #include "../FloatingToolbarSizeModel.h"
 #include "../SettingsStateDirectory.h"
 #include "../SettingsDocumentFile.h"
 #include "../../common/StateDirectory.h"
+#include "../../common/GameCompatProfile.h"
 #include "../../compat/WindowsDpi.h"
 #include "../../tsf/IPC/AuxNamedpipeSender.h"
 #include "../../../../shared/contracts/windows_ipc.h"
@@ -39,7 +41,7 @@ constexpr wchar_t window_class[] = L"MSIME.Windows7Settings" MSIME_EDITION_NAME_
 constexpr wchar_t body_class[] = L"MSIME.Windows7Settings.Body" MSIME_EDITION_NAME_SUFFIX;
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation };
+enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -229,7 +231,7 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, font_catalog, game_profile };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
@@ -247,6 +249,8 @@ struct Completion {
   std::optional<Json> lookup;
   std::optional<Json> credential_request;
   std::optional<Json> credential_response;
+  std::optional<Json> fonts;
+  bool game_profile_enabled = false;
 };
 
 // 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
@@ -281,6 +285,7 @@ private:
     folder_.clear();
     lookup_.reset();
     credential_response_.reset();
+    fonts_.reset();
     if (!store_) {
       directory_ = preferences_directory();
       if (directory_.empty()) return {Outcome::storage, std::nullopt};
@@ -289,6 +294,16 @@ private:
     if (job.reload || job.action == Job::Action::helpcode_sources) helpcodes_ = helpcode_sources(directory_);
     Result result;
     if (job.action == Job::Action::helpcode_sources) return {Outcome::loaded, snapshot_};
+    if (job.action == Job::Action::game_profile) {
+      notice_ = msime::windows::game_profile::apply(window_, !msime::windows::game_profile::enabled());
+      if (notice_.empty()) notice_ = L"登记名称已更新，请重启游戏并重新切换输入法。";
+      return {Outcome::loaded, snapshot_};
+    }
+    if (job.action == Job::Action::font_catalog) {
+      auto owned = msime::host_api::own_string(msime_client_list_font_families());
+      fonts_ = owned ? Json::parse(owned.get(), nullptr, false) : Json();
+      return {Outcome::loaded, snapshot_};
+    }
     if (job.action == Job::Action::credential_test && job.credential) {
       const auto request = job.credential->dump();
       auto owned = msime::host_api::own_string(msime_client_test_api_credential(
@@ -350,6 +365,7 @@ private:
   }
 
   void run() {
+    const HRESULT apartment = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
     Job job;
     for (;;) {
       Result result;
@@ -362,14 +378,14 @@ private:
       }
       std::unique_lock<std::mutex> guard(lock_);
       if (!stopping_) {
-        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_)};
+        completed_ = Completion{std::move(result), std::move(notice_), std::move(folder_), directory_, helpcodes_, std::move(lookup_), job.credential, std::move(credential_response_), std::move(fonts_), msime::windows::game_profile::enabled()};
         guard.unlock();
         PostMessageW(window_, completed_message, 0, 0);
         guard.lock();
       }
       ready_.wait(guard, [this] { return stopping_ || pending_.has_value(); });
       // 关闭前已受理的修改必须做完；窗口已销毁时不再投递结果。
-      if (!pending_) return;
+      if (!pending_) { if (SUCCEEDED(apartment)) CoUninitialize(); return; }
       job = std::move(*pending_);
       pending_.reset();
     }
@@ -389,6 +405,7 @@ private:
   HelpcodeSources helpcodes_;
   std::optional<Json> lookup_;
   std::optional<Json> credential_response_;
+  std::optional<Json> fonts_;
   std::thread thread_;
 };
 
@@ -422,6 +439,7 @@ struct SettingsWindow::State {
   int candidates_height = 0;
   int mode_height = 0;
   int advanced_height = 0;
+  int appearance_height = 0;
   int shortcut_tab = 0;
   int input_tab = 0;
   int expression_tab = 0;
@@ -442,6 +460,7 @@ struct SettingsWindow::State {
   SchemeForm scheme_form;
   GlossForm gloss_form;
   TranslationForm translation_form;
+  CandidateAppearanceForm appearance_form;
   Confirmation confirmation;
 
   int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
@@ -467,7 +486,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -532,6 +551,10 @@ struct SettingsWindow::State {
     translation_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                    int id, int top, int height) {
       return surface_row(Surface::translation, type, text, style, id, top, height);
+    });
+    appearance_height = appearance_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+                                   int id, int top, int height) {
+      return surface_row(Surface::appearance, type, text, style, id, top, height);
     });
     enable(false);
     layout();
@@ -802,6 +825,7 @@ struct SettingsWindow::State {
     scheme_form.enable(enabled);
     gloss_form.enable(enabled);
     translation_form.enable(enabled);
+    appearance_form.enable(enabled);
     for (int id : {restart_service, open_data_directory, open_logs_directory})
       EnableWindow(GetDlgItem(body, id), !busy);
     EnableWindow(reload, !busy);
@@ -834,7 +858,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -975,6 +999,7 @@ struct SettingsWindow::State {
     if (mixed.value("first_page_count", 1) < 1 || mixed.value("first_page_count", 1) > 3) return false;
     if (!CloudCandidateForm::valid(preferences.at("cloud_candidate_provider"))) return false;
     if (!TranslationForm::valid(preferences)) return false;
+    if (!CandidateAppearanceForm::valid(preferences)) return false;
     if (!GlossForm::valid(preferences)) return false;
     if (!InputModeForm::valid(preferences)) return false;
     if (!AdvancedInputForm::valid(preferences) || !SchemeForm::valid(preferences)) return false;
@@ -1129,6 +1154,7 @@ struct SettingsWindow::State {
       scheme_form.refresh(snapshot->preferences());
       gloss_form.refresh(snapshot->preferences());
       translation_form.refresh(snapshot->preferences());
+      appearance_form.refresh(snapshot->preferences());
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
           diagnostics.at("server").get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
@@ -1140,6 +1166,8 @@ struct SettingsWindow::State {
     if (completed->lookup) scheme_form.lookup_result(*completed->lookup);
     if (completed->credential_request && completed->credential_response)
       translation_form.tested(*completed->credential_request, *completed->credential_response);
+    if (completed->fonts) appearance_form.font_catalog(*completed->fonts);
+    appearance_form.game_profile(completed->game_profile_enabled);
     enable(snapshot.has_value());
     layout_body();
     const wchar_t* message = L"读取设置失败，请重新读取后重试。";
@@ -1181,7 +1209,7 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
@@ -1206,6 +1234,18 @@ struct SettingsWindow::State {
       return;
     }
     if (!snapshot) return;
+    auto appearance_change = appearance_form.command(command);
+    if (appearance_change.handled) {
+      if (!appearance_change.message.empty()) SetWindowTextW(status, appearance_change.message.c_str());
+      else if (appearance_change.fonts || appearance_change.game_profile || !appearance_change.changes.empty()) {
+        Job job;
+        job.reload = false;
+        job.action = appearance_change.fonts ? Job::Action::font_catalog : appearance_change.game_profile ? Job::Action::game_profile : Job::Action::preferences;
+        job.changes = std::move(appearance_change.changes);
+        submit(std::move(job));
+      }
+      return;
+    }
     auto translation_change = translation_form.command(command);
     if (translation_change.handled) {
       if (translation_change.test) {

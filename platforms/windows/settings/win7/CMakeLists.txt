@@ -24,6 +24,7 @@ endif()
 add_executable(msime-client-settings-win7 WIN32 main.cpp Settings.rc)
 target_link_libraries(msime-client-settings-win7 PRIVATE msime-win7-settings-window)
 if(MSVC)
+  target_compile_options(msime-client-settings-win7 PRIVATE /W4 /WX /utf-8)
   # 清单已由 Settings.rc 嵌入，不能再让链接器生成同编号资源。
   target_link_options(msime-client-settings-win7 PRIVATE /MANIFEST:NO)
 endif()

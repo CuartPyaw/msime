@@ -1,7 +1,10 @@
 #include "SettingsWindow.h"
 #include "../../compat/WindowsDpi.h"
+#include "../../common/GameCompatProfile.h"
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR command, int show) {
+  const int game_profile = msime::windows::game_profile::run_if_requested(command);
+  if (game_profile >= 0) return game_profile;
   msime::windows::compat::process_context(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
   msime::settings::win7::SettingsWindow window;
   if (!window.create(instance)) return 1;

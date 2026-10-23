@@ -39,6 +39,13 @@ enum ControlId {
   gloss_english = 1100, gloss_translations, gloss_pronunciation, gloss_target, gloss_secondary,
   translation_provider_control = 1200, translation_tencent_first = 1210,
   translation_niutrans_first = 1230, translation_custom_first = 1250,
+  appearance_layout = 1300, appearance_page_size, appearance_logo, appearance_follow,
+  appearance_font_preset, appearance_font_family, appearance_english_font, appearance_fonts_save,
+  appearance_fonts_refresh, appearance_fonts_status, appearance_font_size, appearance_preedit_size,
+  appearance_scale, appearance_opacity, appearance_radius, appearance_preedit, appearance_inline,
+  appearance_game_overlay, appearance_game_always, appearance_game_always_remove,
+  appearance_game_never, appearance_game_never_remove, appearance_game_name, appearance_game_list,
+  appearance_game_add, appearance_game_profile,
 };
 
 class SettingsWindow {
