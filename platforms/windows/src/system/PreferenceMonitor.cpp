@@ -22,6 +22,7 @@ void PreferenceMonitor::request_stop() {
   }
   wake_.notify_all();
 }
+void PreferenceMonitor::wake() { wake_.notify_all(); }
 void PreferenceMonitor::stop() {
   if (input_.on_worker_thread())
     throw std::logic_error("Cannot join preference monitor from input queue");

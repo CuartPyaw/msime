@@ -141,6 +141,13 @@ void preference_monitor_tests(const std::string &options,
   await([&] { return monitor.status() == PreferenceMonitorStatus::Current; });
   require(callbacks.load() == 2 && published_revision.load() == 3,
           "Published preference callback did not observe the new revision");
+  document["revision"] = 4;
+  document["preferences"]["keybindings"]["toggle_japanese_ctrl_shift_j"] = false;
+  write(document.dump());
+  monitor.wake();
+  await([&] { return published_revision.load() == 4; });
+  require(callbacks.load() == 3,
+          "Explicit preference wake did not publish the new revision");
   input.stop();
   await([&] { return monitor.failed(); });
   monitor.stop();

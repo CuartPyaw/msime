@@ -28,6 +28,8 @@ public:
   PreferenceMonitor(const PreferenceMonitor &) = delete;
   PreferenceMonitor &operator=(const PreferenceMonitor &) = delete;
   void request_stop();
+  // 外部写入偏好后立即唤醒一次轮询；不改变停止状态，写入线程不等待发布完成。
+  void wake();
   void stop(); // External owner only; never from an input task.
   PreferenceMonitorStatus status() const { return status_.load(); }
   bool failed() const {

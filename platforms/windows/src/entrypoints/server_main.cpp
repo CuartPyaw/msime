@@ -1069,16 +1069,19 @@ int wmain(int argc, wchar_t **argv) {
           (void)persist_traditional_output(directory, *traditional_output,
                                            click.desired);
         });
-    // TSF 的 Ctrl+Shift+J 同样经一个有界工作线程写偏好，同样要在 WindowsServer 构造之前就有。写成功后立刻更新托盘看到的方案，方案本身由偏好监视器发布给会话。
+    // TSF 的 Ctrl+Shift+J 同样经一个有界工作线程写偏好，同样要在 WindowsServer 构造之前就有。写成功后立刻更新托盘看到的方案，并唤醒偏好监视器，让当前会话尽快切换方案。
+    std::function<void()> wake_preferences;
     SingleClickWorker<JapaneseToggleRequest> japanese_toggles(
         [directory = config.state_root, language_dictionaries, tray_preferences,
-         tray_preferences_mutex](const JapaneseToggleRequest &) {
+         tray_preferences_mutex, &wake_preferences](const JapaneseToggleRequest &) {
           const auto scheme =
               toggle_japanese_scheme(directory, language_dictionaries);
           if (!scheme)
             return;
           std::lock_guard<std::mutex> lock(*tray_preferences_mutex);
           tray_preferences->scheme = *scheme;
+          if (wake_preferences)
+            wake_preferences();
         });
     auto candidate_fonts = std::make_shared<CandidateFontMailbox>();
     auto candidate_style = std::make_shared<CandidateWindowStyleMailbox>();
@@ -1292,6 +1295,7 @@ int wmain(int argc, wchar_t **argv) {
                   })
             : preview_key_handler(config),
         [](const FocusRoute &, const FanyImeNamedpipeData &) { return true; });
+    wake_preferences = [&server] { server.wake_preferences(); };
     // Its palette is applied once the theme is resolved, alongside the toolbar's.
     WaveOverlay voice_overlay;
     VoiceInputSession *voice_session = nullptr;
