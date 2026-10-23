@@ -31,3 +31,5 @@ macOS 发布包把 `character-glosses` 和 `word-glosses` 放在外层 `MSIME.ap
 - #9407 分支在 API 28 专用模拟器运行 `build-core-test.sh`，四组共享库单测共 2035 项通过、0 失败；按脚本跳过 Android 不支持的硬链接前置条件与已有忽略项。macOS 原生 `candidate-pronunciation`、`candidate-translation-display`、`candidate-item-layout`、`candidate-row-layout` 共 4 项通过。
 - 完整 quick 的冷编译运行在 `voice language catalog` 的 120 秒 Cargo 超时处失败；其后 Rust、Android、wasm、Linux 原生 111 项及 macOS 编译均完成。暖缓存整轮重跑仍失败：`linux-ibus-launcher-supervisor` 的第三次间隔为 9.821 秒，超过原测试 9.5 秒上限。没有放宽时限；隔离临时目录并降低契约检查并行度后的整轮 quick 通过，Linux 原生 111 项全部通过（`issue-9407-quick-isolated.log`）。
 - 带固定词汇书的本分支 APK 在 API 28 安装成功，前三项设备冒烟通过，组字重启用例失败；单独重跑越过该断言，随后在放大拼写的长输入夹具处失败。两轮均不能记为完整冒烟通过，也尚未确定是基线问题还是回归。实际 macOS 输入法候选行尚未装机验收。
+
+- Android 完整冒烟尚未通过：修复版首次停在组字重启，单独重跑通过原失败点后停在长拼写夹具。随后从本分支原始基线 `70debe5b77da269d5c00b740328ae63bb9c66762` 独立构建 APK，完整冒烟通过组字重启及长拼写等前 18 项，停在剪贴板导出选择器的合成控件检查（`issue-9407-api28-exact-baseline-smoke.log`）。失败位置不同，不能据此将修复版失败全部归为基线；已通过的 2035 项设备核心测试和 4 项 macOS 原生测试也不代表完整宿主验收。
