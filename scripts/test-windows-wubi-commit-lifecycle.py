@@ -11,6 +11,7 @@ if compiler is None:
     print("skipped: C++ compiler unavailable for Wubi worker lifecycle regression")
     raise SystemExit(0)
 ime = (ROOT / "platforms/windows/tsf/IME/MetasequoiaIME.cpp").read_text()
+ime_header = (ROOT / "platforms/windows/tsf/IME/MetasequoiaIME.h").read_text()
 sink = (ROOT / "platforms/windows/tsf/Key/KeyEventSink.cpp").read_text()
 handler = (ROOT / "platforms/windows/tsf/Key/KeyHandler.cpp").read_text()
 
@@ -33,6 +34,7 @@ constexpr HRESULT S_OK=0, S_FALSE=1, TF_S_ASYNC=2, E_FAIL=-1;
 constexpr UINT WM_CommitCandidateAndContinue=29, FANY_IME_NO_REQUEST_ID=0;
 constexpr int TF_ES_ASYNCDONTCARE=1, TF_ES_READWRITE=2;
 #define _Out_
+#define _In_opt_
 #define STDMETHODIMP HRESULT
 bool SUCCEEDED(HRESULT value) { return value>=0; }
 bool FAILED(HRESULT value) { return value<0; }
@@ -74,7 +76,7 @@ struct CEditSessionBase {
 };
 struct CMetasequoiaIME {
     struct WorkerCandidateCommit { std::wstring text; uint64_t focusToken=0,compositionEpoch=0; };
-    struct DeferredKeyDown { ITfContext *context=nullptr; WPARAM wParam=0; wchar_t translatedWch=0;
+    struct DeferredKeyDown { ITfContext *context=nullptr; WPARAM wParam=0; wchar_t translatedWch=0; uint64_t focusGeneration=0;
         struct { int Category=0,Function=0; } keyState; };
     msime::tsf::WubiCommitOwner _wubiCommitOwner;
     std::deque<DeferredKeyDown> _deferredKeyDowns, _deferredAppliedPrefix;
@@ -108,9 +110,7 @@ struct CMetasequoiaIME {
     bool _IsFocusSessionCurrent(uint64_t value,ITfContext *context=nullptr) const {
         return value==focus && (!context || context==thread.document.context); }
     bool _IsCompositionEpochCurrent(uint64_t value) const { return value==epoch; }
-    bool _IsDeferredKeyReplayCurrent(uint64_t token,uint64_t generation,ITfContext *context=nullptr) const {
-        return _hasDeferredKeyInFlight && token==_deferredKeyReplayToken && generation==_deferredKeyFocusGeneration &&
-            (!context || context==_deferredKeyInFlight.context); }
+    REPLAY_CURRENT_DECLARATION
     void _CompleteDeferredKeyReplay(uint64_t token) {
         if (_hasDeferredKeyInFlight && token==_deferredKeyReplayToken) {
             ++completed; _hasDeferredKeyInFlight=false; _deferredKeyReplayToken=0;
@@ -130,6 +130,9 @@ struct CMetasequoiaIME {
 namespace Global { namespace DataFromServerMsgType { constexpr UINT OutofRange=0; } }
 void MarkNamedpipeSessionDirtyForOwner(CMetasequoiaIME *ime) { ++ime->dirty; }
 '''
+unit = unit.replace('REPLAY_CURRENT_DECLARATION', section(
+    ime_header, '    bool _IsDeferredKeyReplayCurrent(', '\n    bool _IsDeferredApplicationTextCurrent('))
+unit += section(sink, 'bool CMetasequoiaIME::_IsDeferredKeyReplayCurrent(', '\nvoid CMetasequoiaIME::_RetryDeferredKeyReplay(')
 unit += section(ime, 'class CCommitCandidateAndContinueEditSession :', '\nclass CDeferredApplicationTextEditSession')
 unit += r'''
 HRESULT ITfContext::RequestEditSession(int,CCommitCandidateAndContinueEditSession *edit,int,HRESULT *result) {
@@ -155,6 +158,7 @@ struct Fixture {
     void arm(uint64_t token=11) {
         ime._hasDeferredKeyInFlight=true; ime._deferredKeyReplayToken=token;
         ime._deferredKeyInFlight.context=&context; context.AddRef();
+        ime._deferredKeyInFlight.focusGeneration=ime._deferredKeyFocusGeneration;
         ime._wubiCommitOwner.begin(token,now);
     }
     void result() { msime::tsf::EngineResult result;result.handled=result.has_commit=true;

@@ -2908,7 +2908,7 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
         ITfDocumentMgr *document = nullptr;
         ITfContext *context = nullptr;
         HRESULT dispatch = E_FAIL, editResult = E_FAIL;
-        if (replayToken && pIME->_IsDeferredKeyReplayCurrent(replayToken, generation))
+        if (replayToken && pIME->_IsDeferredKeyReplayCurrent(replayToken, generation, nullptr))
         {
             context = pIME->_deferredKeyInFlight.context;
             context->AddRef();

@@ -32,6 +32,10 @@ Status: implemented
 
 提取实际窗口分支、worker 编辑类、收尾、清队列和超时方法的回归在 macOS 与 Linux 容器均 32 项通过。恢复“只清 owner 不清 in-flight”“先改 owner 再校验消息”“现代无 owner 仍允许 token 0 写入”三个缺陷后，相应用例分别出现 1、2、1 项失败；恢复修复后通过。真实 Windows 系统输入框验收尚缺，不据此关闭 issue。
 
+生命周期夹具直接提取生产头文件中的 `_IsDeferredKeyReplayCurrent` 声明与实现，不再由替身给上下文参数增加默认值。这样 worker 窗口分支漏传第三参时，本机也会像 Windows GNU 构建一样编译失败。窗口派发尚未捕获 context，先显式传 `nullptr` 核验 token 与焦点代次，再取得原槽 context；后续编辑会话仍校验捕获的 context。该夹具在修复前复现“需要三个参数、只传两个”的编译失败，补齐调用后 32 项检查通过。
+
+参数补丁的首轮 quick 在 Linux 的 `linux-setup-registration`（30 秒）和 `linux-clipboard-tool-parity`（3 秒）遇到子进程超时，原日志保留在 `target/issue-9452-arity-quick.log` 与 `target/linux-native-gate.log`，不计为通过。运行中的主题测试采样停在 `fsync` 的 `wait_log_commit`；相同安装命令在同一容器的磁盘临时目录耗时 2.855 秒，在可执行的 tmpfs 临时目录耗时 0.947 秒，均退出 0。临时文件系统上的完整安装注册测试也通过。这些对照定位本次同步写入等待，不修改产品逻辑、测试超时或失败基线。完整复验通过命令级 Docker 包装器，仅给 Linux 原生测试容器添加可执行的 512 MiB tmpfs `/tmp`；包装器打印实际环境，编译仍使用原有 `target/linux-build-gate`，正常 pre-push 运行全部门禁。完整结果以该次推送日志为准，上述定向对照不代替整条检查。
+
 光标已经移出组字范围而尚未调用本地 `character` 时，输入处理返回 `S_FALSE`，保留原回放失败恢复；不能以初始 `S_OK` 提前完成 FIFO token。提取真实早退块的回归在修复前失败，修复后通过，且早到 worker 不会夺走未执行字符的恢复归属。
 
 应用键回放、延迟分类与恢复三个现有提取夹具直接包含生产 `WubiCommitOwner`；恢复夹具也提取真实 `_FinishWubiWorkerEdit` 与 `_ClearDeferredKeyDowns`，不能用空方法跳过已经推进字符的失败收尾。三项分别通过 191、220 项检查和恢复检查点回归，覆盖等待期间保留 FIFO 槽与引用、阻止尾键、释放后仅派发一次、旧 token 不影响新 owner、未推进时正常恢复、已推进且有或没有提交文本时禁止重放，以及成功 worker 收尾释放。仅在内存中移除相应 owner guard 后，三个专项分别出现 2、1、2 项失败，仓库生产代码保持不变。首轮完整 quick 的三项夹具编译失败与 Linux 超时日志保留；修正后的整条 `bash scripts/verify-local.sh --quick` 重跑退出 0，其中本机 Windows 测试 178 项通过，Linux 111 项全部通过。Windows 原生交叉编译因本机没有 MinGW 跳过，不能替代真实 Windows 双进程验收。
