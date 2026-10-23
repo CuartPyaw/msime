@@ -32,6 +32,8 @@ Windows 11 上的 x64 专用构建完整产出核心 DLL 与 MCP；导入清单�
 
 `windows7-core-load` 实际装载收集后的 x64 与 x86 DLL，验证 ABI 3、DirectWrite 字体枚举、WASAPI 设备枚举和响应释放，不录音、不输出字体或设备身份。Win7 SP1 验收仍未完成。
 
+同源的 x86 与 x64 TSF DLL 均已链接对应 Win7 核心，并通过实际 DLL 类工厂创建、引用和卸载测试。该检查在 Windows 11 上执行，不包含安装注册、应用输入或 Win7 运行验收。
+
 ## Alternatives considered
 
 - **全局降级依赖与 Rust 工具链。** 可以复用普通构建，但会扩大现代 Windows 和其他平台的回归范围。专用目标与最终链接参数把兼容实现限制在兼容构建中。

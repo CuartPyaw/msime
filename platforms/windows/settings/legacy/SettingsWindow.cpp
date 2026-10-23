@@ -1,0 +1,671 @@
+#include "SettingsWindow.h"
+#include "PreferencesStore.h"
+#include "../InputSettingsModel.h"
+#include "../FloatingToolbarSizeModel.h"
+#include "../SettingsStateDirectory.h"
+#include "../../common/StateDirectory.h"
+#include "../../compat/WindowsDpi.h"
+
+#include <commctrl.h>
+#include <algorithm>
+#include <array>
+#include <condition_variable>
+#include <filesystem>
+#include <fstream>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <thread>
+#include <utility>
+#include <vector>
+
+namespace msime::settings::legacy {
+namespace {
+constexpr UINT completed_message = WM_APP + 71;
+constexpr wchar_t window_class[] = L"MSIME.LegacySettings" MSIME_EDITION_NAME_SUFFIX;
+constexpr wchar_t body_class[] = L"MSIME.LegacySettings.Body" MSIME_EDITION_NAME_SUFFIX;
+namespace ts = msime::settings::toolbar_size;
+enum class Surface { shortcuts, reference, toolbar };
+struct ToolbarCheck { int id; const char* field; const wchar_t* label; };
+constexpr std::array<ToolbarCheck, 11> toolbar_checks{{
+    {toolbar_enabled, "enabled", L"在桌面显示悬浮工具栏"},
+    {toolbar_language, "english_mode", L"中英文切换"},
+    {toolbar_scheme, "input_scheme", L"切换输入方案"},
+    {toolbar_fullwidth, "fullwidth", L"全角 / 半角"},
+    {toolbar_punctuation, "punctuation", L"中英文标点"},
+    {toolbar_character_set, "character_set", L"简繁切换"},
+    {toolbar_emoji, "emoji", L"表情与符号"},
+    {toolbar_handwriting, "handwriting", L"手写识别板"},
+    {toolbar_keyboard, "screen_keyboard", L"屏幕键盘"},
+    {toolbar_voice, "voice", L"语音输入"},
+    {toolbar_settings, "settings", L"设置"},
+}};
+constexpr std::array<const char*, 3> switch_fields{{
+    "switch_language_shift", "switch_language_ctrl", "switch_language_ctrl_alt_space"}};
+constexpr std::array<std::pair<int, const char*>, 4> check_fields{{
+    {caps_lock, "switch_language_caps_lock"}, {japanese_toggle, "toggle_japanese_ctrl_shift_j"},
+    {traditional_toggle, "toggle_character_set_ctrl_shift_f"},
+    {fullwidth_toggle, "toggle_fullwidth_option_shift_h"}}};
+
+std::wstring environment(const wchar_t* name) {
+  const DWORD required = GetEnvironmentVariableW(name, nullptr, 0);
+  if (!required) return {};
+  std::wstring value(required, L'\0');
+  const DWORD length = GetEnvironmentVariableW(name, value.data(), required);
+  if (!length || length >= required) return {};
+  value.resize(length);
+  return value;
+}
+
+// 与现代设置窗口相同的目录优先级；仅工作线程读取运行时选项文件。
+std::filesystem::path preferences_directory() {
+  const auto injected = std::filesystem::path(environment(L"MSIME_CLIENT_STATE_DIR"));
+  if (injected.is_absolute()) return injected;
+  const auto root = msime::windows::resolve_state_directory();
+  if (root.empty()) return {};
+  std::filesystem::path configured;
+  std::ifstream input(root / L"runtime-options.json", std::ios::binary);
+  if (input) {
+    constexpr size_t limit = 1024 * 1024;
+    std::string content(limit + 1, '\0');
+    input.read(content.data(), static_cast<std::streamsize>(content.size()));
+    content.resize(static_cast<size_t>(input.gcount()));
+    if (content.size() <= limit) {
+      const auto options = Json::parse(content, nullptr, false);
+      if (options.is_object()) {
+        const auto directory = options.find("preferences_directory");
+        if (directory != options.end() && directory->is_string())
+          configured = std::filesystem::u8path(directory->get<std::string>());
+      }
+    }
+  }
+  return settings_state_directory(injected, root, configured);
+}
+
+bool offers_japanese_switch() {
+  bool japanese = false;
+  bool chinese = false;
+  for (std::string_view scheme : {MSIME_EDITION_INPUT_SCHEMES}) {
+    japanese = japanese || scheme == "japanese";
+    chinese = chinese || scheme == "quanpin" || scheme == "shuangpin" || scheme == "wubi" ||
+        scheme == "cantonese" || scheme == "zhuyin" || scheme == "stroke";
+  }
+  return japanese && chinese;
+}
+
+struct Job {
+  bool reload = true;
+  std::vector<Change> changes;
+};
+
+// 窗口只发明确字段修改；工作线程串行读写，关闭时收尾，不遗留 HWND 消息负载。
+class Worker {
+public:
+  explicit Worker(HWND window) : window_(window), thread_([this] { run(); }) {}
+  ~Worker() {
+    {
+      std::lock_guard<std::mutex> guard(lock_);
+      stopping_ = true;
+    }
+    ready_.notify_one();
+    thread_.join();
+  }
+
+  void submit(Job job) {
+    {
+      std::lock_guard<std::mutex> guard(lock_);
+      pending_ = std::move(job);
+    }
+    ready_.notify_one();
+  }
+
+  std::optional<Result> take() {
+    std::lock_guard<std::mutex> guard(lock_);
+    return std::exchange(completed_, std::nullopt);
+  }
+
+private:
+  Result execute(const Job& job) {
+    if (!store_) {
+      const auto directory = preferences_directory();
+      if (directory.empty()) return {Outcome::storage, std::nullopt};
+      store_.emplace(directory.u8string());
+    }
+    Result result;
+    if (job.reload) {
+      result = store_->load();
+    } else if (snapshot_) {
+      result = store_->save(*snapshot_, job.changes);
+      if (!result.snapshot) {
+        // 写入后清理失败也可能返回错误；重新读实际状态，不猜测是否落盘，不自动重试覆盖。
+        auto fresh = store_->load();
+        result.snapshot = std::move(fresh.snapshot);
+      }
+    }
+    snapshot_ = result.snapshot;
+    return result;
+  }
+
+  void run() {
+    Job job;
+    for (;;) {
+      Result result;
+      // 文件系统、JSON 与线程边界统一转换为可见失败，异常不能越过线程入口。
+      try {
+        result = execute(job);
+      } catch (const std::exception&) {
+        snapshot_.reset();
+        result = {Outcome::storage, std::nullopt};
+      }
+      std::unique_lock<std::mutex> guard(lock_);
+      if (!stopping_) {
+        completed_ = std::move(result);
+        guard.unlock();
+        PostMessageW(window_, completed_message, 0, 0);
+        guard.lock();
+      }
+      ready_.wait(guard, [this] { return stopping_ || pending_.has_value(); });
+      // 关闭前已受理的修改必须做完；窗口已销毁时不再投递结果。
+      if (!pending_) return;
+      job = std::move(*pending_);
+      pending_.reset();
+    }
+  }
+
+  HWND window_;
+  std::mutex lock_;
+  std::condition_variable ready_;
+  bool stopping_ = false;
+  std::optional<Job> pending_;
+  std::optional<Result> completed_;
+  std::optional<PreferencesStore> store_;
+  std::optional<Snapshot> snapshot_;
+  std::thread thread_;
+};
+
+} // namespace
+
+struct SettingsWindow::State {
+  struct Item {
+    HWND handle;
+    int top;
+    int height;
+    Surface surface = Surface::shortcuts;
+  };
+  HWND window = nullptr;
+  HWND body = nullptr;
+  HWND tabs = nullptr;
+  HWND selector = nullptr;
+  HWND selector_label = nullptr;
+  HWND status = nullptr;
+  HWND reload = nullptr;
+  HFONT font = nullptr;
+  HINSTANCE instance = nullptr;
+  UINT dpi = USER_DEFAULT_SCREEN_DPI;
+  int scroll = 0;
+  int content_height = 0;
+  int toolbar_height = 0;
+  Surface surface = Surface::shortcuts;
+  bool busy = true;
+  bool failed = false;
+  std::vector<Item> items;
+  std::unique_ptr<Worker> worker;
+  std::optional<Snapshot> snapshot;
+
+  int dip(int value) const { return MulDiv(value, static_cast<int>(dpi), USER_DEFAULT_SCREEN_DPI); }
+
+  HWND add(HWND parent, const wchar_t* type, const wchar_t* caption, DWORD style, int id) {
+    HWND child = CreateWindowExW(0, type, caption, WS_CHILD | WS_VISIBLE | style,
+        0, 0, 1, 1, parent, reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), instance, nullptr);
+    if (!child) failed = true;
+    else SendMessageW(child, WM_SETFONT, reinterpret_cast<WPARAM>(font), FALSE);
+    return child;
+  }
+
+  HWND row(const wchar_t* type, const wchar_t* caption, DWORD style, int id, int top, int height) {
+    HWND child = add(body, type, caption, style, id);
+    items.push_back({child, top, height});
+    return child;
+  }
+
+  bool controls() {
+    dpi = msime::windows::compat::system_dpi();
+    font = CreateFontW(-dip(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+    selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
+    selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
+    for (const auto* title : {L"快捷键", L"悬浮工具栏"})
+      SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
+    SendMessageW(selector, CB_SETCURSEL, 0, 0);
+    tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
+    for (size_t index = 0; index < input::shortcut_tabs.size(); ++index) {
+      TCITEMW item{};
+      item.mask = TCIF_TEXT;
+      item.pszText = const_cast<wchar_t*>(input::shortcut_tabs[index].title.data());
+      TabCtrl_InsertItem(tabs, static_cast<int>(index), &item);
+    }
+    body = CreateWindowExW(WS_EX_CONTROLPARENT, body_class, L"快捷键内容", WS_CHILD | WS_VISIBLE | WS_VSCROLL | WS_CLIPCHILDREN,
+        0, 0, 1, 1, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(page_body)), instance, this);
+    if (!body) return false;
+    status = add(window, L"STATIC", L"正在读取设置…", SS_LEFT, status_text);
+    reload = add(window, L"BUTTON", L"重新读取", WS_TABSTOP | BS_PUSHBUTTON, reload_settings);
+    row(L"STATIC", L"输入法快捷键仅在对应输入状态或候选窗口显示时生效。翻页方式和以词定字在「输入 › 选词与翻页」中设置。", SS_LEFT, -1, 0, 48);
+    row(L"STATIC", L"切换中英文", SS_LEFT, -1, 58, 24);
+    const auto language = row(WC_COMBOBOXW, L"切换中英文", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+        language_switch, 88, 200);
+    for (const auto* choice : {L"Shift", L"单击 Ctrl", L"Ctrl+Alt+Space", L"不使用"})
+      SendMessageW(language, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(choice));
+    int top = 134;
+    row(L"BUTTON", L"单按 Caps Lock 切换中英文", WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY, caps_lock, top, 28);
+    row(L"STATIC", L"轻点 Caps Lock（300 毫秒内松开）切换中英文，不打开大写锁定；按住更久照常打开大写锁定，大写锁定开着时按一下照常关掉。", SS_LEFT, -1, top + 32, 62);
+    top += 108;
+    if (offers_japanese_switch()) {
+      row(L"BUTTON", L"Ctrl+Shift+J 在中文和日语之间切换", WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY, japanese_toggle, top, 28);
+      row(L"STATIC", L"中文方案下按它切到日语，在日语里再按回到上次的中文方案；英文模式下交给应用。关闭时组合键交给应用；打开后在浏览器里也会被输入法占用。", SS_LEFT, -1, top + 32, 62);
+      top += 108;
+    }
+    row(L"BUTTON", L"Ctrl+Shift+F 切换繁体输出", WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY, traditional_toggle, top, 28);
+    top += 44;
+    row(L"BUTTON", L"Alt+Shift+H 切换全半角", WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY, fullwidth_toggle, top, 28);
+    row(L"STATIC", L"关闭后这个组合键交给应用处理；工具栏的全半角开关和 Ctrl+Shift+Space 不受影响。", SS_LEFT, -1, top + 32, 46);
+    top += 92;
+    row(L"STATIC", L"Ctrl+Space 由 Windows 管理，请在系统的输入语言热键设置中更改。", SS_LEFT, -1, top, 46);
+    content_height = top + 52;
+    HWND reference_control = add(body, L"EDIT", L"", WS_TABSTOP | ES_MULTILINE | ES_READONLY | WS_VSCROLL,
+        reference_text);
+    items.push_back({reference_control, 0, 0, Surface::reference});
+    toolbar_controls();
+    enable(false);
+    layout();
+    return !failed;
+  }
+
+  void toolbar_controls() {
+    int top = 0;
+    const auto toolbar_row = [this](const wchar_t* type, const wchar_t* caption, DWORD style,
+                                    int id, int position, int height) {
+      HWND control = row(type, caption, style, id, position, height);
+      items.back().surface = Surface::toolbar;
+      return control;
+    };
+    toolbar_row(L"STATIC", L"显示", SS_LEFT, -1, top, 24);
+    top += 32;
+    for (const auto& field : toolbar_checks) {
+      if (field.id == toolbar_handwriting && !MSIME_EDITION_HANDWRITING) continue;
+      toolbar_row(L"BUTTON", field.label, WS_TABSTOP | BS_AUTOCHECKBOX | BS_NOTIFY,
+          field.id, top, 28);
+      top += 36;
+      if (field.id == toolbar_enabled) {
+        toolbar_row(L"STATIC", L"按钮：勾选要显示在悬浮工具栏上的按钮。关闭工具栏不会清除这些选择。", SS_LEFT, -1, top, 40);
+        top += 48;
+      }
+    }
+    top += 12;
+    toolbar_row(L"STATIC", L"工具栏大小", SS_LEFT, -1, top, 24);
+    top += 30;
+    const HWND size = toolbar_row(WC_COMBOBOXW, L"工具栏大小", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
+        toolbar_size, top, 240);
+    for (const auto& choice : ts::sizes) {
+      const auto title = std::to_wstring(choice.percent) + L"%";
+      SendMessageW(size, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title.c_str()));
+    }
+    top += 42;
+    toolbar_row(L"STATIC", L"按钮和图标一起放大或缩小，不改变系统显示缩放。颜色与明暗跟随主题设置。", SS_LEFT, -1, top, 42);
+    top += 50;
+    toolbar_row(L"STATIC", L"", SS_LEFT, toolbar_summary, top, 48);
+    toolbar_height = top + 56;
+  }
+
+  void enable(bool enabled) {
+    for (int id : {language_switch, caps_lock, japanese_toggle, traditional_toggle, fullwidth_toggle})
+      if (HWND control = GetDlgItem(body, id)) EnableWindow(control, enabled);
+    for (const auto& field : toolbar_checks)
+      if (HWND control = GetDlgItem(body, field.id)) EnableWindow(control, enabled);
+    EnableWindow(GetDlgItem(body, toolbar_size), enabled);
+    EnableWindow(reload, !busy);
+  }
+
+  void layout() {
+    if (!body) return;
+    RECT client{};
+    GetClientRect(window, &client);
+    const int width = client.right;
+    const int height = client.bottom;
+    MoveWindow(selector_label, dip(24), dip(18), dip(80), dip(26), TRUE);
+    MoveWindow(selector, dip(112), dip(12), std::max(width - dip(136), 1), dip(160), TRUE);
+    ShowWindow(tabs, surface == Surface::toolbar ? SW_HIDE : SW_SHOW);
+    MoveWindow(tabs, dip(24), dip(52), std::max(width - dip(48), 1), dip(30), TRUE);
+    const int body_top = surface == Surface::toolbar ? 58 : 94;
+    MoveWindow(body, dip(24), dip(body_top), std::max(width - dip(48), 1), std::max(height - dip(body_top + 86), 1), TRUE);
+    MoveWindow(status, dip(24), height - dip(76), std::max(width - dip(48), 1), dip(38), TRUE);
+    MoveWindow(reload, width - dip(144), height - dip(34), dip(120), dip(28), TRUE);
+    layout_body();
+  }
+
+  void layout_body() {
+    RECT client{};
+    GetClientRect(body, &client);
+    SCROLLINFO info{};
+    info.cbSize = sizeof(info);
+    info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
+    const bool reference = surface == Surface::reference;
+    info.nMax = reference ? 0 : dip(surface == Surface::toolbar ? toolbar_height : content_height) - 1;
+    info.nPage = static_cast<UINT>(std::max(client.bottom, 0L));
+    info.nPos = reference ? 0 : scroll;
+    SetScrollInfo(body, SB_VERT, &info, TRUE);
+    info.fMask = SIF_POS;
+    GetScrollInfo(body, SB_VERT, &info);
+    scroll = info.nPos;
+    GetClientRect(body, &client);
+    for (const auto& item : items) {
+      ShowWindow(item.handle, surface == item.surface ? SW_SHOW : SW_HIDE);
+      if (surface != item.surface) continue;
+      MoveWindow(item.handle, 0, reference ? 0 : dip(item.top) - scroll,
+          std::max(client.right - dip(8), 1L), reference ? client.bottom : dip(item.height), TRUE);
+    }
+  }
+
+  void scroll_to(int position) {
+    scroll = std::max(position, 0);
+    layout_body();
+  }
+
+  void reveal(HWND control) {
+    RECT rectangle{};
+    RECT viewport{};
+    GetWindowRect(control, &rectangle);
+    MapWindowPoints(nullptr, body, reinterpret_cast<POINT*>(&rectangle), 2);
+    GetClientRect(body, &viewport);
+    // 下拉框的窗口高度含弹出列表，收起时只需保证顶部编辑行可见。
+    if (GetDlgCtrlID(control) == language_switch || GetDlgCtrlID(control) == toolbar_size)
+      rectangle.bottom = rectangle.top + dip(32);
+    if (rectangle.top < 0) scroll_to(scroll + rectangle.top);
+    else if (rectangle.bottom > viewport.bottom) scroll_to(scroll + rectangle.bottom - viewport.bottom);
+  }
+
+  void submit(Job job) {
+    if (busy) return;
+    busy = true;
+    enable(false);
+    SetWindowTextW(status, job.reload ? L"正在读取设置…" : L"正在保存…");
+    worker->submit(std::move(job));
+  }
+
+  bool valid_settings(const Snapshot& document) const {
+    const auto& preferences = document.preferences();
+    const auto keys = preferences.find("keybindings");
+    if (keys == preferences.end() || !keys->is_object()) return false;
+    const auto has = [&keys](const char* name) {
+      const auto field = keys->find(name);
+      return field != keys->end() && field->is_boolean();
+    };
+    for (const auto* name : switch_fields) if (!has(name)) return false;
+    for (const auto& field : check_fields) if (!has(field.second)) return false;
+    const auto toolbar = preferences.find("floating_toolbar");
+    if (toolbar == preferences.end() || !toolbar->is_object()) return false;
+    for (const auto& field : toolbar_checks) {
+      const auto value = toolbar->find(field.field);
+      if (value == toolbar->end() || !value->is_boolean()) return false;
+    }
+    for (const auto* field : {"scale_percent", "font_size"}) {
+      const auto value = toolbar->find(field);
+      if (value == toolbar->end() || !value->is_number_integer()) return false;
+    }
+    return true;
+  }
+
+  void refresh_toolbar() {
+    if (!snapshot) return;
+    const auto& toolbar = snapshot->preferences().at("floating_toolbar");
+    for (const auto& field : toolbar_checks)
+      if (HWND control = GetDlgItem(body, field.id))
+        SendMessageW(control, BM_SETCHECK, toolbar.at(field.field).get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
+    const int scale = toolbar.at("scale_percent").get<int>();
+    const int font_size = toolbar.at("font_size").get<int>();
+    const auto current = ts::size_for(scale, font_size);
+    const HWND size = GetDlgItem(body, toolbar_size);
+    // 不匹配标准档位时照实显示已有值，只有用户选标准档位才写入两个字段。
+    if (SendMessageW(size, CB_GETCOUNT, 0, 0) > static_cast<LRESULT>(ts::sizes.size()))
+      SendMessageW(size, CB_DELETESTRING, ts::sizes.size(), 0);
+    int selected = static_cast<int>(ts::sizes.size());
+    if (current) {
+      for (size_t index = 0; index < ts::sizes.size(); ++index)
+        if (ts::sizes[index].percent == current->percent) selected = static_cast<int>(index);
+    } else {
+      const auto title = L"自定义（缩放 " + std::to_wstring(scale) + L"%，图标 " + std::to_wstring(font_size) + L"）";
+      SendMessageW(size, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title.c_str()));
+    }
+    SendMessageW(size, CB_SETCURSEL, selected, 0);
+    std::wstring summary = L"当前按钮：";
+    for (const auto& field : toolbar_checks) {
+      if (field.id == toolbar_enabled || (field.id == toolbar_handwriting && !MSIME_EDITION_HANDWRITING)) continue;
+      if (toolbar.at(field.field).get<bool>()) summary += std::wstring(field.label) + L"　";
+    }
+    SetWindowTextW(GetDlgItem(body, toolbar_summary), summary.c_str());
+  }
+
+  void refresh_reference() {
+    if (!snapshot) return;
+    const auto& preferences = snapshot->preferences();
+    const auto enabled = [&preferences](const char* group, const std::string& field) {
+      const auto parent = preferences.find(group);
+      if (parent == preferences.end() || !parent->is_object()) return false;
+      const auto value = parent->find(field);
+      return value != parent->end() && value->is_boolean() && value->get<bool>();
+    };
+    std::wstring text = L"选择候选\tSpace 或 1–9\r\n\r\n向前 / 向后翻页\r\n";
+    for (const auto& keys : input::paging_keys) {
+      std::string key;
+      for (const wchar_t letter : keys.id) key.push_back(static_cast<char>(letter));
+      if (input::paging_keys_on(keys, enabled("navigation", key)))
+        text += L"    " + std::wstring(keys.chord) + L"\r\n";
+    }
+    if (enabled("navigation", "mouse_wheel")) text += L"\r\n候选窗口翻页\t鼠标滚轮\r\n";
+    if (enabled("navigation", "arrows")) text += L"\r\n移动候选项\t↑ / ↓\r\n";
+    if (enabled("navigation", "left_right")) text += L"\r\n移动候选项（输入串两端）\t← / →\r\n";
+    if (enabled("word_character", "enabled")) {
+      const auto& keys = preferences.at("word_character").at("keys");
+      text += keys == "minus_equal" ? L"\r\n以词定字（首字 / 末字）\t- / =\r\n" :
+          L"\r\n以词定字（首字 / 末字）\t[ / ]\r\n";
+    }
+    text += L"\r\n列表首项 / 末项\tHome / End\r\n\r\n编辑输入串\t← / → / Backspace\r\n\r\n提交原始输入 / 取消输入\tEnter / Esc\r\n\r\n打开屏幕键盘\tCtrl+Shift+Win+K";
+    SetWindowTextW(GetDlgItem(body, reference_text), text.c_str());
+  }
+
+  void complete() {
+    auto result = worker->take();
+    if (!result) return;
+    busy = false;
+    snapshot = std::move(result->snapshot);
+    if (snapshot && !valid_settings(*snapshot)) {
+      snapshot.reset();
+      result->outcome = Outcome::invalid_response;
+    }
+    if (snapshot) {
+      const auto& keys = snapshot->preferences().at("keybindings");
+      int selected = 3;
+      for (size_t index = 0; index < switch_fields.size(); ++index) {
+        if (keys.at(switch_fields[index]).get<bool>()) { selected = static_cast<int>(index); break; }
+      }
+      SendMessageW(GetDlgItem(body, language_switch), CB_SETCURSEL, selected, 0);
+      for (const auto& field : check_fields)
+        if (HWND control = GetDlgItem(body, field.first))
+          SendMessageW(control, BM_SETCHECK, keys.at(field.second).get<bool>() ? BST_CHECKED : BST_UNCHECKED, 0);
+      refresh_reference();
+      refresh_toolbar();
+    }
+    enable(snapshot.has_value());
+    const wchar_t* message = L"读取设置失败，请重新读取后重试。";
+    switch (result->outcome) {
+    case Outcome::loaded: message = L""; break;
+    case Outcome::saved: message = L"已保存。"; break;
+    case Outcome::conflict: message = L"设置已在其他窗口中更新，已重新读取；本次修改未覆盖其他窗口的设置。"; break;
+    case Outcome::invalid_change: message = L"无法修改这个设置，请重新读取后重试。"; break;
+    case Outcome::invalid_response: message = L"设置返回内容无法读取，请重新读取后重试。"; break;
+    case Outcome::storage: message = L"读写设置失败，请重新读取后重试。"; break;
+    }
+    SetWindowTextW(status, message);
+  }
+
+  void command(WPARAM command) {
+    const int id = LOWORD(command);
+    if (id == page_selector && HIWORD(command) == CBN_SELCHANGE) {
+      surface = SendMessageW(selector, CB_GETCURSEL, 0, 0) == 1 ? Surface::toolbar :
+          TabCtrl_GetCurSel(tabs) == 1 ? Surface::reference : Surface::shortcuts;
+      scroll = 0;
+      layout();
+      return;
+    }
+    if (busy) return;
+    if (id == reload_settings && HIWORD(command) == BN_CLICKED) { submit(Job{}); return; }
+    if (!snapshot) return;
+    Job job;
+    job.reload = false;
+    if (id == language_switch && HIWORD(command) == CBN_SELCHANGE) {
+      const LRESULT selected = SendMessageW(GetDlgItem(body, language_switch), CB_GETCURSEL, 0, 0);
+      if (selected < 0 || selected > 3) return;
+      for (size_t index = 0; index < switch_fields.size(); ++index)
+        job.changes.push_back({{"keybindings", switch_fields[index]}, selected == static_cast<LRESULT>(index)});
+    } else if (id == toolbar_size && HIWORD(command) == CBN_SELCHANGE) {
+      const LRESULT selected = SendMessageW(GetDlgItem(body, toolbar_size), CB_GETCURSEL, 0, 0);
+      if (selected < 0 || selected >= static_cast<LRESULT>(ts::sizes.size())) return;
+      const auto& choice = ts::sizes[static_cast<size_t>(selected)];
+      job.changes.push_back({{"floating_toolbar", "scale_percent"}, choice.scale_percent});
+      job.changes.push_back({{"floating_toolbar", "font_size"}, choice.font_size});
+    } else if (HIWORD(command) == BN_CLICKED) {
+      for (const auto& field : check_fields)
+        if (id == field.first)
+          job.changes.push_back({{"keybindings", field.second},
+              SendMessageW(GetDlgItem(body, id), BM_GETCHECK, 0, 0) == BST_CHECKED});
+      for (const auto& field : toolbar_checks)
+        if (id == field.id && GetDlgItem(body, id))
+          job.changes.push_back({{"floating_toolbar", field.field},
+              SendMessageW(GetDlgItem(body, id), BM_GETCHECK, 0, 0) == BST_CHECKED});
+    }
+    if (!job.changes.empty()) submit(std::move(job));
+  }
+
+  static LRESULT CALLBACK body_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+    auto* self = reinterpret_cast<State*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (message == WM_NCCREATE) {
+      self = static_cast<State*>(reinterpret_cast<CREATESTRUCTW*>(lparam)->lpCreateParams);
+      SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+    }
+    if (!self) return DefWindowProcW(hwnd, message, wparam, lparam);
+    if (message == WM_COMMAND) {
+      if (((LOWORD(wparam) == language_switch || LOWORD(wparam) == toolbar_size) && HIWORD(wparam) == CBN_SETFOCUS) ||
+          ((LOWORD(wparam) >= caps_lock && LOWORD(wparam) <= fullwidth_toggle) && HIWORD(wparam) == BN_SETFOCUS) ||
+          ((LOWORD(wparam) >= toolbar_enabled && LOWORD(wparam) <= toolbar_settings) && HIWORD(wparam) == BN_SETFOCUS))
+        self->reveal(reinterpret_cast<HWND>(lparam));
+      else self->command(wparam);
+      return 0;
+    }
+    if (message == WM_MOUSEWHEEL) {
+      self->scroll_to(self->scroll - MulDiv(GET_WHEEL_DELTA_WPARAM(wparam), self->dip(48), WHEEL_DELTA));
+      return 0;
+    }
+    if (message == WM_VSCROLL) {
+      SCROLLINFO info{};
+      info.cbSize = sizeof(info);
+      info.fMask = SIF_ALL;
+      GetScrollInfo(hwnd, SB_VERT, &info);
+      int next = info.nPos;
+      switch (LOWORD(wparam)) {
+      case SB_LINEUP: next -= self->dip(28); break;
+      case SB_LINEDOWN: next += self->dip(28); break;
+      case SB_PAGEUP: next -= static_cast<int>(info.nPage); break;
+      case SB_PAGEDOWN: next += static_cast<int>(info.nPage); break;
+      case SB_THUMBTRACK: next = info.nTrackPos; break;
+      case SB_TOP: next = info.nMin; break;
+      case SB_BOTTOM: next = info.nMax; break;
+      }
+      self->scroll_to(next);
+      return 0;
+    }
+    return DefWindowProcW(hwnd, message, wparam, lparam);
+  }
+
+  static LRESULT CALLBACK window_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
+    auto* self = reinterpret_cast<State*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
+    if (message == WM_NCCREATE) {
+      self = static_cast<State*>(reinterpret_cast<CREATESTRUCTW*>(lparam)->lpCreateParams);
+      self->window = hwnd;
+      SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
+    }
+    if (!self) return DefWindowProcW(hwnd, message, wparam, lparam);
+    switch (message) {
+    case WM_CREATE: return self->controls() ? 0 : -1;
+    case WM_SIZE: self->layout(); return 0;
+    case WM_GETMINMAXINFO: {
+      auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
+      limits->ptMinTrackSize = {self->dip(720), self->dip(540)};
+      return 0;
+    }
+    case WM_COMMAND: self->command(wparam); return 0;
+    case WM_NOTIFY: {
+      const auto* notification = reinterpret_cast<NMHDR*>(lparam);
+      if (notification->idFrom == page_tabs && notification->code == TCN_SELCHANGE) {
+        self->surface = TabCtrl_GetCurSel(self->tabs) == 1 ? Surface::reference : Surface::shortcuts;
+        self->scroll = 0;
+        self->layout_body();
+      }
+      return 0;
+    }
+    case completed_message: self->complete(); return 0;
+    case WM_DESTROY: self->worker.reset(); PostQuitMessage(0); return 0;
+    case WM_NCDESTROY:
+      SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0);
+      self->window = nullptr;
+      break;
+    }
+    return DefWindowProcW(hwnd, message, wparam, lparam);
+  }
+};
+
+SettingsWindow::SettingsWindow() : state_(std::make_unique<State>()) {}
+
+SettingsWindow::~SettingsWindow() {
+  if (state_->window) DestroyWindow(state_->window);
+  state_->worker.reset();
+  if (state_->font) DeleteObject(state_->font);
+}
+
+bool SettingsWindow::create(HINSTANCE instance) {
+  state_->instance = instance;
+  INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_TAB_CLASSES | ICC_STANDARD_CLASSES};
+  if (!InitCommonControlsEx(&controls)) return false;
+  for (const auto& entry : {std::pair{window_class, &State::window_proc}, std::pair{body_class, &State::body_proc}}) {
+    WNDCLASSEXW type{};
+    type.cbSize = sizeof(type);
+    type.hInstance = instance;
+    type.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    type.hbrBackground = GetSysColorBrush(COLOR_WINDOW);
+    type.lpfnWndProc = entry.second;
+    type.lpszClassName = entry.first;
+    if (!RegisterClassExW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
+  }
+  state_->dpi = msime::windows::compat::system_dpi();
+  HWND window = CreateWindowExW(WS_EX_CONTROLPARENT, window_class, MSIME_EDITION_DISPLAY_NAME L" · 设置",
+      WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
+      state_->dip(900), state_->dip(720), nullptr, nullptr, instance, state_.get());
+  if (!window) return false;
+  state_->worker = std::make_unique<Worker>(window);
+  return true;
+}
+
+HWND SettingsWindow::handle() const { return state_->window; }
+
+int SettingsWindow::run(int show) {
+  ShowWindow(state_->window, show);
+  MSG message{};
+  BOOL result;
+  while ((result = GetMessageW(&message, nullptr, 0, 0)) > 0) {
+    if (!IsDialogMessageW(state_->window, &message)) {
+      TranslateMessage(&message);
+      DispatchMessageW(&message);
+    }
+  }
+  return result < 0 ? 1 : static_cast<int>(message.wParam);
+}
+
+} // namespace msime::settings::legacy

@@ -34,7 +34,7 @@ Windows 11 上 `msimeui` 与 `msime-windows-server` 静态库构建通过。UI �
 
 MSVC x64 的 `windows-server-smoke` 与受控 `msime-tsf-edit-control-demo` 完整构建通过，最终 PE 导入表没有六个新 DPI API、线程上下文查询/比较或 DirectComposition 入口。更新测试适配后再次运行 Server 冒烟测试，仍只停在同一窗口显示断言。这不是编辑器输入验收通过的证据，真实登录桌面和 Win7 上的输入仍待验证。
 
-首轮 quick 的编译阶段通过，但语音语言目录和 Windows 设置页就绪检查分别因 120 秒与 40 秒超时失败；未改动这些检查或扩大失败基线。相同门禁正在复跑，尚不能报告 quick 通过。真实 Win7 验收仍需完成。
+quick 的首轮编译通过，但两个契约检查超时；第二轮仅 Linux 的 `linux-floating-panels-x11` 在“切换方案按钮没有弹出菜单”处失败，同一二进制的定向复跑通过。第三轮 `20261023-195145` 完整 quick 于 15 分 45 秒内通过，没有修改检查或扩大失败基线。Studio 缺少 Windows 交叉工具链、Node 和 HarmonyOS 完整环境，相应阶段跳过；Windows 原生验证和笔记门禁另行执行。真实 Win7 验收仍需完成。
 
 ## Alternatives considered
 

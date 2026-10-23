@@ -516,6 +516,22 @@ jobs:
           & $msbuild[0] platforms/windows/settings/MSIME.Settings.vcxproj /restore /t:Build /p:Configuration=RelWithDebInfo /p:Platform=x64 /p:TargetName=msime-client-settings /p:HostApiLibrary="$env:GITHUB_WORKSPACE/target/debug/msime_host_api.dll.lib" /p:OutDir="$output" /p:IntDir="$env:GITHUB_WORKSPACE/target/windows-full/x64/settings-obj/" /verbosity:minimal
           if ($LASTEXITCODE -ne 0) { throw 'Settings host build failed' }
           Copy-Item target/debug/msime_host_api.dll $output
+      - name: Build and test the compatibility settings host
+        if: ${{ needs.changes.outputs.windows == 'true' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $toolchain = Join-Path $env:VCPKG_INSTALLATION_ROOT 'scripts/buildsystems/vcpkg.cmake'
+          if (-not (Test-Path -LiteralPath $toolchain -PathType Leaf)) { throw 'vcpkg toolchain not found' }
+          $output = 'target/windows-full/x64/legacy-settings'
+          # 使用同一提交的普通核心验证 HWND 和持久化；Win7 目标与实机另做验收。
+          cmake -S platforms/windows/settings/legacy -B $output -A x64 "-DCMAKE_TOOLCHAIN_FILE=$toolchain" "-DVCPKG_INSTALLED_DIR=$env:GITHUB_WORKSPACE/target/windows-native-deps/legacy-settings" -DVCPKG_TARGET_TRIPLET=x64-windows-static-md "-DMSIME_HOST_LIBRARY=$env:GITHUB_WORKSPACE/target/debug/msime_host_api.dll.lib"
+          if ($LASTEXITCODE -ne 0) { throw 'Compatibility settings configuration failed' }
+          cmake --build $output --config RelWithDebInfo --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Compatibility settings build failed' }
+          Copy-Item target/debug/msime_host_api.dll "$output/RelWithDebInfo/"
+          ctest --test-dir $output -C RelWithDebInfo --output-on-failure
+          if ($LASTEXITCODE -ne 0) { throw 'Compatibility settings tests failed' }
       - name: Inspect native settings pages
         if: ${{ needs.changes.outputs.windows == 'true' }}
         shell: powershell

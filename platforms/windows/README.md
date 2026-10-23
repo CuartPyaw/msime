@@ -1,5 +1,20 @@
 # Windows Server 会话适配
 
+## 兼容设置窗口（开发中）
+
+`settings/legacy` 是使用 Win32 标准控件的原生兼容宿主，目前接通快捷键页，以及工具栏显示、按钮与尺寸控件的真实读取、保存与并发冲突处理；工具栏图形预览和主题跳转仍未完成。其余设置页仍未完成，普通设置启动器和安装包继续使用 WinUI 3。不能将此目标作为完整 Win7 产品安装。
+
+在 Windows MSVC 开发环境中，使用同一提交、同一架构的核心与原生依赖前缀构建：
+
+```powershell
+cmake -S platforms/windows/settings/legacy -B target/windows-full/x64/legacy-settings -A x64 "-DCMAKE_PREFIX_PATH=<x64 原生依赖前缀>" "-DMSIME_HOST_LIBRARY=$PWD/target/windows7-core/x64/msime_host_api.dll.lib"
+cmake --build target/windows-full/x64/legacy-settings --config RelWithDebInfo --parallel 2
+Copy-Item target/windows7-core/x64/msime_host_api.dll target/windows-full/x64/legacy-settings/RelWithDebInfo/
+ctest --test-dir target/windows-full/x64/legacy-settings -C RelWithDebInfo --output-on-failure
+```
+
+32 位构建把 `x64` 路径改成 `x86`，`-A x64` 改成 `-A Win32`，依赖前缀也必须为 x86。没有预备依赖前缀时，可用 vcpkg 工具链与此目录的最小清单安装锁定的 `nlohmann-json`；安装目录仍放在 `target/windows-native-deps` 下。测试使用独立合成数据，经实际窗口通知与工作线程调用 Rust 配置存储，覆盖修订号冲突、未修改字段保留和退出时的待保存修改。CI 使用同源普通核心覆盖原生控件与持久化，不代表 Win7 实机或整个产品验证通过。
+
 ## 目录结构
 
 Windows 平台的实现源码在 `src/` 下；`tsf/`、`msimeui/`、`tests/`、`installer/` 各自守着协议、UI、测试与打包的边界，`experiments/` 放不进产品的验证工具。平台根目录放构建文件、脚本、清单和文档。

@@ -20,10 +20,13 @@ Status: proposed
 
 Win7 Rust 构建需要独立的 `*-win7-windows-msvc` 目标、标准库和依赖导入审计。现有 Win10/11 的工具链与发布行为保持原状。Win7 设置需要原生兼容承载，覆盖当前设置页面与所有可达操作；WinUI 3 不能作为 Win7 设置入口。共享面板和语音运行库必须逐项验证，任何未适配能力都属于尚未完成，而非默认移除。
 
+兼容设置采用 Win32 标准控件，复用 `settings/` 中不依赖 WinRT 的页面模型和同一个 Host API，不引入另一套业务规则或偏好默认值。读写在串行工作线程执行，按已读取的修订号比较并交换；保存失败后重新读取实际状态，不自动覆盖并发更新。开发中的兼容目标单独构建，全部页面和操作完成前不改普通设置启动器或安装包。先接通快捷键页的真实控件、持久化和冲突处理，再逐页补齐完整范围。
+
 首轮 Rust Win7 目标构建成功，但实际 DLL 仍导入 `combase.dll` 的两个旧 COM 函数、WinRT 错误 API，以及 `mmdevapi.dll` 的 `ActivateAudioInterfaceAsync`。后者在 Win7 不存在，新版 cpal 的默认麦克风和扬声器也会使用它。Win7 核心构建使用 MSVC 延迟加载及专用通知钩子处理这三个已确认的依赖；原有现代构建不加此钩子。系统模块只从系统目录加载，存在的函数仍调用原地址；旧 COM 函数使用 `ole32.dll` 的同一函数，WinRT 错误消息使用传统 `IErrorInfo` 保存。默认录音和播放的虚拟 GUID 用 Win7 的 `IMMDeviceEnumerator` 与 `IMMDevice::Activate` 激活，由 MTA 工作线程按原接口回调完成结果；不能仅返回“不支持”而使现有语音和音效失效。不为未知导入伪造成功或通用空实现。该切片仍需普通麦克风、语音播放和 Win7 实机验证。
 
 ### 既有笔记审计
 
+- [原生兼容设置基础](../../implemented/feature/2026-10-23-windows7-native-settings-foundation.md)：部分落地，快捷键页、工具栏设置控件与存储边界已有真实测试，完整页面和操作仍需继续适配。
 - [设置界面归属](../../implemented/architecture/2026-10-15-settings-ui-ownership-by-platform.md)：部分重叠。Windows 的原生设置归属保持，新增兼容承载不改变其他平台的选择；Win10/11 继续使用 WinUI 3。
 - [候选渲染边界](../../implemented/architecture/2026-10-13-cross-platform-candidate-rendering-boundaries.md)：部分重叠。候选继续归 Server，TSF DLL 不承载绘制，兼容处理只在宿主绘制层。
 - 按 `win7`、`windows 7` 检索 `proposed`、`implemented`、`rejected`，没有既有 Win7 支持方案；无需替换或归档旧决定。
