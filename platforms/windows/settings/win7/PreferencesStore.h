@@ -32,6 +32,7 @@ struct Result {
 struct Change {
   std::vector<std::string> path;
   Json value;
+  bool remove = false;
 };
 
 // 只转换 C ABI 的文档与所有权；默认值、版本过滤、校验和持久化仍归共享 Rust。
@@ -49,6 +50,12 @@ public:
     for (const auto& change : changes) {
       if (change.path.empty()) return {Outcome::invalid_change, std::nullopt};
       Json* parent = &next.at("preferences");
+      // 屏幕键盘的显式恢复默认只删除这五项，由共享反序列化恢复当前默认；不能泛化为任意字段删除。
+      if (change.remove) {
+        if (change.path.size() != 1 || std::find(reset_keyboard_fields.begin(),reset_keyboard_fields.end(),change.path.front()) == reset_keyboard_fields.end())
+          return {Outcome::invalid_change, std::nullopt};
+        parent->erase(change.path.front()); continue;
+      }
       // 仅放行共享格式明确省略的叶字段及其类型；未知路径和缺少中间对象仍不能补造。
       const bool optional_boolean = change.value.is_boolean() &&
           (change.path == std::vector<std::string>{"navigation", "mouse_wheel"} ||
@@ -117,6 +124,7 @@ public:
   }
 
 private:
+  inline static const std::vector<std::string> reset_keyboard_fields{"touch_key_spacing_tenths", "touch_row_spacing_tenths", "touch_keyboard_height_adjustment", "touch_voice_shortcut", "touch_toolbar"};
   static bool plugin_field(const Change& change) {
     if (change.path.size() < 2 || change.path.front() != "plugins") return false;
     const auto& path = change.path;

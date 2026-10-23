@@ -23,6 +23,8 @@ int main() {
   assert(settings_page_for_route("settings:appearance") == 5 && settings_page_for_route("settings:skin") == 8);
   assert(settings_page_for_route("settings:dictionary") == 13 && settings_page_for_route("settings:vocabulary") == 14);
   assert(settings_page_for_route("settings:plugins") == 15);
+  assert(settings_page_for_route("settings:screen-keyboard") == 20 && settings_page_for_route("settings:osk") == 20);
+  assert(settings_page_for_route("settings:handwriting") == (MSIME_EDITION_HANDWRITING != 0 ? 20 : 3));
   wchar_t root[MAX_PATH]{}, file[MAX_PATH]{};
   assert(GetTempPathW(MAX_PATH, root) && GetTempFileNameW(root, L"m7r", 0, file));
   assert(DeleteFileW(file) && CreateDirectoryW(file, nullptr));

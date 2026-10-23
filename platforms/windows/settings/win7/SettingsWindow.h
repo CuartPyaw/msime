@@ -108,6 +108,7 @@ public:
   using FilePicker = std::function<std::optional<std::filesystem::path>(HWND, bool)>;
   using Confirmation = std::function<bool(HWND, const wchar_t*, const wchar_t*)>;
   using FolderPicker = std::function<std::optional<std::filesystem::path>(HWND)>;
+  using SurfaceLauncher = std::function<bool(std::string_view)>;
   // 可注入社区传输以验证真实窗口与 worker；默认仍调用共享 Rust 服务。
   using CommunityTransport = std::function<std::string(const std::string&)>;
   struct ClipboardServices {
@@ -119,7 +120,7 @@ public:
     CommunityTransport relay;
   };
   explicit SettingsWindow(FilePicker file_picker = {}, Confirmation confirmation = {}, FolderPicker folder_picker = {},
-      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {}, ClipboardServices clipboard = {}, CloudClipboardServices cloud_clipboard = {}, CommunityTransport dictionary_transport = {}, CommunityTransport update_transport = {}, CommunityTransport voice_transport = {});
+      CommunityTransport community_transport = {}, CommunityTransport statistics_upload_transport = {}, CommunityTransport account_transport = {}, ClipboardServices clipboard = {}, CloudClipboardServices cloud_clipboard = {}, CommunityTransport dictionary_transport = {}, CommunityTransport update_transport = {}, CommunityTransport voice_transport = {}, SurfaceLauncher surface_launcher = {});
   ~SettingsWindow();
   SettingsWindow(const SettingsWindow&) = delete;
   SettingsWindow& operator=(const SettingsWindow&) = delete;

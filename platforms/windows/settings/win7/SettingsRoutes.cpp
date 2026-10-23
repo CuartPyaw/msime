@@ -1,5 +1,6 @@
 #include "SettingsRoutes.h"
 #include "../SettingsNavigation.h"
+#include "../../../../shared/contracts/msime_edition.h"
 #include <utility>
 
 namespace msime::settings::win7 {
@@ -12,6 +13,8 @@ std::optional<int> settings_page_for_route(std::string_view route) {
   if (category == "vocabulary") return 14;
   if (category == "community") return 9;
   if (category == "voice") return 19;
+  if (category == "screen-keyboard" || category == "osk") return 20;
+  if (category == "handwriting") return MSIME_EDITION_HANDWRITING != 0 ? 20 : 3;
   if (category == "community-resources") return 18;
   if (category == "community-plugins") return 17;
   bool recognized = find_page(category) != nullptr;

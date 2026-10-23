@@ -4,6 +4,7 @@
 #include "VocabularyWindow.h"
 #include "CloudDictionaryWindow.h"
 #include "EmojiWindow.h"
+#include "KeyboardWindow.h"
 #include "../../compat/WindowsDpi.h"
 #include "../../common/SurfaceRouteArgument.h"
 
@@ -11,8 +12,13 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
   const auto requested = msime::windows::requested_surface_route("handwriting");
   if (!requested) return 2;
   const auto& route = *requested;
-  if (route != "handwriting" && route != "clipboard" && route != "cloud-clipboard" && route != "vocabulary" && route != "cloud-dictionary" && route != "emoji") return 2;
+  if (route != "handwriting" && route != "clipboard" && route != "cloud-clipboard" && route != "vocabulary" && route != "cloud-dictionary" && route != "emoji" && route != "keyboard") return 2;
   msime::windows::compat::process_context(DPI_AWARENESS_CONTEXT_SYSTEM_AWARE);
+  if (route == "keyboard") {
+    msime::windows::win7::KeyboardWindow window;
+    if (!window.create(instance)) return 1;
+    return window.run(show);
+  }
   if (route == "emoji") {
     msime::windows::win7::EmojiWindow window;
     if (!window.create(instance)) return 1;

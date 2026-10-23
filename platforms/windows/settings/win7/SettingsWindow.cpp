@@ -28,6 +28,8 @@
 #include "CommunityPluginForm.h"
 #include "CommunityResourceForm.h"
 #include "VoiceForm.h"
+#include "KeyboardForm.h"
+#include "SurfaceLauncher.h"
 #include "VoiceModelsForm.h"
 #include "StatisticsForm.h"
 #include "ToolbarPreview.h"
@@ -81,7 +83,7 @@ bool copy_clipboard(HWND owner, std::wstring_view text) {
 }
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary, plugins, about, community_plugins, community_resources, voice };
+  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary, plugins, about, community_plugins, community_resources, voice, keyboard };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -950,6 +952,10 @@ struct SettingsWindow::State {
   int vocabulary_height = 0;
   int plugins_height = 0;
   int about_height = 0;
+  int keyboard_height = 0;
+  bool keyboard_created = false;
+  KeyboardForm keyboard_form;
+  SurfaceLauncher surface_launcher;
   int voice_height = 0;
   bool voice_created = false;
   VoiceForm voice_form;
@@ -1041,7 +1047,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板", L"词库", L"背单词", L"插件", L"关于与帮助", L"社区插件", L"社区词库与回复模板", L"语音输入"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板", L"词库", L"背单词", L"插件", L"关于与帮助", L"社区插件", L"社区词库与回复模板", L"语音输入", MSIME_EDITION_HANDWRITING != 0 ? L"屏幕键盘与手写" : L"屏幕键盘"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -1160,6 +1166,16 @@ struct SettingsWindow::State {
     about_created = true;
     if (snapshot) about_form.refresh(snapshot->preferences());
     about_form.enable(snapshot.has_value() && !busy);
+  }
+
+  void keyboard_controls() {
+    if (keyboard_created) return;
+    keyboard_height = keyboard_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) {
+      return surface_row(Surface::keyboard,type,text,style,id,top,height);
+    });
+    keyboard_created = true;
+    if (snapshot) keyboard_form.refresh(snapshot->preferences());
+    keyboard_form.enable(snapshot.has_value() && !busy);
   }
 
   void voice_controls() {
@@ -1542,6 +1558,7 @@ struct SettingsWindow::State {
     if (about_created) about_form.enable(enabled);
     if (community_plugins_created) community_plugins_form.enable(enabled);
     if (community_resources_created) community_resources_form.enable(enabled);
+    if (keyboard_created) keyboard_form.enable(enabled);
     if (voice_created) { voice_form.enable(enabled); voice_models_form.enable(enabled); }
     if (plugins_created) { plugin_effects_form.enable(enabled); plugin_library_form.enable(enabled); plugin_scripts_form.enable(enabled); plugin_mentions_form.enable(enabled); }
     dictionary_updates_form.enable(enabled && !updates_busy);
@@ -1580,7 +1597,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::voice ? voice_height : surface == Surface::community_resources ? community_resources_height : surface == Surface::community_plugins ? community_plugins_height : surface == Surface::about ? about_height : surface == Surface::plugins ? plugins_height : surface == Surface::vocabulary ? vocabulary_height : surface == Surface::dictionary ? dictionary_height : surface == Surface::cloud_clipboard ? cloud_clipboard_height : surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::keyboard ? keyboard_height : surface == Surface::voice ? voice_height : surface == Surface::community_resources ? community_resources_height : surface == Surface::community_plugins ? community_plugins_height : surface == Surface::about ? about_height : surface == Surface::plugins ? plugins_height : surface == Surface::vocabulary ? vocabulary_height : surface == Surface::dictionary ? dictionary_height : surface == Surface::cloud_clipboard ? cloud_clipboard_height : surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -1913,6 +1930,7 @@ struct SettingsWindow::State {
       cloud_clipboard_form.refresh(*snapshot);
       refresh_plugins();
       if (about_created) about_form.refresh(snapshot->preferences());
+      if (keyboard_created) keyboard_form.refresh(snapshot->preferences());
       if (voice_created) { voice_form.refresh(snapshot->preferences()); voice_models_form.refresh_preferences(snapshot->preferences()); }
       const auto& diagnostics = snapshot->preferences().at("diagnostic_log");
       SendMessageW(GetDlgItem(body, diagnostic_server), BM_SETCHECK,
@@ -2113,7 +2131,7 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 19 ? Surface::voice : selected == 18 ? Surface::community_resources : selected == 17 ? Surface::community_plugins : selected == 16 ? Surface::about : selected == 15 ? Surface::plugins : selected == 14 ? Surface::vocabulary : selected == 13 ? Surface::dictionary : selected == 12 ? Surface::cloud_clipboard : selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 20 ? Surface::keyboard : selected == 19 ? Surface::voice : selected == 18 ? Surface::community_resources : selected == 17 ? Surface::community_plugins : selected == 16 ? Surface::about : selected == 15 ? Surface::plugins : selected == 14 ? Surface::vocabulary : selected == 13 ? Surface::dictionary : selected == 12 ? Surface::cloud_clipboard : selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
@@ -2121,6 +2139,7 @@ struct SettingsWindow::State {
       if (selected == 16) about_controls();
       if (selected == 17) community_plugins_controls();
       if (selected == 18) community_resources_controls();
+      if (selected == 20) keyboard_controls();
       if (selected == 19) voice_controls();
       scroll = 0;
       layout();
@@ -2194,6 +2213,26 @@ struct SettingsWindow::State {
           Job job; job.reload = false; job.action = Job::Action::about;
           job.credential = Json{{"operation", change.notices ? "notices" : "check"}}; submit(std::move(job));
         } else if (!change.changes.empty()) { Job job; job.reload = false; job.changes = std::move(change.changes); submit(std::move(job)); }
+        return;
+      }
+    }
+    if (keyboard_created) {
+      auto change = keyboard_form.command(command);
+      if (change.handled) {
+        if (change.route) {
+          const bool opened = surface_launcher ? surface_launcher(*change.route) : launch_surface(*change.route);
+          SetWindowTextW(status,opened ? L"已打开输入面板。" : L"无法打开输入面板，请检查安装文件。");
+        } else if (change.theme) {
+          SendMessageW(selector,CB_SETCURSEL,8,0); this->command(MAKEWPARAM(page_selector,CBN_SELCHANGE));
+        } else {
+          if (change.reset) {
+            const wchar_t* text = L"将高度、间距和顶部语音入口恢复为默认值？";
+            const bool allowed = confirmation ? confirmation(window,L"恢复屏幕键盘默认值",text) : MessageBoxW(window,text,L"恢复屏幕键盘默认值",MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+            if (!allowed) return;
+            keyboard_form.resetting(); change.changes = KeyboardForm::reset_changes();
+          }
+          if (!change.changes.empty()) { Job job; job.reload = false; job.changes = std::move(change.changes); submit(std::move(job)); }
+        }
         return;
       }
     }
@@ -2704,13 +2743,14 @@ struct SettingsWindow::State {
       else self->command(wparam);
       return 0;
     }
+    if (message == WM_HSCROLL) { if (self->keyboard_created) self->keyboard_form.scroll(reinterpret_cast<HWND>(lparam)); return 0; }
     if (message == WM_MOUSEWHEEL) {
       self->scroll_to(self->scroll - MulDiv(GET_WHEEL_DELTA_WPARAM(wparam), self->dip(48), WHEEL_DELTA));
       return 0;
     }
     if (message == WM_DRAWITEM) {
       const auto* draw = reinterpret_cast<const DRAWITEMSTRUCT*>(lparam);
-      if (draw && (self->account_form.draw(*draw) || self->theme_form.draw(*draw) || self->community_form.draw(*draw) || self->statistics_form.draw(*draw) || self->toolbar_preview_form.draw(*draw))) return TRUE;
+      if (draw && (self->account_form.draw(*draw) || self->theme_form.draw(*draw) || self->community_form.draw(*draw) || self->statistics_form.draw(*draw) || self->toolbar_preview_form.draw(*draw) || (self->keyboard_created && self->keyboard_form.draw(*draw)))) return TRUE;
       if (draw && draw->CtlID == appearance_preview) {
         RECT rect = draw->rcItem;
         const auto background = CreateSolidBrush(RGB(248, 248, 248));
@@ -2819,7 +2859,7 @@ struct SettingsWindow::State {
   }
 };
 
-SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker, CommunityTransport community_transport, CommunityTransport statistics_upload_transport, CommunityTransport account_transport, ClipboardServices clipboard, CloudClipboardServices cloud_clipboard, CommunityTransport dictionary_transport, CommunityTransport update_transport, CommunityTransport voice_transport) : state_(std::make_unique<State>()) {
+SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation, FolderPicker folder_picker, CommunityTransport community_transport, CommunityTransport statistics_upload_transport, CommunityTransport account_transport, ClipboardServices clipboard, CloudClipboardServices cloud_clipboard, CommunityTransport dictionary_transport, CommunityTransport update_transport, CommunityTransport voice_transport, SurfaceLauncher surface_launcher) : state_(std::make_unique<State>()) {
   state_->file_picker = std::move(file_picker);
   state_->confirmation = std::move(confirmation);
   state_->folder_picker = std::move(folder_picker);
@@ -2831,6 +2871,7 @@ SettingsWindow::SettingsWindow(FilePicker file_picker, Confirmation confirmation
   state_->dictionary_transport = std::move(dictionary_transport);
   state_->update_transport = std::move(update_transport);
   state_->voice_transport = std::move(voice_transport);
+  state_->surface_launcher = std::move(surface_launcher);
 }
 
 SettingsWindow::~SettingsWindow() {
@@ -2846,7 +2887,7 @@ bool SettingsWindow::create(HINSTANCE instance) {
   if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return false;
   state_->com_initialized = true;
   state_->instance = instance;
-  INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_TAB_CLASSES | ICC_STANDARD_CLASSES};
+  INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_TAB_CLASSES | ICC_STANDARD_CLASSES | ICC_BAR_CLASSES};
   if (!InitCommonControlsEx(&controls)) return false;
   for (const auto& entry : {std::pair{window_class, &State::window_proc}, std::pair{body_class, &State::body_proc}}) {
     WNDCLASSEXW type{};
