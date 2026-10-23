@@ -12,6 +12,8 @@ Server、候选窗和 `msimeui` 直接导入 `GetDpiForWindow`、`SetThreadDpiAw
 
 窗口共用 `ThreadDpiScope`：支持线程 API 的系统保持原有切换、异常和恢复语义；缺少该入口时沿用进程 DPI。语音与无障碍原有的非抛错作用域继续保留其行为，调用同一探测入口。
 
+受控 TSF 编辑器使用同一 DPI 适配，以便在旧系统验证真实 TSF 输入。Server 冒烟测试自己的线程上下文查询与比较也按导出探测：新系统与 Wine 保留既有严格断言，旧系统核对实际进程 DPI。不能让验收程序比被测产品先因缺少新 API 无法装载。编辑器原有的 Windows min/max 宏冲突以带括号的标准库调用解决；COM 接口的未使用参数显式标记，鼠标回调 cookie 显式初始化，不降低 `/W4 /WX`。
+
 `DeviceResources` 动态装载系统目录内的 `dcomp.dll` 并解析 `DCompositionCreateDevice`，取消 `msimeui` 的静态链接依赖。合成器可用时仍调用原入口；不可用时由既有 `EnsureForComposition` 进入分层窗口绘制。系统材质的既有失败回退保持。
 
 ### 边界与历史审计
@@ -29,6 +31,8 @@ MSVC 的 x64 与 x86 DPI 测试在 Windows 11 通过，`dumpbin /imports` 确认
 Windows 11 上 `msimeui` 与 `msime-windows-server` 静态库构建通过。UI 套件运行 46 项，其中 5 项失败；在同一台 SSH 构建机、同一个 CMake 目录用固定基线 `fe0d55ad8b` 的源码重建对照，再恢复本切片重建，失败名称完全一致：`hwnd_target_refreshes_dpi_when_reused` 和四项 `text_selection_*` 方向键用例，未增加失败。该比较只证明这台机器上的已有测试无新增失败，不替代登录桌面的窗口验收或 Win7 验收。
 
 完整 Server 已用同源的 Win7 Rust 核心链接，`--help` 运行通过，实际 EXE 没有六个新 DPI API 或 DirectComposition 静态导入。`windows-server` 在窗口显示断言失败；同一构建目录切回固定基线、再恢复本切片分别重建运行，两者均在 `require(IsWindowVisible(window.handle()) && !window.failed())` 失败，没有增加失败。
+
+MSVC x64 的 `windows-server-smoke` 与受控 `msime-tsf-edit-control-demo` 完整构建通过，最终 PE 导入表没有六个新 DPI API、线程上下文查询/比较或 DirectComposition 入口。更新测试适配后再次运行 Server 冒烟测试，仍只停在同一窗口显示断言。这不是编辑器输入验收通过的证据，真实登录桌面和 Win7 上的输入仍待验证。
 
 首轮 quick 的编译阶段通过，但语音语言目录和 Windows 设置页就绪检查分别因 120 秒与 40 秒超时失败；未改动这些检查或扩大失败基线。相同门禁正在复跑，尚不能报告 quick 通过。真实 Win7 验收仍需完成。
 
