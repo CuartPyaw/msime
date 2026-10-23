@@ -25,6 +25,8 @@
 #include "PluginMentionsForm.h"
 #include "ThemeForm.h"
 #include "CommunitySkinForm.h"
+#include "CommunityPluginForm.h"
+#include "CommunityResourceForm.h"
 #include "StatisticsForm.h"
 #include "ToolbarPreview.h"
 #include "../InputSettingsModel.h"
@@ -76,7 +78,7 @@ bool copy_clipboard(HWND owner, std::wstring_view text) {
 }
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary, plugins, about };
+  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary, plugins, about, community_plugins, community_resources };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -294,7 +296,7 @@ bool offers_japanese_switch() {
 }
 
 struct Job {
-  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary, plugins, about };
+  enum class Action { preferences, export_file, import_file, restart, data_directory, logs_directory, helpcode_sources, wubi_lookup, credential_test, ai_models, account, font_catalog, game_profile, theme_scan, theme_preview, skin_import, skin_directory, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary, plugins, about, community_plugins, community_resources };
   bool reload = true;
   std::vector<Change> changes;
   Action action = Action::preferences;
@@ -570,6 +572,10 @@ private:
     }
     if (job.action == Job::Action::community && job.credential) {
       try {
+        if (job.credential->value("operation", std::string{}) == "resource_import_local") {
+          community_response_ = community_resource_data::import_local(runtime_options(), *job.credential, dictionary_transport_);
+          return {Outcome::loaded, snapshot_};
+        }
         const auto account = account_directory();
         if (account.empty()) community_response_ = Json{{"ok", false}, {"error", "community_storage"}};
         else {
@@ -600,6 +606,9 @@ private:
                 theme_data::call(msime_client_community, request);
             if (job.credential->value("operation", std::string{}) == "candidate_skin_preview")
               community_preview_ = community_data::preview(*community_response_);
+            const auto operation = job.credential->value("operation", std::string{});
+            if (community_response_->is_object() && operation.substr(0, 7) == "plugin_")
+              (*community_response_)["local_catalog"] = plugin_data::call(directory_, runtime_options(), {{"operation", "catalog"}});
           }
         }
       } catch (const std::exception&) {
@@ -877,6 +886,10 @@ struct SettingsWindow::State {
   int vocabulary_height = 0;
   int plugins_height = 0;
   int about_height = 0;
+  int community_resources_height = 0;
+  bool community_resources_created = false;
+  int community_plugins_height = 0;
+  bool community_plugins_created = false;
   bool about_created = false;
   int about_focus = 0;
   bool plugins_created = false;
@@ -922,6 +935,8 @@ struct SettingsWindow::State {
   ThemeForm theme_form;
   CommunitySkinForm community_form;
   AboutForm about_form;
+  CommunityPluginForm community_plugins_form;
+  CommunityResourceForm community_resources_form;
   CommunityTransport community_transport;
   CommunityTransport statistics_upload_transport;
   CommunityTransport account_transport;
@@ -957,7 +972,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板", L"词库", L"背单词", L"插件", L"关于与帮助"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板", L"词库", L"背单词", L"插件", L"关于与帮助", L"社区插件", L"社区词库与回复模板"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -1031,9 +1046,10 @@ struct SettingsWindow::State {
                                       int id, int top, int height) {
       return surface_row(Surface::ai, type, text, style, id, top, height);
     });
-    account_height = account_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
+    surface_row(Surface::account, L"BUTTON", L"打开社区词库、回复模板与我的作品", WS_TABSTOP | BS_PUSHBUTTON, CommunityResourceForm::open, 0, 32);
+    account_height = 48 + account_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
                                                 int id, int top, int height) {
-      return surface_row(Surface::account, type, text, style, id, top, height);
+      return surface_row(Surface::account, type, text, style, id, top + 48, height);
     });
     statistics_height = statistics_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style,
         int id, int top, int height) {
@@ -1077,12 +1093,29 @@ struct SettingsWindow::State {
     about_form.enable(snapshot.has_value() && !busy);
   }
 
+  void community_resources_controls() {
+    if (community_resources_created) return;
+    community_resources_height = community_resources_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) {
+      return surface_row(Surface::community_resources, type, text, style, id, top, height);
+    });
+    community_resources_created = true; community_resources_form.enable(snapshot.has_value() && !busy);
+  }
+
+  void community_plugins_controls() {
+    if (community_plugins_created) return;
+    community_plugins_height = community_plugins_form.create([this](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) {
+      return surface_row(Surface::community_plugins, type, text, style, id, top, height);
+    });
+    community_plugins_created = true; community_plugins_form.enable(snapshot.has_value() && !busy);
+  }
+
   void plugin_controls() {
     if (plugins_created) return;
     const auto row = [this](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) {
       return surface_row(Surface::plugins, type, text, style, id, top, height);
     };
-    plugins_height = plugin_effects_form.create(row);
+    row(L"BUTTON", L"打开社区插件与发布", WS_TABSTOP | BS_PUSHBUTTON | BS_NOTIFY, CommunityPluginForm::open, 0, 32);
+    plugins_height = 48 + plugin_effects_form.create([&](const wchar_t* type, const wchar_t* text, DWORD style, int id, int top, int height) { return row(type, text, style, id, top + 48, height); });
     plugins_height = plugin_library_form.create(row, plugins_height + 24);
     plugins_height = plugin_scripts_form.create(row, plugins_height + 24);
     plugins_height = plugin_mentions_form.create(row, plugins_height + 24);
@@ -1426,6 +1459,8 @@ struct SettingsWindow::State {
     dictionary_form.enable(enabled);
     vocabulary_form.enable(enabled);
     if (about_created) about_form.enable(enabled);
+    if (community_plugins_created) community_plugins_form.enable(enabled);
+    if (community_resources_created) community_resources_form.enable(enabled);
     if (plugins_created) { plugin_effects_form.enable(enabled); plugin_library_form.enable(enabled); plugin_scripts_form.enable(enabled); plugin_mentions_form.enable(enabled); }
     dictionary_updates_form.enable(enabled && !updates_busy);
     theme_form.enable(enabled);
@@ -1463,7 +1498,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::about ? about_height : surface == Surface::plugins ? plugins_height : surface == Surface::vocabulary ? vocabulary_height : surface == Surface::dictionary ? dictionary_height : surface == Surface::cloud_clipboard ? cloud_clipboard_height : surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::community_resources ? community_resources_height : surface == Surface::community_plugins ? community_plugins_height : surface == Surface::about ? about_height : surface == Surface::plugins ? plugins_height : surface == Surface::vocabulary ? vocabulary_height : surface == Surface::dictionary ? dictionary_height : surface == Surface::cloud_clipboard ? cloud_clipboard_height : surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -1830,7 +1865,13 @@ struct SettingsWindow::State {
     if (completed->community_response && completed->credential_request) {
       if (completed->credential_request->value("operation", std::string{}) == "candidate_skin_preview")
         community_form.preview(std::move(completed->community_preview));
-      community_form.completed(*completed->credential_request, *completed->community_response);
+      const auto operation = completed->credential_request->value("operation", std::string{});
+      if (operation.substr(0, 7) == "plugin_" || (operation == "report" && completed->credential_request->value("kind", std::string{}) == "plugins"))
+        community_plugins_form.completed(*completed->credential_request, *completed->community_response);
+      else if (operation.substr(0, 9) == "resource_" || (operation == "report" &&
+          (completed->credential_request->value("kind", std::string{}) == "dictionaries" || completed->credential_request->value("kind", std::string{}) == "replies")))
+        community_resources_form.completed(*completed->credential_request, *completed->community_response);
+      else community_form.completed(*completed->credential_request, *completed->community_response);
     }
     if (completed->statistics_response) statistics_form.completed(*completed->statistics_response);
     if (completed->clipboard_response) clipboard_form.completed(*completed->clipboard_response);
@@ -1977,12 +2018,14 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 16 ? Surface::about : selected == 15 ? Surface::plugins : selected == 14 ? Surface::vocabulary : selected == 13 ? Surface::dictionary : selected == 12 ? Surface::cloud_clipboard : selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 18 ? Surface::community_resources : selected == 17 ? Surface::community_plugins : selected == 16 ? Surface::about : selected == 15 ? Surface::plugins : selected == 14 ? Surface::vocabulary : selected == 13 ? Surface::dictionary : selected == 12 ? Surface::cloud_clipboard : selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
       if (selected == 15) plugin_controls();
       if (selected == 16) about_controls();
+      if (selected == 17) community_plugins_controls();
+      if (selected == 18) community_resources_controls();
       scroll = 0;
       layout();
       if (selected == 16 && about_focus) { reveal(GetDlgItem(body, about_focus)); about_focus = 0; }
@@ -1998,6 +2041,12 @@ struct SettingsWindow::State {
         submit(std::move(job));
       }
       if (selected == 10) poll_statistics();
+      if (selected == 18 && !busy) {
+        Job job; job.reload = false; job.action = Job::Action::community; job.credential = community_resources_form.list_request(); submit(std::move(job));
+      }
+      if (selected == 17 && !busy) {
+        Job job; job.reload = false; job.action = Job::Action::community; job.credential = community_plugins_form.list_request(); submit(std::move(job));
+      }
       if (selected == 9 && !busy) {
         Job job;
         job.reload = false;
@@ -2046,6 +2095,41 @@ struct SettingsWindow::State {
           Job job; job.reload = false; job.action = Job::Action::about;
           job.credential = Json{{"operation", change.notices ? "notices" : "check"}}; submit(std::move(job));
         } else if (!change.changes.empty()) { Job job; job.reload = false; job.changes = std::move(change.changes); submit(std::move(job)); }
+        return;
+      }
+    }
+    if (id == CommunityResourceForm::open && HIWORD(command) == BN_CLICKED) {
+      SendMessageW(selector, CB_SETCURSEL, 18, 0); this->command(MAKEWPARAM(page_selector, CBN_SELCHANGE)); return;
+    }
+    if (community_resources_created) {
+      auto change = community_resources_form.command(command);
+      if (change.handled) {
+        if (!change.message.empty()) { SetWindowTextW(status, change.message.c_str()); return; }
+        if (change.request) {
+          if (!change.confirmation.empty()) {
+            const bool allowed = confirmation ? confirmation(window, L"社区作品", change.confirmation.c_str()) : MessageBoxW(window, change.confirmation.c_str(), L"社区作品", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+            if (!allowed) return;
+          }
+          Job job; job.reload = false; job.action = Job::Action::community; job.credential = std::move(change.request); submit(std::move(job));
+        }
+        return;
+      }
+    }
+    if (id == CommunityPluginForm::open && HIWORD(command) == BN_CLICKED) {
+      SendMessageW(selector, CB_SETCURSEL, 17, 0); this->command(MAKEWPARAM(page_selector, CBN_SELCHANGE)); return;
+    }
+    if (community_plugins_created) {
+      auto change = community_plugins_form.command(command);
+      if (change.handled) {
+        if (!change.message.empty()) { SetWindowTextW(status, change.message.c_str()); return; }
+        if (change.local || change.login) { SendMessageW(selector, CB_SETCURSEL, change.local ? 15 : 7, 0); this->command(MAKEWPARAM(page_selector, CBN_SELCHANGE)); return; }
+        if (change.request) {
+          if (!change.confirmation.empty()) {
+            const bool allowed = confirmation ? confirmation(window, L"社区插件", change.confirmation.c_str()) : MessageBoxW(window, change.confirmation.c_str(), L"社区插件", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2) == IDYES;
+            if (!allowed) return;
+          }
+          Job job; job.reload = false; job.action = Job::Action::community; job.credential = std::move(change.request); submit(std::move(job));
+        }
         return;
       }
     }
