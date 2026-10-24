@@ -2208,6 +2208,7 @@ void CMetasequoiaIME::IpcWorkerThread(CMetasequoiaIME *pIME)
         }
         else if (buf.msg_type == Global::DataToTsfWorkerThreadMsgType::InputModeChanged)
         {
+            msime::tsf::invalidate_host_configuration();
             Global::InputModeScheme.store(
                 msime::windows::scheme::mode_scheme(msime::windows::scheme::input_mode_from_code(buf.data[0])),
                 std::memory_order_relaxed);
