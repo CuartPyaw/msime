@@ -97,7 +97,6 @@ template<typename... Args> void DebugTsfIssue47(Args...) {}
 struct CMetasequoiaIME {
     std::atomic<bool> _localSessionResetPending{false};
     msime::tsf::WubiCommitOwner _wubiCommitOwner;
-    std::atomic<bool> _localSessionResetPending{false};
     Engine *_pCompositionProcessorEngine = nullptr;
     std::deque<DeferredKeyDown> _deferredAppliedPrefix;
     std::uint64_t _deferredKeyFocusGeneration = 7;
