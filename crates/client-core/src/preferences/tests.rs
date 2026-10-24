@@ -25,7 +25,7 @@ fn touch_shuangpin_layout_defaults_persists_and_rejects_unsupported_layouts() {
     };
     store.save(0, configured.clone()).unwrap();
     assert_eq!(store.load().unwrap().preferences, configured);
-    let mut invalid = legacy;
+    let mut invalid = legacy.clone();
     invalid["touch_shuangpin_layout"] = "nine_key".into();
     assert!(serde_json::from_value::<Preferences>(invalid).is_err());
     let mut malformed = legacy;
@@ -2956,6 +2956,7 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
             symbols: true,
             quick_phrase: true,
             quick_phrase_frequency: true,
+            ..Default::default()
         }
     );
     fs::write(store.path(), &bytes).unwrap();
@@ -2970,6 +2971,7 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
                 quick_phrase: true,
                 quick_phrase_frequency: true,
                 minimum_prefix: mask % 8 + 1,
+                ..Default::default()
             },
             ..Preferences::default()
         };
