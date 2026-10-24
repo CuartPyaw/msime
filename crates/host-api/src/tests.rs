@@ -10653,7 +10653,6 @@ fn complete_candidate_abi_keeps_view_paged_and_selects_a_later_entry() {
 
 /// 表情目录请求列出插件符号组：不需要 msime-others.db，没传插件目录时为空，相对路径被拒绝。
 #[test]
-#[cfg(unix)]
 fn emoji_catalog_lists_plugin_symbol_groups() {
     let directory = tempfile::tempdir().unwrap();
     let pack = directory.path().join("plugins/symbol_set/arrows");
@@ -10700,7 +10699,6 @@ fn emoji_catalog_lists_plugin_symbol_groups() {
 }
 
 #[test]
-#[cfg(unix)]
 fn emoji_catalog_pagination_preserves_legacy_defaults() {
     let legacy: crate::ffi::EmojiCatalogQuery = serde_json::from_str("{}").unwrap();
     assert!(!legacy.cursor);
@@ -10718,7 +10716,6 @@ fn emoji_catalog_pagination_preserves_legacy_defaults() {
 }
 
 #[test]
-#[cfg(unix)]
 fn emoji_catalog_cursor_advances_over_invalid_rows_and_preserves_duplicates() {
     let directory = tempfile::tempdir().unwrap();
     let db = rusqlite::Connection::open(directory.path().join("msime-others.db")).unwrap();
@@ -10797,7 +10794,6 @@ fn emoji_catalog_cursor_advances_over_invalid_rows_and_preserves_duplicates() {
 }
 
 #[test]
-#[cfg(unix)]
 fn emoji_catalog_cursor_skips_invalid_groups_without_stalling() {
     let directory = tempfile::tempdir().unwrap();
     let db = rusqlite::Connection::open(directory.path().join("msime-others.db")).unwrap();
@@ -10830,7 +10826,6 @@ fn emoji_catalog_cursor_skips_invalid_groups_without_stalling() {
 }
 
 #[test]
-#[cfg(unix)]
 fn emoji_catalog_ffi_reads_beyond_first_page() {
     let directory = tempfile::tempdir().unwrap();
     let db = rusqlite::Connection::open(directory.path().join("msime-others.db")).unwrap();
@@ -10858,7 +10853,7 @@ fn emoji_catalog_ffi_reads_beyond_first_page() {
         .unwrap();
     }
     let resources = directory.path().to_str().unwrap().as_bytes();
-    let request = |category: &str, offset: usize, limit: u8| {
+    let request = |category: &str, offset: u64, limit: u8| {
         let query = serde_json::to_vec(
             &json!({"category":category,"search":"match","offset":offset,"limit":limit}),
         )
@@ -10902,11 +10897,11 @@ fn emoji_catalog_ffi_reads_beyond_first_page() {
         "synthetic-2"
     );
     assert_eq!(request("", 0, 0)["ok"], false);
-    assert_eq!(request("", usize::MAX, 255)["ok"], false);
+    assert_eq!(request("", u64::MAX, 255)["ok"], false);
+    assert_eq!(request("", u64::from(u32::MAX), 255)["ok"], true);
 }
 
 #[test]
-#[cfg(unix)]
 fn emoji_catalog_errors_are_not_empty_results() {
     let directory = tempfile::tempdir().unwrap();
     let resources = directory.path().to_str().unwrap().as_bytes();
@@ -10949,7 +10944,6 @@ fn emoji_catalog_errors_are_not_empty_results() {
 }
 
 #[test]
-#[cfg(unix)]
 fn emoji_groups_preserve_catalog_order_and_filter_before_paging() {
     let directory = tempfile::tempdir().unwrap();
     let db = rusqlite::Connection::open(directory.path().join("msime-others.db")).unwrap();
@@ -19642,6 +19636,38 @@ fn sentence_collocation_tuning_reaches_engine_options() {
             weak_collocation_penalty: -120.0,
             rear_penalty: -25.0,
         }
+    );
+}
+
+#[test]
+fn keyboard_design_operations_are_explicit_bounded_and_do_not_need_a_state_directory() {
+    let call = |value: serde_json::Value| {
+        let request = serde_json::to_vec(&value).unwrap();
+        read(unsafe { msime_client_keyboard_skin_design(request.as_ptr(), request.len()) })
+    };
+    let catalog = call(serde_json::json!({"operation":"catalog"}));
+    assert_eq!(catalog["ok"], true);
+    assert_eq!(catalog["value"]["templates"].as_array().unwrap().len(), 15);
+    let reset = call(serde_json::json!({"operation":"reset"}));
+    assert_eq!(reset["value"], catalog["value"]["default"]);
+    assert_eq!(
+        call(serde_json::json!({"operation":"template","index":0}))["value"],
+        catalog["value"]["templates"][0]["design"]
+    );
+    for request in [
+        serde_json::json!({"operation":"template","index":99}),
+        serde_json::json!({"operation":"reset","unexpected":true}),
+    ] {
+        assert_eq!(call(request)["ok"], false);
+    }
+    assert_eq!(
+        read(unsafe { msime_client_keyboard_skin_design(std::ptr::null(), 0) })["ok"],
+        false
+    );
+    let byte = 0_u8;
+    assert_eq!(
+        read(unsafe { msime_client_keyboard_skin_design(&byte, 1024 * 1024 + 1) })["ok"],
+        false
     );
 }
 

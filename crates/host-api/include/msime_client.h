@@ -489,6 +489,12 @@ char *msime_client_personal_dictionary_request(const uint8_t *request, size_t le
  * atomically: use a worker. Failures carry the shared community_* codes the
  * settings pages already have wording for, not a Display string. */
 char *msime_client_custom_skin_library(const uint8_t *request, size_t length);
+
+/* 共用键盘设计操作，不写磁盘。请求 operation 为 catalog、reset、template（index）、
+ * background（index、design）或 optimize_contrast（design）。返回普通 {ok,value} JSON；
+ * catalog 返回 default、templates、backgrounds，其余返回完整设计。未知字段、无效设计、
+ * 越界索引和超过 1 MiB 的请求返回 keyboard_skin_invalid。结果由 msime_client_string_free 释放。 */
+char *msime_client_keyboard_skin_design(const uint8_t *request, size_t length);
 /* JSON {directory:absolute state root,id:publication uuid,name,design}. Starts
  * a skin trial and imports the design into the library, answering
  * {skin,trial}. One call rather than two: the trial is what remembers the skin
@@ -601,6 +607,20 @@ char *msime_client_voice_capture(uint32_t milliseconds);
  * "windows". Other targets fail with "voice capture devices unavailable". Enumerates through
  * COM: call off the UI thread. Ids and labels may identify the user's hardware: never log them. */
 char *msime_client_voice_capture_devices(void);
+#ifdef _WIN32
+/* 原生语音审阅面板复用 Server 控制协议。create 不录音，返回 {handle:uint64}，至多 32 个活动句柄。
+ * recognize 消费句柄一次，在工作线程阻塞到识别结束，返回 {text}；不自动输入或修改剪贴板。
+ * language 为 1..64 字节 ASCII 语言标签。progress 可空，非空时在调用线程借用 UTF-8 JSON
+ * {phase:connecting|recording|recognizing|processing|complete|cancelled|failed,level:0..1,text?:string}。
+ * 回调不能展开异常，可重入 control；不保留其借用缓冲区，也不记录或落盘音频／文本。
+ * control 可从任何线程调用：0 请求结束录音，1 取消，2 关闭并取消；关闭后句柄永不复用。
+ * 执行中的调用继续持有自己的取消信号；宿主关闭窗口时先 control(2)，再等待 recognize 返回。
+ * 完成／失败不隐式关闭句柄，调用方必须 control(2)。所有返回字符串用 string_free 释放。 */
+char *msime_client_windows_voice_session_create(void);
+char *msime_client_windows_voice_session_control(uint64_t handle, uint32_t operation);
+char *msime_client_windows_voice_session_recognize(uint64_t handle, const uint8_t *language, size_t length,
+    void (*progress)(const uint8_t *, size_t, void *), void *context);
+#endif
 char *msime_client_voice_apply(uint64_t session, uint64_t generation,
                                const uint8_t *text, size_t length);
 /* On-device speech models and user-dictionary hotwords. JSON request buffers of length bytes; standard responses. Error text of the model calls is a stable code beginning with "local_model_".
@@ -971,6 +991,16 @@ char *msime_client_translation_gloss_save(const uint8_t *request, size_t request
 /* TranslationQuery accepts the optional sentence:true flag for an explicit
  * single-item sentence request (up to 512 Unicode characters); ordinary
  * candidate gloss requests retain their normal limits. */
+#if defined(_WIN32)
+/* Windows 原生手写面板，阻塞调用，只能放在工作线程，不依赖 WebView。
+ * 请求为 <=262144 字节的 JSON；{operation:"status"} 返回 {system_recognizer:bool}。
+ * {operation:"recognize",request:{language?:"zh-CN",strokes:[{points:[{x,y},...]}]},model?:绝对路径}
+ * 使用 420×420 DIP 坐标；系统识别优先，失败或无结果时可用可信模型回退。
+ * 返回标准封装 {candidates:[...]}；错误码 invalid_stroke、no_chinese_recognizer、
+ * handwriting_unavailable、invalid_handwriting_model；本安装包不提供手写时为 handwriting_not_offered。
+ * 不访问输入会话、不联网、不保留请求；调用方用 msime_client_string_free 释放响应。 */
+char *msime_client_windows_handwriting(const uint8_t *request, size_t length);
+#endif
 #if !defined(_WIN32)
 char *msime_client_translation_provider_request(const uint8_t *query,
                                                 size_t query_length,
@@ -995,23 +1025,22 @@ char *msime_client_emoji_provider_request(const uint8_t *query,
                                           size_t query_length,
                                           const uint8_t *socket_path,
                                           size_t socket_length);
-/* Query the verified local msime-others.db Emoji catalog. Resources is an absolute
- * generation directory containing msime-others.db; no provider socket is needed.
- * Optional offset is a nonnegative SQL row offset (default 0); limit is 1..255.
- * Optional group filters a catalog subdivision; list_groups:true returns
- * {groups:[name,...]} in catalog order instead of an item page.
- * list_symbol_groups:true returns {symbol_groups:[{parent,title},...]}.
- * Optional parent narrows symbols to a parent category before paging.
- * list_plugin_symbol_groups:true with plugins (absolute plugins directory) returns
- * {plugin_symbol_groups:[{pack,pack_name,tab:"symbols"|"kaomoji",title,keywords,items:[text,...]},...]}:
- * 已安装符号集插件的全部组，包按名字排序、组按清单顺序；keywords 没写时为空串。宿主把 symbols 组追加在内置符号之后、以 pack_name 为上级分类，
- * kaomoji 组追加在颜文字 All 之后，不与内置目录去重。没传 plugins 时为空列表。
- * Advance offset by limit, not returned item count: each page deduplicates text. */
+#endif
+/* 从已校验的 msime-others.db 读取本地表情目录；resources 为含该文件的绝对目录。
+ * 无需提供商套接字，Windows 和 Unix 宿主使用同一接口。
+ * offset 为非负行偏移（缺省 0），limit 为 1..255。
+ * group 筛选目录子类；list_groups:true 返回 {groups:[name,...]}。
+ * list_symbol_groups:true 返回 {symbol_groups:[{parent,title},...]}。
+ * parent 在分页前筛选符号父类，避免不同父类下的同名子类混淆。
+ * list_plugin_symbol_groups:true 搭配绝对 plugins 目录，返回
+ * {plugin_symbol_groups:[{pack,pack_name,tab,title,keywords,items:[text,...]},...]}。
+ * 插件组独立于内置数据库；包按名称、组按清单顺序，不与内置目录去重。
+ * cursor:true 返回 next_offset 和 complete；必须按 next_offset 推进，
+ * 空页可能只是坏行。缺省模式按 limit 推进，每页按文本去重。 */
 char *msime_client_emoji_catalog_request(const uint8_t *query,
                                          size_t query_length,
                                          const uint8_t *resources,
                                          size_t resources_length);
-#endif
 /* Shared Doubao authentication policy. Input (max 32768 bytes):
  * {auth_mode,app_id,token,resource_id}; an absent or empty mode means api_key.
  * Response value: {headers:[[name,value],...]}. Contains credentials: never
