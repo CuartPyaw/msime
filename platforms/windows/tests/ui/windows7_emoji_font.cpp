@@ -1,6 +1,8 @@
 #include "../../common/Windows7EmojiFont.h"
 #include <cassert>
 #include <cstdio>
+#include <thread>
+#include <vector>
 
 namespace {
 class GlyphCheck final : public IDWriteTextRenderer {
@@ -60,6 +62,22 @@ int main() {
   assert(SUCCEEDED(layout->GetMetrics(&metrics)) && metrics.width > 80 && metrics.width < 120);
   FLOAT x = 0, y = 0; DWRITE_HIT_TEST_METRICS hit{};
   assert(SUCCEEDED(layout->HitTestTextPosition(0, FALSE, &x, &y, &hit)) && hit.textPosition == 0 && hit.length == 8);
+  // 模拟多个桌面的候选 UI 同时排版，检查共享字体与独立布局的字形和命中范围。
+  std::vector<std::thread> desktops;
+  for (unsigned desktop = 0; desktop < 4; ++desktop) {
+    desktops.emplace_back([&] {
+      for (unsigned iteration = 0; iteration < 64; ++iteration) {
+        ComPtr<IDWriteTextLayout> concurrent;
+        assert(SUCCEEDED(font.factory->CreateTextLayout(clusters.c_str(), static_cast<UINT32>(clusters.size()), format.Get(), 400, 100, &concurrent)));
+        assert(ApplyWindows7EmojiFallback(font.factory.Get(), concurrent.Get(), clusters.c_str(), static_cast<UINT32>(clusters.size())) == 3);
+        GlyphCheck rendered;
+        assert(SUCCEEDED(concurrent->Draw(nullptr, &rendered, 0, 0)) && rendered.missing == 0 && rendered.glyphs == 5);
+        FLOAT hit_x = 0, hit_y = 0; DWRITE_HIT_TEST_METRICS cluster_hit{};
+        assert(SUCCEEDED(concurrent->HitTestTextPosition(0, FALSE, &hit_x, &hit_y, &cluster_hit)) && cluster_hit.textPosition == 0 && cluster_hit.length == 8);
+      }
+    });
+  }
+  for (auto& desktop : desktops) desktop.join();
   const std::wstring text_digit = L"1\uFE0E";
   layout.Reset();
   assert(SUCCEEDED(font.factory->CreateTextLayout(text_digit.c_str(), static_cast<UINT32>(text_digit.size()), format.Get(), 400, 100, &layout)));

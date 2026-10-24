@@ -66,6 +66,8 @@ public:
     hb_ot_font_set_funcs(font_);
     face_->GetMetrics(&metrics_);
     hb_font_set_scale(font_, metrics_.designUnitsPerEm, metrics_.designUnitsPerEm);
+    // 多桌面的候选线程共用整形字体；发布前冻结，缓冲区仍由每次调用独立持有。
+    hb_font_make_immutable(font_);
   }
   ~Shaper() { if (font_) hb_font_destroy(font_); }
   Shaper(const Shaper&) = delete;

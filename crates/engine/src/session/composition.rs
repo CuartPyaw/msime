@@ -244,8 +244,10 @@ pub(super) fn build_quanpin_autocorrect_display<'a>(request: &'a QueryRequest) -
         request.enable_quanpin_autocorrect_neighbor,
     );
     let letters_rewritten = !folded_letters_equal(base, cased);
-    // The scheme kept the typed letters and no correction can apply, so there are no other separators to draw.
-    if !letters_rewritten && (types == 0 || is_complete_pinyin_input(&request.raw_input)) {
+    // 完整拼音保留已有切分，尾部隔音符不参与完整性判定，避免被纠错重新切开。
+    if !letters_rewritten
+        && (types == 0 || is_complete_pinyin_input(request.raw_input.trim_end_matches('\'')))
+    {
         return Cow::Borrowed(base);
     }
     // A legal syllable plus one trailing letter is jianpin, never a typo, as in the dictionary's own guard; without this the deletion table would re-separate `zheg`.
@@ -615,7 +617,9 @@ impl InputSession {
                 },
                 request,
             ),
-            SchemeType::Quanpin => build_quanpin_autocorrect_display(request),
+            SchemeType::Quanpin => {
+                with_trailing_separator(build_quanpin_autocorrect_display(request), request)
+            }
             SchemeType::Shuangpin => with_trailing_separator(
                 Cow::Owned(crate::shuangpin::mid_sentence::decorate_segmentation(
                     &self.pinyin_segmentation(),

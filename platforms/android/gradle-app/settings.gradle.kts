@@ -10,3 +10,8 @@ dependencyResolutionManagement {
 }
 rootProject.name = "msime-android-host"
 include(":app")
+
+// OCR 模块与隔离探针只由专项显式构建，不进入基础输入法的依赖图。
+if (providers.gradleProperty("msimeOcrProbe").orNull == "true") {
+    include(":ocr-module", ":ocr-probe")
+}

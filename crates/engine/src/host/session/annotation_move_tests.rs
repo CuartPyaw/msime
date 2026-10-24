@@ -2,9 +2,9 @@ use super::*;
 use crate::host::tests::{generated_mode_options, helpcode_fixture};
 use crate::ime::personal_rerank::allocations;
 
-// 冻结 d2434c7f88 的完整宿主快照构造，只改函数名和接收参数并去掉注释。
+// 冻结 d2434c7f88 的宿主注释复制路径；预编辑沿用当前宿主显示契约。
 fn frozen_snapshot(session: &Session) -> Result<EngineSnapshot> {
-    let value = session.inner.snapshot();
+    let value = session.inner.snapshot_for_host(true);
     let helpcode_scheme = value.scheme.helpcode();
     let uppercase_all = value.scheme == SchemeType::Quanpin;
     let keymap = session.helpcode_keymap.as_deref().filter(|_| {

@@ -12,11 +12,11 @@ namespace {
   throw std::runtime_error("Toolbar icon table failed at line " +
                            std::to_string(line));
 }
-#define require(value)                                                         \
-  do {                                                                         \
-    if (!(value))                                                              \
-      require_failed(__LINE__);                                                \
-  } while (false)
+void require_at(bool value, int line) {
+  if (!value)
+    require_failed(line);
+}
+#define require(value) require_at((value), __LINE__)
 // The text a button draws when it has no glyph, and that it has none.
 bool text(const ToolbarIcon &icon, const wchar_t *expected) {
   return icon.codepoint == 0 && std::wcscmp(icon.fallback, expected) == 0;

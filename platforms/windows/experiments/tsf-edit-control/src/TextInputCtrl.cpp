@@ -346,7 +346,7 @@ void CTextInputCtrl::OnSize()
 //
 //----------------------------------------------------------------
 
-void CTextInputCtrl::OnKeyDown(WPARAM wParam, [[maybe_unused]] LPARAM lParam)
+void CTextInputCtrl::OnKeyDown(WPARAM wParam, LPARAM)
 {
     UINT nSelStart;
     UINT nSelEnd;
@@ -439,7 +439,7 @@ void CTextInputCtrl::OnKeyDown(WPARAM wParam, [[maybe_unused]] LPARAM lParam)
 //
 //----------------------------------------------------------------
 
-void CTextInputCtrl::OnCreate(HWND hwnd, [[maybe_unused]] WPARAM wParam, [[maybe_unused]] LPARAM lParam)
+void CTextInputCtrl::OnCreate(HWND hwnd, WPARAM, LPARAM)
 {
     if (!InitializeTsfTextServices(g_hInst))
     {
@@ -470,7 +470,7 @@ void CTextInputCtrl::OnDestroy()
 //
 //----------------------------------------------------------------
 
-void CTextInputCtrl::OnSetFocus([[maybe_unused]] WPARAM wParam, [[maybe_unused]] LPARAM lParam)
+void CTextInputCtrl::OnSetFocus(WPARAM, LPARAM)
 {
     _editor.SetFocusDocumentMgr();
 }
@@ -481,7 +481,7 @@ void CTextInputCtrl::OnSetFocus([[maybe_unused]] WPARAM wParam, [[maybe_unused]]
 //
 //----------------------------------------------------------------
 
-void CTextInputCtrl::OnLButtonDown([[maybe_unused]] WPARAM wParam, LPARAM lParam)
+void CTextInputCtrl::OnLButtonDown(WPARAM, LPARAM lParam)
 {
     SetFocus(_hwnd);
 
@@ -509,7 +509,7 @@ void CTextInputCtrl::OnLButtonDown([[maybe_unused]] WPARAM wParam, LPARAM lParam
 //
 //----------------------------------------------------------------
 
-void CTextInputCtrl::OnLButtonUp([[maybe_unused]] WPARAM wParam, LPARAM lParam)
+void CTextInputCtrl::OnLButtonUp(WPARAM, LPARAM lParam)
 {
     if (AleartMouseSink(lParam))
     {
@@ -536,7 +536,7 @@ void CTextInputCtrl::OnLButtonUp([[maybe_unused]] WPARAM wParam, LPARAM lParam)
 //
 //----------------------------------------------------------------
 
-void CTextInputCtrl::OnRButtonDown([[maybe_unused]] WPARAM wParam, LPARAM lParam)
+void CTextInputCtrl::OnRButtonDown(WPARAM, LPARAM lParam)
 {
     if (AleartMouseSink(lParam))
     {
@@ -550,7 +550,7 @@ void CTextInputCtrl::OnRButtonDown([[maybe_unused]] WPARAM wParam, LPARAM lParam
 //
 //----------------------------------------------------------------
 
-void CTextInputCtrl::OnRButtonUp([[maybe_unused]] WPARAM wParam, LPARAM lParam)
+void CTextInputCtrl::OnRButtonUp(WPARAM, LPARAM lParam)
 {
     if (AleartMouseSink(lParam))
     {

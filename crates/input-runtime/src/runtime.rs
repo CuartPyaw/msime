@@ -1339,13 +1339,13 @@ impl<E: InputEngine> Runtime<E> {
         self.engine.pending_suffix()
     }
 
-    /// 换触屏的组码网格。九键要求全拼或注音，全拼 14 键和九键双拼要求全拼，双拼 14 键要求双拼；方案不符报 `InvalidNineKeyScheme`，组字中切换报 `CompositionActive`。
+    /// 换触屏的组码网格。九键要求全拼或注音，全拼十四键、十八键和九键双拼要求全拼，双拼 14 键要求双拼；方案不符报 `InvalidNineKeyScheme`，组字中切换报 `CompositionActive`。
     pub fn set_key_grid(&mut self, grid: Option<KeyGrid>) -> Result<(), RuntimeError> {
         let scheme = scheme_type(self.cached.scheme);
         let supported = match grid {
             None => true,
             Some(KeyGrid::NineKey) => scheme.is_some_and(SchemeType::nine_key),
-            Some(KeyGrid::FourteenKey | KeyGrid::NineKeyShuangpin(_)) => {
+            Some(KeyGrid::FourteenKey | KeyGrid::EighteenKey | KeyGrid::NineKeyShuangpin(_)) => {
                 scheme == Some(SchemeType::Quanpin)
             }
             Some(KeyGrid::FourteenKeyShuangpin(_)) => scheme == Some(SchemeType::Shuangpin),
@@ -2040,10 +2040,12 @@ impl<E: InputEngine> Runtime<E> {
         // consumed, with its candidates, and the caret at its end.
         self.engine.command(Command::Cancel)?;
         for byte in selection.reading.bytes() {
-            // 14 键的组码只认 `grid_key`；分词键 `'` 和九键的数字本来就从 `character` 进。
+            // 字母归组键盘的组码只认 `grid_key`；分词键 `'` 和九键的数字本来就从 `character` 进。
             if matches!(
                 selection.grid,
-                Some(KeyGrid::FourteenKey | KeyGrid::FourteenKeyShuangpin(_))
+                Some(
+                    KeyGrid::FourteenKey | KeyGrid::EighteenKey | KeyGrid::FourteenKeyShuangpin(_)
+                )
             ) && byte != b'\''
             {
                 self.engine.grid_key(byte)?;
@@ -3407,6 +3409,7 @@ fn key_grid_name(grid: Option<KeyGrid>) -> &'static str {
     match grid {
         None => "none",
         Some(KeyGrid::NineKey) => "nine_key",
+        Some(KeyGrid::EighteenKey) => "eighteen_key",
         Some(KeyGrid::FourteenKey | KeyGrid::FourteenKeyShuangpin(_)) => "fourteen_key",
         Some(KeyGrid::NineKeyShuangpin(_)) => "nine_key_shuangpin",
     }

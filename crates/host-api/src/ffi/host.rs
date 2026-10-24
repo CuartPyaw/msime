@@ -848,8 +848,8 @@ pub unsafe extern "C" fn msime_client_load_preferences(
     })
 }
 
-/// 三个可重绑切换热键（`keybindings.toggle_english_candidates`、`toggle_full_width`、
-/// `toggle_punctuation`）按共享 `KeyChord` 契约解码：每个键给出 `null`（不绑定）或
+/// 可重绑切换热键（`keybindings.toggle_english_candidates`、`toggle_full_width`、
+/// `toggle_punctuation`、`toggle_voice_input`）按共享 `KeyChord` 契约解码：每个键给出 `null`（不绑定）或
 /// `{"key": 主键规范名, "ctrl", "alt", "shift", "meta"}`，宿主按规范名认键，
 /// 写法解析只在 Rust 一侧。keybindings 缺键或值为 null 时按出厂值。
 /// # Safety
@@ -884,7 +884,52 @@ pub unsafe extern "C" fn msime_client_toggle_hotkey_chords(
             "english_candidates": toggle_hotkey_chord(keys.english_candidates_chord()),
             "full_width": toggle_hotkey_chord(keys.full_width_chord()),
             "punctuation": toggle_hotkey_chord(keys.punctuation_chord()),
+            "voice_input": toggle_hotkey_chord(keys.toggle_voice_input.parse().ok()),
         }))
+    })
+}
+
+/// 原生设置录键的试写检查：复用共享偏好的语法、规范化和冲突表，不写入配置。
+/// # Safety
+/// `request` 指向不超过 64 KiB 的有效 JSON；返回字符串交由 `msime_client_string_free` 释放。
+#[no_mangle]
+pub unsafe extern "C" fn msime_client_check_toggle_hotkey(
+    request: *const u8,
+    length: usize,
+) -> *mut c_char {
+    use msime_client_core::preferences::{
+        KeybindingPreferences, ToggleHotkeyRejection, ToggleHotkeySlot,
+    };
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Request {
+        field: ToggleHotkeySlot,
+        chord: String,
+        #[serde(default)]
+        keybindings: KeybindingPreferences,
+        voice_ctrl_f9: bool,
+    }
+    response(|| {
+        if request.is_null() || length > 64 * 1024 {
+            return Err("invalid toggle hotkey request buffer".into());
+        }
+        // SAFETY: 调用方保证缓冲区可读，上方已检查长度上限。
+        let bytes = unsafe { std::slice::from_raw_parts(request, length) };
+        let request: Request = serde_json::from_slice(bytes)
+            .map_err(|_| "invalid toggle hotkey request".to_owned())?;
+        Ok(
+            match request.keybindings.check_toggle_hotkey(
+                request.field,
+                &request.chord,
+                request.voice_ctrl_f9,
+            ) {
+                Ok(chord) => json!({"ok": true, "chord": chord}),
+                Err(ToggleHotkeyRejection::Invalid(_)) => json!({"ok": false, "kind": "invalid"}),
+                Err(ToggleHotkeyRejection::Conflict { owner, .. }) => json!({
+                    "ok": false, "kind": "conflict", "owner": owner.id(),
+                }),
+            },
+        )
     })
 }
 

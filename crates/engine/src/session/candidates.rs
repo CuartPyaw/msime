@@ -18,10 +18,12 @@ use crate::types::{
     CandidateSource, FrequencyAdjustmentMode, FrequencyAdjustmentOptions, KeyResult,
     LocalInputMode, PersonalDictionaryKind, SchemeType, WordItem,
 };
+use crate::user_dictionary::journal::has_matching_user_weight;
 use crate::user_dictionary::positions::{
     apply_fixed_positions_with_state, clear_fixed_position, is_pinned_candidate,
     record_pinned_candidate, set_fixed_position,
 };
+use crate::user_dictionary::ranking::candidate_dictionary_key;
 use crate::user_dictionary::removal::delete_dictionary_candidate;
 
 fn english_position_context(input: &str) -> String {
@@ -140,7 +142,28 @@ impl InputSession {
                     &model,
                     self.chain.earlier.as_deref(),
                     previous,
-                    &mut |leader: &str| is_pinned_candidate(journal, &context, leader),
+                    &mut |leader: &str| {
+                        is_pinned_candidate(journal, &context, leader)
+                            || (self.frequency.mode != FrequencyAdjustmentMode::Disabled
+                                && decoded.first().is_some_and(|row| {
+                                    if !row.source.is_dictionary() || !row.scheme.is_pinyin() {
+                                        return false;
+                                    }
+                                    // 用调频写入的真实读音匹配，单码和双拼不能拿显示编码查日志。
+                                    let key = if row.canonical_pinyin.is_empty() {
+                                        Cow::Owned(candidate_dictionary_key(row, &context))
+                                    } else {
+                                        Cow::Borrowed(row.canonical_pinyin.as_ref())
+                                    };
+                                    has_matching_user_weight(
+                                        journal,
+                                        PersonalDictionaryKind::Pinyin,
+                                        &key,
+                                        &row.word,
+                                        row.weight,
+                                    )
+                                }))
+                    },
                 )
             }
             _ => None,

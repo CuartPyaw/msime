@@ -65,7 +65,7 @@ STDAPI_(ULONG) CTextStore::Release()
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::AdviseSink(REFIID riid, IUnknown *punk, [[maybe_unused]] DWORD dwMask)
+STDAPI CTextStore::AdviseSink(REFIID riid, IUnknown *punk, DWORD)
 {
 
     if (!IsEqualGUID(riid, IID_ITextStoreACPSink))
@@ -87,7 +87,7 @@ STDAPI CTextStore::AdviseSink(REFIID riid, IUnknown *punk, [[maybe_unused]] DWOR
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::UnadviseSink([[maybe_unused]] IUnknown *punk)
+STDAPI CTextStore::UnadviseSink(IUnknown *)
 {
     // we're dealing with TSF. We don't have to check punk is same instance of _pSink.
     _pSink->Release();
@@ -251,7 +251,7 @@ STDAPI CTextStore::GetText(LONG acpStart, LONG acpEnd, __out_ecount(cchPlainReq)
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::SetText([[maybe_unused]] DWORD dwFlags, LONG acpStart, LONG acpEnd, __in_ecount(cch) const WCHAR *pchText, ULONG cch,
+STDAPI CTextStore::SetText(DWORD, LONG acpStart, LONG acpEnd, __in_ecount(cch) const WCHAR *pchText, ULONG cch,
                            TS_TEXTCHANGE *pChange)
 {
     if (!pChange || (cch && !pchText))
@@ -296,7 +296,7 @@ STDAPI CTextStore::SetText([[maybe_unused]] DWORD dwFlags, LONG acpStart, LONG a
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::GetFormattedText([[maybe_unused]] LONG acpStart, [[maybe_unused]] LONG acpEnd, [[maybe_unused]] IDataObject **ppDataObject)
+STDAPI CTextStore::GetFormattedText(LONG, LONG, IDataObject **)
 {
     return E_NOTIMPL;
 }
@@ -307,7 +307,7 @@ STDAPI CTextStore::GetFormattedText([[maybe_unused]] LONG acpStart, [[maybe_unus
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::GetEmbedded([[maybe_unused]] LONG acpPos, [[maybe_unused]] REFGUID rguidService, [[maybe_unused]] REFIID riid, [[maybe_unused]] IUnknown **ppunk)
+STDAPI CTextStore::GetEmbedded(LONG, REFGUID, REFIID, IUnknown **)
 {
     return E_NOTIMPL;
 }
@@ -318,8 +318,8 @@ STDAPI CTextStore::GetEmbedded([[maybe_unused]] LONG acpPos, [[maybe_unused]] RE
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::InsertEmbedded([[maybe_unused]] DWORD dwFlags, [[maybe_unused]] LONG acpStart, [[maybe_unused]] LONG acpEnd, [[maybe_unused]] IDataObject *pDataObject,
-                                  [[maybe_unused]] TS_TEXTCHANGE *pChange)
+STDAPI CTextStore::InsertEmbedded(DWORD, LONG, LONG, IDataObject *,
+                                  TS_TEXTCHANGE *)
 {
     return E_NOTIMPL;
 }
@@ -330,7 +330,7 @@ STDAPI CTextStore::InsertEmbedded([[maybe_unused]] DWORD dwFlags, [[maybe_unused
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::RequestSupportedAttrs([[maybe_unused]] DWORD dwFlags, ULONG cFilterAttrs, const TS_ATTRID *paFilterAttrs)
+STDAPI CTextStore::RequestSupportedAttrs(DWORD, ULONG cFilterAttrs, const TS_ATTRID *paFilterAttrs)
 {
     PrepareAttributes(cFilterAttrs, paFilterAttrs);
     if (!_nAttrVals)
@@ -344,8 +344,8 @@ STDAPI CTextStore::RequestSupportedAttrs([[maybe_unused]] DWORD dwFlags, ULONG c
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::RequestAttrsAtPosition([[maybe_unused]] LONG acpPos, ULONG cFilterAttrs, const TS_ATTRID *paFilterAttrs,
-                                          [[maybe_unused]] DWORD dwFlags)
+STDAPI CTextStore::RequestAttrsAtPosition(LONG, ULONG cFilterAttrs, const TS_ATTRID *paFilterAttrs,
+                                          DWORD)
 {
     PrepareAttributes(cFilterAttrs, paFilterAttrs);
     if (!_nAttrVals)
@@ -359,8 +359,8 @@ STDAPI CTextStore::RequestAttrsAtPosition([[maybe_unused]] LONG acpPos, ULONG cF
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::RequestAttrsTransitioningAtPosition([[maybe_unused]] LONG acpPos, [[maybe_unused]] ULONG cFilterAttrs, [[maybe_unused]] const TS_ATTRID *paFilterAttrs,
-                                                       [[maybe_unused]] DWORD dwFlags)
+STDAPI CTextStore::RequestAttrsTransitioningAtPosition(LONG, ULONG, const TS_ATTRID *,
+                                                       DWORD)
 {
     return E_NOTIMPL;
 }
@@ -371,8 +371,8 @@ STDAPI CTextStore::RequestAttrsTransitioningAtPosition([[maybe_unused]] LONG acp
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::FindNextAttrTransition([[maybe_unused]] LONG acpStart, [[maybe_unused]] LONG acpHalt, [[maybe_unused]] ULONG cFilterAttrs,
-                                          [[maybe_unused]] const TS_ATTRID *paFilterAttrs, [[maybe_unused]] DWORD dwFlags, LONG *pacpNext, BOOL *pfFound,
+STDAPI CTextStore::FindNextAttrTransition(LONG, LONG, ULONG,
+                                          const TS_ATTRID *, DWORD, LONG *pacpNext, BOOL *pfFound,
                                           LONG *plFoundOffset)
 {
     *pacpNext = 0;
@@ -429,7 +429,7 @@ STDAPI CTextStore::GetActiveView(TsViewCookie *pvcView)
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::GetACPFromPoint([[maybe_unused]] TsViewCookie vcView, [[maybe_unused]] const POINT *pt, [[maybe_unused]] DWORD dwFlags, [[maybe_unused]] LONG *pacp)
+STDAPI CTextStore::GetACPFromPoint(TsViewCookie, const POINT *, DWORD, LONG *)
 {
     return E_NOTIMPL;
 }
@@ -440,7 +440,7 @@ STDAPI CTextStore::GetACPFromPoint([[maybe_unused]] TsViewCookie vcView, [[maybe
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::GetTextExt([[maybe_unused]] TsViewCookie vcView, LONG acpStart, LONG acpEnd, RECT *prc, BOOL *pfClipped)
+STDAPI CTextStore::GetTextExt(TsViewCookie, LONG acpStart, LONG acpEnd, RECT *prc, BOOL *pfClipped)
 {
     RECT rcStart;
     RECT rcEnd;
@@ -483,7 +483,7 @@ STDAPI CTextStore::GetTextExt([[maybe_unused]] TsViewCookie vcView, LONG acpStar
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::GetScreenExt([[maybe_unused]] TsViewCookie vcView, RECT *prc)
+STDAPI CTextStore::GetScreenExt(TsViewCookie, RECT *prc)
 {
     GetClientRect(_pEditor->GetWnd(), prc);
     ClientToScreen(_pEditor->GetWnd(), (POINT *)&prc->left);
@@ -497,7 +497,7 @@ STDAPI CTextStore::GetScreenExt([[maybe_unused]] TsViewCookie vcView, RECT *prc)
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::GetWnd([[maybe_unused]] TsViewCookie vcView, HWND *phwnd)
+STDAPI CTextStore::GetWnd(TsViewCookie, HWND *phwnd)
 {
     *phwnd = _pEditor->GetWnd();
     return S_OK;
@@ -509,7 +509,7 @@ STDAPI CTextStore::GetWnd([[maybe_unused]] TsViewCookie vcView, HWND *phwnd)
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::QueryInsertEmbedded([[maybe_unused]] const GUID *pguidService, [[maybe_unused]] const FORMATETC *pFormatEtc, [[maybe_unused]] BOOL *pfInsertable)
+STDAPI CTextStore::QueryInsertEmbedded(const GUID *, const FORMATETC *, BOOL *)
 {
     return E_NOTIMPL;
 }
@@ -575,8 +575,8 @@ STDAPI CTextStore::InsertTextAtSelection(DWORD dwFlags, __in_ecount(cch) const W
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::InsertEmbeddedAtSelection([[maybe_unused]] DWORD dwFlags, [[maybe_unused]] IDataObject *pDataObject, [[maybe_unused]] LONG *pacpStart, [[maybe_unused]] LONG *pacpEnd,
-                                             [[maybe_unused]] TS_TEXTCHANGE *pChange)
+STDAPI CTextStore::InsertEmbeddedAtSelection(DWORD, IDataObject *, LONG *, LONG *,
+                                             TS_TEXTCHANGE *)
 {
     return E_NOTIMPL;
 }
@@ -752,7 +752,7 @@ STDAPI CTextStore::OnStartComposition(ITfCompositionView *pComposition, BOOL *pf
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::OnUpdateComposition(ITfCompositionView *pComposition, [[maybe_unused]] ITfRange *pRangeNew)
+STDAPI CTextStore::OnUpdateComposition(ITfCompositionView *pComposition, ITfRange *)
 {
     if (_pCurrentCompositionView)
     {
@@ -771,7 +771,7 @@ STDAPI CTextStore::OnUpdateComposition(ITfCompositionView *pComposition, [[maybe
 //
 //----------------------------------------------------------------------------
 
-STDAPI CTextStore::OnEndComposition([[maybe_unused]] ITfCompositionView *pComposition)
+STDAPI CTextStore::OnEndComposition(ITfCompositionView *)
 {
     if (_pCurrentCompositionView)
     {

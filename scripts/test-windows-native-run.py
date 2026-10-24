@@ -53,6 +53,8 @@ HOST_DIFFERENCES = {
 
 # Sources whose `main` takes an argument the build system supplies.
 ARGUMENTS = {
+    "input/wubi_auto_commit.cpp": ["platforms/windows/tests/input/fixtures/msime-wubi-commit.db"],
+    "input/wubi_commit_owner.cpp": ["platforms/windows/tests/input/fixtures/msime-wubi-commit-owner.db"],
     "input/backspace_selected_phrase.cpp": ["platforms/windows/tests/input/fixtures/msime-phrase-backspace.db"],
     "input/host_online_candidates.cpp": ["platforms/windows/tests/input/fixtures/msime-pinyin-online.db"],
     "core/installer_launch.cpp": ["platforms/windows/installer/msime_setup.iss"],
@@ -74,6 +76,17 @@ BUILD_DRIVEN = {
 # other source that needs more than itself.
 # Values are (sources relative to platforms/windows, whether they need the shared host library).
 COMPANIONS: dict[str, tuple[list[str], bool]] = {
+    # 两份真实会话共同验证五笔自动上屏的文档写入归属。
+    "input/wubi_auto_commit.cpp": (
+        ["src/ipc/ReplyComposer.cpp", "src/ipc/ReplyCodec.cpp", "src/ipc/ServerSession.cpp",
+         "src/input/ChineseTextConversion.cpp", "tsf/EngineSessionAdapter.cpp", "tsf/EngineResponse.cpp"],
+        True,
+    ),
+    "input/wubi_commit_owner.cpp": (
+        ["src/ipc/ReplyComposer.cpp", "src/ipc/ReplyCodec.cpp", "src/ipc/ServerSession.cpp",
+         "src/input/ChineseTextConversion.cpp", "tsf/EngineSessionAdapter.cpp", "tsf/EngineResponse.cpp"],
+        True,
+    ),
     # Windows 的两份真实会话共同验证部分选词、普通退格与实时设置。
     "input/backspace_selected_phrase.cpp": (
         ["src/ipc/ReplyComposer.cpp", "src/ipc/ReplyCodec.cpp", "src/ipc/ServerSession.cpp",
@@ -246,8 +259,9 @@ def include_flags() -> list[str]:
     directories = [SRC, *(path for path in sorted(SRC.iterdir()) if path.is_dir())]
     # The DLL/Server contract headers, which the Windows build puts on the global include path. Ahead of the TIP's directories, so the forwarding tsf/IPC/KeyEventSendResult.h does not shadow the definition it forwards to.
     directories += [ROOT / "platforms/windows/common"]
-    directories += [TESTS / "core", ROOT / "shared/contracts", ROOT / "crates/host-api/include",
-                    ROOT / "platforms/windows/msimeui/include"]
+    directories += [TESTS / "core", ROOT / "shared/contracts", ROOT / "crates/host-api/include"]
+    # Windows 宿主会继续解析到公共绘制头文件；与 CMake 的公开 include 路径一致。
+    directories += [ROOT / "platforms/windows/msimeui/include"]
     # The TIP's own headers, for its own tests: its root and each of its source directories, which its CMakeLists hands to individual tests (`IPC` for passthrough statistics, `Global` for the smart punctuation fingerprint). Last, so a header both trees have still resolves to the host's copy as before.
     tsf = ROOT / "platforms/windows/tsf"
     directories += [tsf]
@@ -256,10 +270,10 @@ def include_flags() -> list[str]:
     flags = [f"-I{path}" for path in directories if path.exists()]
     flags += [f"-I{path}" for path in EXTRA_INCLUDES if pathlib.Path(path).exists()]
     # shared/contracts/msime_edition.h 要求构建选定一个版本；Windows 的 CMake 缺省编 full，这里照做。
-    flags += ["-DMSIME_EDITION_FULL"]
+    flags += ["-DMSIME_EDITION_FULL", "-DNOMINMAX"]
     if sys.platform == "win32":
-        # 与原生 CMake 相同，避免 Windows SDK 的宏和窄字符别名改变被测源码。
-        flags += ["-DNOMINMAX", "-DUNICODE", "-D_UNICODE"]
+        # 与原生 CMake 相同，避免 Windows SDK 的窄字符别名改变被测源码。
+        flags += ["-DUNICODE", "-D_UNICODE"]
     return flags
 
 
@@ -354,13 +368,20 @@ def build(
         "No such file or directory",
         "Undefined symbols",
         "undefined reference",
+        "undefined symbol:",  # LLD 与 GNU ld 对同一种缺失链接依赖使用不同诊断。
+        # MSVC 的同类诊断：这个原生源文件仍需由 Windows CMake 目标链接系统库。
+        "unresolved external symbol",
     )
-    missing = MISSING_HEADER.search(compiled.stderr)
+    # MSVC 链接器也会把诊断写到 stdout；错误码不受系统显示语言影响。
+    diagnostic = compiled.stdout + compiled.stderr
+    missing = MISSING_HEADER.search(diagnostic)
     if missing:
         found = repository_header(missing.group(1))
         if found:
             return None, f"cannot find {missing.group(1)}, which this repository has at {found}: the include path here is missing its directory"
-    if any(marker in compiled.stderr for marker in ordinary):
+    if any(marker in diagnostic for marker in ordinary) or re.search(
+        r"\berror LNK(?:2001|2019|1120):", diagnostic
+    ):
         return None, ""
     # MSVC 的链接诊断可能本地化且写入 stdout；只识别缺少符号／入口的确定错误码。
     if re.search(r"\berror LNK(?:2001|2019|1561):", compiled.stdout + compiled.stderr):
@@ -368,7 +389,7 @@ def build(
     if relative in HOST_DIFFERENCES:
         return None, ""
     first = next(
-        (line for line in compiled.stderr.splitlines() if "error" in line),
+        (line for line in diagnostic.splitlines() if "error" in line),
         "did not compile",
     )
     return None, first[:200]

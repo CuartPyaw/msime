@@ -16,6 +16,8 @@ Win7 的实际候选里，`nihao` 后的第二项是 U+1F44B 挥手表情，文�
 
 Win7 的 DirectWrite 即使显式启用 `ccmp`，仍把 ZWJ 家庭、肤色和键帽分成独立字形。私有字体因此使用基线锁定的 HarfBuzz Core 整形，再由 `IDWriteInlineObject` 把字形、字宽和基线交给 DirectWrite；只处理需要回退的完整组合表情簇，原始 UTF-16 文本与候选索引不变。单个表情仍走现有私有字体排版，现代 Windows 保持系统排版。内联绘制的原点与效果继承遵循 [IDWriteInlineObject::Draw](https://learn.microsoft.com/en-us/windows/win32/api/dwrite/nf-dwrite-idwriteinlineobject-draw)，排版保留原始范围，绘制原点加字体基线。显式文本选择符 VS15 不会单独触发表情字体回退。测试渲染器必须实际调用内联对象的绘制，不能因回调被跳过而假通过。
 
+集成主线的多桌面候选调度后，各桌面的 UI 线程共用私有字体。遵循 [HarfBuzz 对象生命周期约定](https://harfbuzz.github.io/object-model-lifecycle.html)，字体在设定整形函数和比例后标记不可变；每次排版独立创建缓冲区。回归同时在四条线程反复绘制家庭、肤色和键帽，并核对字形与 UTF-16 命中范围，覆盖跨桌面的共享对象边界。
+
 ### 既有笔记审计
 
 - [原生手写](../../implemented/feature/2026-10-23-windows7-handwriting.md)：部分重叠，沿用独立面板与关闭收尾边界。
@@ -39,7 +41,7 @@ Win7 的 DirectWrite 即使显式启用 `ccmp`，仍把 ZWJ 家庭、肤色和�
 - x64 clippy 通过；x86 的 Win7 标准库 TLS 展开对已有 `const { ... }` 初始化误报 `missing_const_for_thread_local`，仅在该命令级豁免这一 lint，其他警告仍按错误处理；再次运行通过。没有修改这些业务源码。
 - Win7 SP1 x64 交互桌面的 x64／x86 原生目录与窗口回归通过。早期 Linux 时限失败后的完整 quick 已通过，最终门禁见[产品构建](2026-10-24-windows7-product-build.md)。
 
-- 双架构私有字体排版测试验证挥手、新表情、UTF-16 范围和中文主字体保留；家庭、肤色与键帽必须整簇选字并产生完整字形，同时核对整簇宽度与 UTF-16 命中范围。Win7 SP1 交互桌面的双架构完整运行回归通过，覆盖新字体与实际内联绘制、系统对话框、外部编辑器传输和 MCP。
+- 双架构私有字体排版测试验证挥手、新表情、UTF-16 范围和中文主字体保留；四条线程各 64 轮的家庭、肤色与键帽真实布局和绘制已在 Win7 SP1 双架构运行通过。家庭、肤色与键帽必须整簇选字并产生完整字形，同时核对整簇宽度与 UTF-16 命中范围。Win7 SP1 交互桌面的双架构完整运行回归通过，覆盖新字体与实际内联绘制、系统对话框、外部编辑器传输和 MCP。
 
 ## Consequences
 

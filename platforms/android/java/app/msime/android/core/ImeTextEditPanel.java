@@ -12,9 +12,9 @@ import android.view.MotionEvent;
 import android.view.View;
 import android.view.inputmethod.InputConnection;
 import android.widget.Button;
-import android.widget.LinearLayout;
-import android.widget.ScrollView;
 import android.widget.FrameLayout;
+import android.widget.LinearLayout;
+import java.util.List;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
@@ -36,7 +36,6 @@ final class ImeTextEditPanel {
     private TextTrackpadSettings trackpadSettings;
     private boolean liveTrackpadPreferencesLoaded;
     private TextTrackpadView trackpad;
-    private LinearLayout arrows;
     private Button modeButton;
     private Button trackpadSelect;
     private boolean modeSaving;
@@ -65,32 +64,37 @@ final class ImeTextEditPanel {
         previewReads = new TextTrackpadReadQueue<>(trackpadWorker, s.main::post);
     }
 
-    /** 建面板视图（隐藏状态），布局与 {@link TextEditPanelModel} 的 4 × 4 网格一致。 */
+    /** 所有操作同屏可见；中央十字的四角留白，父面板拦截空白处触摸。 */
     LinearLayout build() {
-        if (shortcutTouch != null) shortcutTouch.cancel(false);
-        setPreviewActive(false);
-        if (trackpad != null) trackpad.cancel();
-        buttons.clear();
-        LinearLayout panel = LayoutPolicy.row(s);
+        LinearLayout panel = LayoutPolicy.column(s);
         panel.setContentDescription("文本编辑面板");
         int padding = s.pixels(4);
         ViewPolicy.setPadding(panel, padding, padding, padding, padding);
-        // 键之间的空隙不能把触摸漏给底下的字母键。
         ViewPolicy.setClickable(panel, true);
+        populate(panel);
+        ViewPolicy.hide(panel);
+        configureTrackpad();
+        return panel;
+    }
 
-        LinearLayout left = LayoutPolicy.column(s);
+    private void populate(LinearLayout panel) {
+        if (shortcutTouch != null) shortcutTouch.cancel(false);
+        setPreviewActive(false);
+        selectionReads.cancel();
+        if (trackpad != null) trackpad.cancel();
+        stopRepeat();
+        buttons.clear();
+        panel.removeAllViews();
+        LinearLayout modes = LayoutPolicy.row(s);
         modeButton = s.keyboardKey("触控板", "切换为触控板", this::toggleTrackpad);
-        left.addView(modeButton, new LinearLayout.LayoutParams(-1, s.pixels(32)));
-        arrows = LayoutPolicy.row(s);
-        arrows.addView(key(TextEditPanelModel.Action.LEFT), cell(true));
-        LinearLayout vertical = LayoutPolicy.column(s);
-        vertical.addView(key(TextEditPanelModel.Action.UP), cell(false));
-        vertical.addView(key(TextEditPanelModel.Action.SELECT), cell(false));
-        vertical.addView(key(TextEditPanelModel.Action.DOWN), cell(false));
-        arrows.addView(vertical, LayoutPolicy.weightedMatchParentParams(1));
-        arrows.addView(key(TextEditPanelModel.Action.RIGHT), cell(true));
+        modes.addView(modeButton, LayoutPolicy.weightedMatchParentParams(1));
+        trackpadSelect = s.keyboardKey("选择", "选择模式", () -> perform(TextEditPanelModel.Action.SELECT));
+        modes.addView(trackpadSelect, LayoutPolicy.weightedMatchParentParams(1));
+        panel.addView(modes, LayoutPolicy.matchWidthHeightPx(s.pixels(32)));
         FrameLayout movement = new FrameLayout(s);
-        movement.addView(arrows, new FrameLayout.LayoutParams(-1, -1));
+        LinearLayout grid = LayoutPolicy.column(s);
+        movement.addView(grid, LayoutPolicy.frameMatchParentParams());
+        populateGrid(grid);
         trackpad = new TextTrackpadView(s, new TextTrackpadView.Listener() {
             @Override public Object target() { return s.connection; }
             @Override public boolean move(TextTrackpadGesture.Steps steps) { return moveTrackpad(steps); }
@@ -103,60 +107,44 @@ final class ImeTextEditPanel {
                 setPreviewActive(active);
             }
         });
-        movement.addView(trackpad, new FrameLayout.LayoutParams(-1, -1));
-        left.addView(movement, LayoutPolicy.weightedWidthParams(3));
-        LinearLayout ends = LayoutPolicy.row(s);
-        ends.addView(key(TextEditPanelModel.Action.DOCUMENT_START), cell(true));
-        ends.addView(key(TextEditPanelModel.Action.DOCUMENT_END), cell(true));
-        ends.addView(key(TextEditPanelModel.Action.DELETE), cell(true));
-        trackpadSelect = s.keyboardKey("选择", "选择模式", () -> perform(TextEditPanelModel.Action.SELECT));
-        ends.addView(trackpadSelect, cell(true));
-        left.addView(ends, LayoutPolicy.weightedWidthParams(1));
-        panel.addView(left, LayoutPolicy.weightedMatchParentParams(3));
-
-        LinearLayout clipboard = LayoutPolicy.column(s);
-        clipboard.addView(key(TextEditPanelModel.Action.SELECT_ALL), cell(false));
-        clipboard.addView(key(TextEditPanelModel.Action.COPY), cell(false));
-        clipboard.addView(key(TextEditPanelModel.Action.CUT), cell(false));
-        clipboard.addView(key(TextEditPanelModel.Action.PASTE), cell(false));
-        for (TextEditPanelModel.Key shortcut : TextEditPanelModel.shortcuts())
-            clipboard.addView(key(shortcut.action()), cell(false));
-        ScrollView scroll = new ScrollView(s);
-        scroll.setContentDescription("文本编辑快捷操作");
-        scroll.setFillViewport(true);
-        scroll.setVerticalScrollBarEnabled(false);
-        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        scroll.addView(clipboard, LayoutPolicy.matchParentParams());
-        // 右列保持四行可见，新增的三个快捷键通过上下滑动访问；按键高度跟随当前键盘高度调整。
-        scroll.addOnLayoutChangeListener((view, xLeft, yTop, xRight, yBottom,
-                oldLeft, oldTop, oldRight, oldBottom) -> resizeShortcutRows(clipboard, yBottom - yTop));
-        panel.addView(scroll, LayoutPolicy.weightedMatchParentParams(1));
-        ViewPolicy.hide(panel);
-        configureTrackpad();
-        return panel;
+        TextTrackpadView currentTrackpad = trackpad;
+        movement.addView(currentTrackpad, new FrameLayout.LayoutParams(1, 1));
+        // 触控板只替代中央前三行；两侧七键和底部首尾、换行保持可用。
+        movement.addOnLayoutChangeListener((view, left, top, right, bottom,
+                oldLeft, oldTop, oldRight, oldBottom) -> {
+            int width = right - left, height = bottom - top, margin = s.pixels(3);
+            FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                Math.max(1, width * 6 / 10 - 2 * margin), Math.max(1, height * 3 / 4 - 2 * margin));
+            params.leftMargin = width * 2 / 10 + margin;
+            params.topMargin = margin;
+            currentTrackpad.setLayoutParams(params);
+        });
+        panel.addView(movement, LayoutPolicy.weightedWidthParams(1));
     }
 
-    private void resizeShortcutRows(LinearLayout column, int viewportHeight) {
-        int height = viewportHeight / 4;
-        if (height <= 0) return;
-        for (int index = 0; index < column.getChildCount(); index++) {
-            View child = column.getChildAt(index);
-            LinearLayout.LayoutParams params = (LinearLayout.LayoutParams) child.getLayoutParams();
-            if (params.height == height && params.weight == 0) continue;
-            params.width = LinearLayout.LayoutParams.MATCH_PARENT;
-            params.height = height;
-            params.weight = 0;
-            child.setLayoutParams(params);
+    private void populateGrid(LinearLayout panel) {
+        org.json.JSONObject preferences = s.preferencesSnapshot == null
+            ? null : s.preferencesSnapshot.optJSONObject("preferences");
+        List<TextEditPanelModel.Key> keys = TextEditPanelModel.keys(TextEditButtonOrder.fromPreferences(preferences));
+        for (int rowIndex = 0; rowIndex < TextEditPanelModel.ROWS; rowIndex++) {
+            LinearLayout row = LayoutPolicy.row(s);
+            int column = 0;
+            for (TextEditPanelModel.Key spec : keys) {
+                if (spec.row() != rowIndex) continue;
+                if (spec.column() > column) row.addView(new View(s), LayoutPolicy.weightedMatchParentParams(spec.column() - column));
+                FrameLayout slot = new FrameLayout(s);
+                FrameLayout.LayoutParams params = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
+                int margin = s.pixels(3);
+                params.setMargins(margin, margin, margin, margin);
+                slot.addView(key(spec.action()), params);
+                row.addView(slot, LayoutPolicy.weightedMatchParentParams(spec.columnSpan()));
+                column = spec.column() + spec.columnSpan();
+            }
+            if (column < TextEditPanelModel.COLUMNS)
+                row.addView(new View(s), LayoutPolicy.weightedMatchParentParams(TextEditPanelModel.COLUMNS - column));
+            panel.addView(row, LayoutPolicy.weightedWidthParams(1));
         }
-    }
-
-    /** 一格的布局参数：`horizontal` 为真时在横排里按宽度均分，否则在竖排里按高度均分，四周留出键距。 */
-    private LinearLayout.LayoutParams cell(boolean horizontal) {
-        LinearLayout.LayoutParams params = horizontal
-            ? LayoutPolicy.weightedMatchParentParams(1) : LayoutPolicy.weightedWidthParams(1);
-        int margin = s.pixels(3);
-        params.setMargins(margin, margin, margin, margin);
-        return params;
     }
 
     private Button key(TextEditPanelModel.Action action) {
@@ -254,6 +242,7 @@ final class ImeTextEditPanel {
         s.closeToolbarPanels();
         s.closeCandidatePanel();
         selecting = false;
+        populate(s.textEditPanel);
         renderState();
         s.imeStyler.applySkinBackground(s.textEditPanel);
         configureTrackpad();
@@ -396,7 +385,10 @@ final class ImeTextEditPanel {
         }
         boolean enabled = trackpadSettings != null && (trackpadSettings.enabled() || temporaryTrackpad);
         ViewPolicy.setVisible(trackpad, enabled);
-        ViewPolicy.setVisible(arrows, !enabled);
+        for (TextEditPanelModel.Action action : new TextEditPanelModel.Action[] {
+                TextEditPanelModel.Action.LEFT, TextEditPanelModel.Action.UP, TextEditPanelModel.Action.SELECT,
+                TextEditPanelModel.Action.DOWN, TextEditPanelModel.Action.RIGHT})
+            ViewPolicy.setVisible(buttons.get(action), !enabled);
         ViewPolicy.setVisible(trackpadSelect, enabled);
         modeButton.setText(enabled ? "方向键" : "触控板");
         modeButton.setContentDescription(enabled ? "切换为方向键" : "切换为触控板");
