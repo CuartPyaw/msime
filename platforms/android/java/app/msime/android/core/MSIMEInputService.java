@@ -10316,7 +10316,7 @@ public final class MSIMEInputService extends InputMethodService {
             if (dismissShortcutButton instanceof KeyboardShortcutButton dismiss) dismiss.setFlipped(keysCollapsed);
         }
         if (voiceShortcutButton != null) {
-            ViewPolicy.hide(voiceShortcutButton);
+            ViewPolicy.setVisible(voiceShortcutButton, touchVoiceShortcutEnabled);
             ViewPolicy.setEnabled(voiceShortcutButton, voiceInsertionReady());
         }
         if (aiPolishShortcutButton != null) {
