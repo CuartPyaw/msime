@@ -1265,6 +1265,7 @@ impl NineKeySession {
             }
         }
         SessionSnapshot {
+            prediction: false,
             scheme: if matches!(self.grid, KeyGrid::FourteenKeyShuangpin(_)) {
                 SchemeType::Shuangpin
             } else {

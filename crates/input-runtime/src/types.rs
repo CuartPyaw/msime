@@ -87,6 +87,9 @@ pub enum CharacterWidth {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct View {
+    /// 非组字的上屏后联想；空格、回车、数字和失焦均不自动提交这些候选。
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub prediction: bool,
     pub scheme: u8,
     /// The active scheme writes Chinese (`SchemeType::is_chinese`): what 中文 returns to and what the Chinese statistics count. Hosts branch on this rather than on scheme ordinals.
     pub chinese_text: bool,

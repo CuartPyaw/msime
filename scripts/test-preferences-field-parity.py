@@ -33,6 +33,8 @@ RUST_ONLY: dict[str, set[str]] = {
         "touch_japanese_toggle_input",
         # 文本编辑触控板仅由 Android 原生设置页呈现，其他宿主保留文档字段，不在 React 页提供无效入口。
         "android_text_trackpad",
+        # 上屏后联想先在 Android 原生键盘验收，其他宿主保留字段，尚无共享设置入口。
+        "next_word_prediction",
 
     },
     "KeybindingPreferences": set(),

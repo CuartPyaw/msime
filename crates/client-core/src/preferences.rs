@@ -1150,6 +1150,9 @@ pub struct Preferences {
     /// its model is installed.
     #[serde(default)]
     pub sentence_association: SentenceAssociationPreferences,
+    /// 上屏后推荐下一词；Android 原生键盘提供入口，独立于整句候选，默认关闭。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub next_word_prediction: bool,
     #[serde(default)]
     pub custom_translation: CustomTranslationPreferences,
     #[serde(default)]
@@ -3180,6 +3183,7 @@ impl Default for Preferences {
             vim_mode_apps: Vec::new(),
             ai_assistant: AiAssistantPreferences::default(),
             sentence_association: SentenceAssociationPreferences::default(),
+            next_word_prediction: false,
             custom_translation: CustomTranslationPreferences::default(),
             tencent_tmt: TencentTmtPreferences::default(),
             niutrans: NiuTransPreferences::default(),
