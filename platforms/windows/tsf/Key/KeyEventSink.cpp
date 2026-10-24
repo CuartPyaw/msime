@@ -1408,7 +1408,7 @@ bool CMetasequoiaIME::_HasDeferredKeyBarrier() const
 {
     if (_localSessionResetPending.load(std::memory_order_acquire) || _focusResetPending || _activationRequired ||
         _deferredKeyProjectionValid || !_deferredKeyDowns.empty() || _hasDeferredKeyInFlight ||
-        _HasPendingApplicationKeyReplay())
+        _HasPendingApplicationKeyReplay() || _wubiCommitOwner.active())
     {
         return true;
     }
@@ -2473,6 +2473,7 @@ bool CMetasequoiaIME::_QueueDeferredPreservedKey(_In_ ITfContext *pContext, REFG
 
 void CMetasequoiaIME::_ClearDeferredKeyDowns()
 {
+    _wubiCommitOwner.clear();
     _ClearApplicationKeyReplay();
     _deferredKeyClassificationPending = false;
     _backspaceHoldArmed = false;
@@ -2560,6 +2561,8 @@ void CMetasequoiaIME::_CompleteDeferredKeyReplay(uint64_t replayToken)
     {
         return;
     }
+
+    if (_wubiCommitOwner.current(replayToken)) return;
 
     DebugTsfIssue47(L"deferred-replay-complete", FANY_IME_NO_REQUEST_ID, static_cast<UINT>(_deferredKeyInFlight.wParam),
                     _deferredKeyInFlight.translatedWch, _deferredKeyInFlight.keyState.Category,
@@ -2668,6 +2671,15 @@ void CMetasequoiaIME::_RetryDeferredKeyReplay(uint64_t replayToken)
     {
         return;
     }
+    if (_wubiCommitOwner.current(replayToken))
+    {
+        if (_wubiCommitOwner.applied())
+        {
+            _FinishWubiWorkerEdit(replayToken, false);
+            return;
+        }
+        _wubiCommitOwner.clear();
+    }
     if (_deferredKeyInFlight.focusGeneration != _deferredKeyFocusGeneration)
     {
         DebugTsfIssue47(L"deferred-replay-focus-changed", FANY_IME_NO_REQUEST_ID,
@@ -2727,7 +2739,7 @@ void CMetasequoiaIME::_RetryDeferredKeyReplay(uint64_t replayToken)
 
 void CMetasequoiaIME::_ScheduleDeferredKeyDownDrain(bool allowSyncFallback)
 {
-    if (!_deferredKeyDowns.empty() && !_hasDeferredKeyInFlight && !_HasPendingApplicationKeyReplay() &&
+    if (!_deferredKeyDowns.empty() && !_hasDeferredKeyInFlight && !_wubiCommitOwner.active() && !_HasPendingApplicationKeyReplay() &&
         !_deferredKeyDrainPosted && _msgWndHandle &&
         IsWindow(_msgWndHandle))
     {
@@ -2838,7 +2850,7 @@ bool CMetasequoiaIME::_ResolveDeferredKeyClassification(uint64_t replayToken)
 void CMetasequoiaIME::_DrainOneDeferredKeyDown()
 {
     _deferredKeyDrainPosted = false;
-    if (_hasDeferredKeyInFlight || _HasPendingApplicationKeyReplay() || _deferredKeyDowns.empty() ||
+    if (_hasDeferredKeyInFlight || _wubiCommitOwner.active() || _HasPendingApplicationKeyReplay() || _deferredKeyDowns.empty() ||
         !Global::g_connected)
     {
         return;
@@ -3325,6 +3337,12 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
         // 每个键之前比较一次字段属性，变了就排在这个键前面报给 Server。
         _NoteFieldTraitsForServer();
         PerfTimer sendKeyEventTimer;
+        // 必须在 IPC 和可能重入的 COM 之前注册；worker 可能比本地编辑会话先到。
+        if (deferredReplayToken != 0 && KeystrokeState.Function == FUNCTION_INPUT &&
+            Global::InputModeScheme.load(std::memory_order_relaxed) == msime::windows::scheme::Wubi &&
+            _pCompositionProcessorEngine->GetHostEngineAdapter() &&
+            _pCompositionProcessorEngine->GetHostEngineAdapter()->valid())
+            _wubiCommitOwner.begin(deferredReplayToken, GetTickCount64());
         const KeyEventSendResult sendResult = SendKeyEventToUIProcess(&requestId);
         if (KeystrokeState.Function == FUNCTION_TOGGLE_CHARACTER_SET || KeystrokeState.Function == FUNCTION_TOGGLE_JAPANESE)
         {

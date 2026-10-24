@@ -1,5 +1,6 @@
 #pragma once
 #include "../HostFocusState.h"
+#include "../WubiCommitOwner.h"
 
 #include "KeyHandlerEditSession.h"
 #include "MetasequoiaIMEBaseStructure.h"
@@ -343,7 +344,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     HRESULT _SelectHighlightedHostCandidate(TfEditCookie ec, _In_ ITfContext *pContext,
                                             _In_opt_ const std::wstring *serverChoice = nullptr);
     HRESULT _ApplyHostCompositionResult(TfEditCookie ec, ITfContext *pContext,
-                                         const msime::tsf::EngineResult &result);
+                                         const msime::tsf::EngineResult &result, bool serverCommit = false);
     HRESULT _HandleCandidateConvert(TfEditCookie ec, _In_ ITfContext *pContext, uint64_t requestId,
                                     const std::wstring &prefetchedText);
     HRESULT _HandleCandidateArrowKey(TfEditCookie ec, _In_ ITfContext *pContext, _In_ KEYSTROKE_FUNCTION keyFunction,
@@ -394,6 +395,10 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
                                      _In_opt_ ITfContext *expectedContext) const;
     bool _IsDeferredApplicationTextCurrent(uint64_t replayToken, uint64_t focusGeneration, ITfContext *context,
                                             HWND foregroundWindow, uint64_t focusToken);
+    bool _IsWubiWorkerEditCurrent(uint64_t token, uint64_t generation, ITfContext *context) const;
+    bool _FinishWubiLocalEdit(uint64_t replayToken, bool applied);
+    void _FinishWubiWorkerEdit(uint64_t replayToken, bool applied);
+    void _PollWubiCommit();
     void _CompleteDeferredKeyReplay(uint64_t replayToken);
     void _RetryDeferredKeyReplay(uint64_t replayToken);
 
@@ -446,6 +451,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     bool _PostServerTextDelivery(UINT windowMessage, _In_z_ const WCHAR *text,
                                  uint64_t expectedFocus = 0, uint64_t expectedEpoch = 0);
     bool _TakeServerCandidateCommit(UINT token, _Out_ WorkerCandidateCommit &request);
+    bool _PeekServerCandidateCommit(UINT token, _Out_ WorkerCandidateCommit &request);
     void _ResetVoiceCompositionAssemble();
     void _AssembleVoiceCompositionFrame(const FanyImeNamedpipeDataToTsfWorkerThread &buf);
     void _DispatchServerText(WPARAM wParam, KEYSTROKE_FUNCTION function);
@@ -812,6 +818,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     UINT _pendingServerCandidateMsgType;
     std::wstring _pendingServerCandidateString;
     std::deque<CCandidateListUIPresenter *> _pendingCandidatePresenterCleanup;
+    msime::tsf::WubiCommitOwner _wubiCommitOwner;
     std::deque<DeferredKeyDown> _deferredKeyDowns;
     std::deque<DeferredKeyDown> _deferredAppliedPrefix;
     DeferredKeyDown _deferredKeyInFlight;

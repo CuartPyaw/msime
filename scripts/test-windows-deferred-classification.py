@@ -21,6 +21,7 @@ HARNESS = r'''
 #include <string_view>
 #include <vector>
 #include "InputSchemeTraits.h"
+#include "WubiCommitOwner.h"
 #include "SecondThirdCandidatePolicy.h"
 #include "WubiCandidateSelectionPolicy.h"
 #include "LocalModeKeyPolicy.h"
@@ -105,6 +106,7 @@ struct Engine {
 using CCompositionProcessorEngine = Engine;
 // 生产投影规则
 struct CMetasequoiaIME {
+    msime::tsf::WubiCommitOwner _wubiCommitOwner;
     Engine *_pCompositionProcessorEngine = nullptr;
     void *_pThreadMgr = reinterpret_cast<void *>(1);
     int _tfClientId = 1, _candidateMode = CANDIDATE_NONE;
@@ -162,6 +164,7 @@ struct CMetasequoiaIME {
     uint64_t _CaptureFocusSessionToken() const { return 11; }
     bool _IsFocusSessionCurrent(uint64_t, ITfContext * = nullptr) const { return true; }
     void _ClearDeferredKeyDowns() {
+        _wubiCommitOwner.clear();
         ++_deferredKeyFocusGeneration;
         for (auto &key : _deferredKeyDowns) key.context->Release();
         _deferredKeyDowns.clear();
@@ -226,6 +229,21 @@ struct Fixture {
     }
 };
 int main() {
+    {
+        Fixture f;
+        f.ime._wubiCommitOwner.begin(42, 1);
+        const auto refs = f.context.refs;
+        f.ime._DrainOneDeferredKeyDown();
+        check(f.ime._deferredKeyDowns.size() == 1 && !f.ime._hasDeferredKeyInFlight &&
+              f.context.refs == refs && f.ime.dispatched.empty(),
+              "active Wubi owner preserves the queued key and reference before classification");
+        f.ime._wubiCommitOwner.clear();
+        f.ime._DrainOneDeferredKeyDown();
+        f.ime._DrainOneDeferredKeyDown();
+        check(f.ime._deferredKeyDowns.empty() && f.ime.dispatched.size() == 1 &&
+              f.ime.completions == 1 && f.context.refs == 1,
+              "released Wubi owner permits the queued key to dispatch only once");
+    }
     {
         Fixture f;
         f.finishSelection(L"", false);
