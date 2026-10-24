@@ -684,6 +684,7 @@ function Assert-VoiceToggleRecorder($window, [IntPtr]$handle) {
     Start-Sleep -Milliseconds 150
     Save-Window $window 'voice-hotkey-cleared.png'
     Write-Host '语音原生录键、取消、固定键冲突、切页恢复与解绑通过'
+}
 function Assert-SentenceModelSettings($window, [string]$theme) {
     Open-Page $window 'typing'
     Select-PageTab $window 'input-tab-candidates' '语法模型'
