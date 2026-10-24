@@ -49,6 +49,7 @@ private:
   std::mutex mutex_, join_mutex_;
   std::condition_variable wake_;
   bool stopping_ = false;
+  bool wake_pending_ = false;
   std::thread worker_;
 };
 } // namespace msime::windows

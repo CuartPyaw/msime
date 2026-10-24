@@ -162,4 +162,28 @@ void preference_monitor_tests(const std::string &options,
                   std::chrono::seconds(2),
           "Monitor stop waited for poll interval");
   idle.stop();
+
+  // 用一分钟空闲间隔区分显式唤醒与正常轮询，不靠短间隔掩盖丢失通知。
+  document["revision"] = 5;
+  document["preferences"]["keybindings"]["toggle_japanese_ctrl_shift_j"] = true;
+  write(document.dump());
+  InputQueue awakened(gate, 1, 1, options);
+  std::atomic<uint64_t> awakened_revision{0};
+  PreferenceMonitor long_poll(
+      awakened, directory, std::chrono::seconds(60),
+      [&](const PreferenceSnapshot &snapshot) {
+        awakened_revision.store(snapshot.revision());
+      });
+  await([&] { return awakened.stats().completed >= 1; });
+  // 输入队列的屏障确认旧发布任务已完成，后续只能由这次写入与 wake 推进。
+  auto barrier = awakened.submit([](InputState &) {});
+  require(barrier && barrier->get() == InputTaskStatus::Completed,
+          "Explicit wake setup did not drain the initial publication");
+  document["revision"] = 6;
+  document["preferences"]["keybindings"]["toggle_japanese_ctrl_shift_j"] = false;
+  write(document.dump());
+  long_poll.wake();
+  await([&] { return awakened_revision.load() == 6; });
+  long_poll.stop();
+  awakened.stop();
 }
