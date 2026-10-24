@@ -27,6 +27,7 @@ final class OfflineVoiceDeviceCases {
     private final String scenario;
     private volatile Activity activity;
     private volatile Throwable failure;
+    private final java.util.Set<String> permissionNodes = new java.util.TreeSet<>();
     private final java.util.List<String> stages = new java.util.concurrent.CopyOnWriteArrayList<>();
 
     OfflineVoiceDeviceCases(Instrumentation instrumentation, String scenario) {
@@ -37,7 +38,7 @@ final class OfflineVoiceDeviceCases {
     void onCreated(Activity created) {
         if (!created.getClass().getName().equals("app.msime.android.OfflineVoiceRecognitionActivity")) return;
         activity = created;
-        if (scenario.equals("offline-asr")) {
+        if (scenario.equals("offline-asr") || scenario.equals("offline-no-model")) {
             try {
                 var field = created.getClass().getDeclaredField("recognizer");
                 field.setAccessible(true);
@@ -50,7 +51,7 @@ final class OfflineVoiceDeviceCases {
             }
         }
         if (!java.util.Set.of("offline-result", "offline-cancel", "offline-activity-result",
-                "offline-activity-cancel").contains(scenario)) return;
+                "offline-activity-cancel", "offline-repeat").contains(scenario)) return;
         try {
             if (scenario.startsWith("offline-activity-")) {
                 if (created.getCallingActivity() == null) throw new AssertionError("Caller identity missing");
@@ -58,7 +59,7 @@ final class OfflineVoiceDeviceCases {
             }
             var deliver = created.getClass().getDeclaredMethod("returnResult", String.class);
             deliver.setAccessible(true);
-            String text = scenario.equals("offline-result") || scenario.equals("offline-activity-result")
+            String text = scenario.equals("offline-result") || scenario.equals("offline-activity-result") || scenario.equals("offline-repeat")
                 ? "synthetic external transcript" : null;
             deliver.invoke(created, text);
             deliver.invoke(created, "synthetic late transcript");
@@ -72,8 +73,15 @@ final class OfflineVoiceDeviceCases {
         try {
             if (scenario.equals("offline-prepare")) prepareLocalModel();
             else if (scenario.equals("offline-capture-cancel")) captureCancellation();
+            else if (scenario.equals("offline-no-model")) noModelResult();
             else if (scenario.startsWith("offline-activity-")) activityResult();
-            else externalResult();
+            else if (scenario.equals("offline-repeat")) {
+                for (int request = 0; request < 3; request++) {
+                    activity = null;
+                    failure = null;
+                    externalResult();
+                }
+            } else externalResult();
             result.putString("stream", "Offline voice boundary passed: " + scenario);
             instrumentation.finish(Activity.RESULT_OK, result);
         } catch (Exception | AssertionError error) {
@@ -296,22 +304,72 @@ final class OfflineVoiceDeviceCases {
         }
     }
 
+    /** 只临时更改共享配置的模型选择，不删除已安装资源；恢复时保留其它设置的新改动。 */
+    private void noModelResult() throws Exception {
+        Context context = instrumentation.getTargetContext();
+        Activity home = instrumentation.startActivitySync(new Intent().setClassName(context,
+            "app.msime.android.home.HomeActivity").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        try {
+            java.io.File options = new java.io.File(context.getFilesDir(), "runtime-options.json");
+            await(options::isFile, "Native host did not prepare runtime options");
+            String directory = new org.json.JSONObject(new String(java.nio.file.Files.readAllBytes(options.toPath()),
+                java.nio.charset.StandardCharsets.UTF_8))
+                .getString("preferences_directory");
+            Class<?> client = context.getClassLoader().loadClass("app.msime.android.NativeClient");
+            var load = client.getMethod("loadPreferences", String.class);
+            var save = client.getMethod("savePreferences", String.class, long.class, String.class);
+            org.json.JSONObject loaded = new org.json.JSONObject((String) load.invoke(null, directory));
+            if (!loaded.optBoolean("ok")) throw new AssertionError("Shared preferences unavailable");
+            org.json.JSONObject snapshot = loaded.getJSONObject("value");
+            org.json.JSONObject voice = snapshot.getJSONObject("preferences").getJSONObject("voice_input");
+            String originalProvider = voice.getString("asr_provider");
+            String originalModel = voice.getString("asr_model_path");
+            voice.put("asr_provider", "local").put("asr_model_path", "");
+            org.json.JSONObject saved = new org.json.JSONObject((String) save.invoke(null, directory,
+                snapshot.getLong("revision"), snapshot.toString()));
+            if (!saved.optBoolean("ok")) throw new AssertionError("Synthetic model selection failed");
+            try {
+                externalResult();
+            } finally {
+                loaded = new org.json.JSONObject((String) load.invoke(null, directory));
+                if (!loaded.optBoolean("ok")) throw new AssertionError("Cannot load preferences for restoration");
+                snapshot = loaded.getJSONObject("value");
+                voice = snapshot.getJSONObject("preferences").getJSONObject("voice_input");
+                if (!"local".equals(voice.getString("asr_provider")) || !voice.getString("asr_model_path").isEmpty())
+                    throw new AssertionError("Concurrent model selection must not be overwritten");
+                voice.put("asr_provider", originalProvider).put("asr_model_path", originalModel);
+                saved = new org.json.JSONObject((String) save.invoke(null, directory,
+                    snapshot.getLong("revision"), snapshot.toString()));
+                if (!saved.optBoolean("ok")) throw new AssertionError("Model selection restoration failed");
+                loaded = new org.json.JSONObject((String) load.invoke(null, directory));
+                if (!loaded.optBoolean("ok")) throw new AssertionError("Cannot verify restored preferences");
+                voice = loaded.getJSONObject("value").getJSONObject("preferences").getJSONObject("voice_input");
+                if (!originalProvider.equals(voice.getString("asr_provider"))
+                        || !originalModel.equals(voice.getString("asr_model_path")))
+                    throw new AssertionError("Original model selection was not restored");
+            }
+        } finally {
+            instrumentation.runOnMainSync(home::finish);
+        }
+    }
+
     private void externalResult() throws Exception {
         Context context = instrumentation.getTargetContext();
-        if (scenario.equals("offline-permission-home") && context.checkSelfPermission(
+        if ((scenario.equals("offline-permission-home") || scenario.equals("offline-permission-deny")) && context.checkSelfPermission(
                 android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             throw new AssertionError("Revoke RECORD_AUDIO before testing permission-stage Home");
         }
-        if (scenario.equals("offline-permission-home")) {
+        if (scenario.equals("offline-permission-home") || scenario.equals("offline-permission-deny")) {
             var automation = instrumentation.getUiAutomation();
             var info = automation.getServiceInfo();
-            info.flags |= android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS;
+            info.flags |= android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+                | android.accessibilityservice.AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS;
             automation.setServiceInfo(info);
         }
         AtomicInteger deliveries = new AtomicInteger();
         AtomicReference<Intent> returned = new AtomicReference<>();
         AtomicInteger code = new AtomicInteger();
-        String action = context.getPackageName() + ".OFFLINE_SYNTHETIC_RESULT";
+        String action = context.getPackageName() + ".OFFLINE_SYNTHETIC_RESULT." + java.util.UUID.randomUUID();
         BroadcastReceiver receiver = new BroadcastReceiver() {
             @Override public void onReceive(Context ignored, Intent intent) {
                 code.set(getResultCode());
@@ -355,9 +413,55 @@ final class OfflineVoiceDeviceCases {
                     }
                 }
                 await(this::finished, "Home did not cancel permission-stage request");
+            } else if (scenario.equals("offline-permission-deny") || scenario.equals("offline-no-model")) {
+                try {
+                    if (scenario.equals("offline-permission-deny"))
+                        await(this::requestPermissionDenial, "System microphone deny button did not appear");
+                }
+                catch (AssertionError error) {
+                    throw new AssertionError(error.getMessage() + "; finished=" + finished()
+                        + "; permission window=" + permissionVisible() + "; system nodes=" + permissionNodes);
+                }
+                var failed = activity.getClass().getDeclaredField("failed");
+                failed.setAccessible(true);
+                AtomicBoolean visibleFailure = new AtomicBoolean();
+                await(() -> {
+                    instrumentation.runOnMainSync(() -> {
+                        try { visibleFailure.set(failed.getBoolean(activity)); }
+                        catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+                    });
+                    return visibleFailure.get();
+                }, "Permission denial did not show the product failure state");
+                instrumentation.runOnMainSync(() -> {
+                    try {
+                        var started = activity.getClass().getDeclaredField("started");
+                        var done = activity.getClass().getDeclaredField("done");
+                        var settings = activity.getClass().getDeclaredField("settings");
+                        var status = activity.getClass().getDeclaredField("status");
+                        for (var field : java.util.List.of(started, done, settings, status)) field.setAccessible(true);
+                        if (scenario.equals("offline-permission-deny") && context.checkSelfPermission(android.Manifest.permission.RECORD_AUDIO)
+                                == android.content.pm.PackageManager.PERMISSION_GRANTED)
+                            throw new AssertionError("System denial unexpectedly granted the microphone");
+                        if (scenario.equals("offline-permission-deny") && started.getBoolean(activity))
+                            throw new AssertionError("Recording started after denial");
+                        if (((android.widget.Button) done.get(activity)).isEnabled())
+                            throw new AssertionError("Denied request allows completion");
+                        if (!((android.view.View) settings.get(activity)).isShown())
+                            throw new AssertionError("Denied request has no settings entry");
+                        if (scenario.equals("offline-no-model") && !stages.isEmpty())
+                            throw new AssertionError("Unselected model reached the recognizer");
+                        String expected = scenario.equals("offline-no-model") ? "安装并选用模型" : "麦克风权限";
+                        if (!((android.widget.TextView) status.get(activity)).getText().toString().contains(expected))
+                            throw new AssertionError("Denied request has no permission explanation");
+                        if (deliveries.get() != 0 || finished())
+                            throw new AssertionError("Denial returned before the user cancelled");
+                        if (!clickCancel(activity.findViewById(android.R.id.content)))
+                            throw new AssertionError("Product cancel button unavailable");
+                    } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+                });
             } else if (scenario.equals("offline-asr")) {
                 finishSyntheticSpeech();
-            } else if (!scenario.equals("offline-result") && !scenario.equals("offline-cancel")) {
+            } else if (!scenario.equals("offline-result") && !scenario.equals("offline-cancel") && !scenario.equals("offline-repeat")) {
                 throw new AssertionError("Unknown offline scenario");
             }
             try {
@@ -370,7 +474,7 @@ final class OfflineVoiceDeviceCases {
             if (failure != null) throw new AssertionError("Activity callback failed", failure);
             if (deliveries.get() != 1) throw new AssertionError("Result delivered more than once");
             Intent data = returned.get();
-            boolean success = scenario.equals("offline-result") || scenario.equals("offline-asr");
+            boolean success = scenario.equals("offline-result") || scenario.equals("offline-asr") || scenario.equals("offline-repeat");
             if (code.get() != (success ? Activity.RESULT_OK : Activity.RESULT_CANCELED)) {
                 throw new AssertionError("Unexpected result code");
             }
@@ -438,6 +542,49 @@ final class OfflineVoiceDeviceCases {
                 throw new AssertionError(error);
             }
         });
+    }
+
+    private static boolean clickCancel(android.view.View view) {
+        if (view instanceof android.widget.Button button && "取消".contentEquals(button.getText())
+                && button.isShown() && button.isEnabled()) return button.performClick();
+        if (view instanceof android.view.ViewGroup group) {
+            for (int child = 0; child < group.getChildCount(); child++) {
+                if (clickCancel(group.getChildAt(child))) return true;
+            }
+        }
+        return false;
+    }
+
+    @SuppressWarnings("deprecation") // API 28 的辅助功能节点仍需显式回收。
+    private boolean requestPermissionDenial() {
+        var automation = instrumentation.getUiAutomation();
+        for (var window : automation.getWindows()) {
+            try {
+                if (requestPermissionDenialRoot(window.getRoot())) return true;
+            } finally { window.recycle(); }
+        }
+        return requestPermissionDenialRoot(automation.getRootInActiveWindow());
+    }
+
+    @SuppressWarnings("deprecation") // 只点击系统权限窗口的拒绝按钮，不调用产品权限回调。
+    private boolean requestPermissionDenialRoot(android.view.accessibility.AccessibilityNodeInfo node) {
+        if (node == null) return false;
+        try {
+            String owner = String.valueOf(node.getPackageName());
+            String id = node.getViewIdResourceName();
+            if ((owner.contains("permissioncontroller") || owner.contains("packageinstaller")) && id != null) {
+                permissionNodes.add(id + ":enabled=" + node.isEnabled() + ":clickable=" + node.isClickable());
+            }
+            if ((owner.contains("permissioncontroller") || owner.contains("packageinstaller"))
+                    && id != null && id.endsWith(":id/permission_deny_button")
+                    && node.isEnabled() && node.isClickable()) {
+                return node.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK);
+            }
+            for (int child = 0; child < node.getChildCount(); child++) {
+                if (requestPermissionDenialRoot(node.getChild(child))) return true;
+            }
+            return false;
+        } finally { node.recycle(); }
     }
 
     private boolean finished() {
@@ -546,7 +693,11 @@ final class OfflineVoiceDeviceCases {
 
     private static void await(java.util.function.BooleanSupplier condition, String message) {
         long deadline = SystemClock.uptimeMillis() + 10000;
-        while (!condition.getAsBoolean() && SystemClock.uptimeMillis() < deadline) SystemClock.sleep(25);
-        if (!condition.getAsBoolean()) throw new AssertionError(message);
+        // 条件可能执行一次系统点击；成功后立即返回，不能为最终断言再次触发它。
+        for (;;) {
+            if (condition.getAsBoolean()) return;
+            if (SystemClock.uptimeMillis() >= deadline) throw new AssertionError(message);
+            SystemClock.sleep(25);
+        }
     }
 }
