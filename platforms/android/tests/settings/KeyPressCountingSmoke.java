@@ -21,13 +21,13 @@ public final class KeyPressCountingSmoke {
     }
 
     private static void ids() {
-        // 与 crates/client-services/src/typing_statistics.rs 的 KEY_IDS 是同样的 141 个 id。
-        check(KeyPressIds.KEY_IDS.size() == 141, "the whitelist has the store's 141 ids");
-        check(new HashSet<>(KeyPressIds.KEY_IDS).size() == 141, "the whitelist has no duplicate");
+        // 与 crates/client-services/src/typing_statistics.rs 的 KEY_IDS 是同样的 159 个 id。
+        check(KeyPressIds.KEY_IDS.size() == 159, "the whitelist has the store's 159 ids");
+        check(new HashSet<>(KeyPressIds.KEY_IDS).size() == 159, "the whitelist has no duplicate");
         // 14 键的十四个键按键面字母命名，与 Rust 的 KEY_IDS 末尾逐字相同。
         check(KeyPressIds.KEY_IDS.subList(127, 141).equals(List.of("FourteenQW", "FourteenER", "FourteenTY",
             "FourteenUI", "FourteenOP", "FourteenAS", "FourteenDF", "FourteenGH", "FourteenJK", "FourteenL",
-            "FourteenZX", "FourteenCV", "FourteenBN", "FourteenM")), "the fourteen-key ids close the whitelist");
+            "FourteenZX", "FourteenCV", "FourteenBN", "FourteenM")), "the fourteen-key ids keep their original positions");
         check(KeyPressIds.isKnown("Nine0") && KeyPressIds.isKnown("SoftVoice"), "soft ids are known");
         check(!KeyPressIds.isKnown("KeyAA") && !KeyPressIds.isKnown(null) && !KeyPressIds.isKnown(""),
             "anything else is not");

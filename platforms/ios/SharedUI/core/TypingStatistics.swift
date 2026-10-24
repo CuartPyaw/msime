@@ -334,9 +334,11 @@ enum TypingKeyID {
     let nineKey: [String] = (0...9).map { "Nine\($0)" }
     // 全拼 14 键的各键，按键面上的字母命名，与 client-services 的 `KEY_IDS` 逐字一致。
     let fourteenKey: [String] = ["QW", "ER", "TY", "UI", "OP", "AS", "DF", "GH", "JK", "L", "ZX", "CV", "BN", "M"].map { "Fourteen\($0)" }
+    // 保留 Android 双拼 18 键的共享统计，当前宿主不显示该布局。
+    let eighteenKey: [String] = ["Q", "WE", "RT", "Y", "U", "IO", "P", "A", "SD", "FG", "H", "JK", "L", "Z", "XC", "V", "BN", "M"].map { "Eighteen\($0)" }
     let soft: [String] = ["SoftPunctuation", "SoftSymbol", "SoftLayer", "SoftLanguage", "SoftGlobe", "SoftEmoji", "SoftVoice"]
     var keys: [String] = letters
-    for part in [digits, editing, functionKeys, numpadDigits, numpad, nineKey, soft, fourteenKey] {
+    for part in [digits, editing, functionKeys, numpadDigits, numpad, nineKey, soft, fourteenKey, eighteenKey] {
       keys += part
     }
     return keys
@@ -425,6 +427,7 @@ enum TypingKeyID {
     if id.hasPrefix("Key") { return String(id.dropFirst(3)) }
     if id.hasPrefix("Digit") { return String(id.dropFirst(5)) }
     if id.hasPrefix("Nine") { return "九键 \(id.dropFirst(4))" }
+    if id.hasPrefix("Eighteen") { return "18 键 \(id.dropFirst(8))" }
     if id.hasPrefix("Fourteen") { return "14 键 \(id.dropFirst(8))" }
     return id
   }

@@ -1339,7 +1339,7 @@ impl<E: InputEngine> Runtime<E> {
         self.engine.pending_suffix()
     }
 
-    /// 换触屏的组码网格。九键要求全拼或注音，全拼 14 键和九键双拼要求全拼，双拼 14 键要求双拼；方案不符报 `InvalidNineKeyScheme`，组字中切换报 `CompositionActive`。
+    /// 换触屏的组码网格。九键要求全拼或注音，全拼 14 键和九键双拼要求全拼，双拼 14 键与 18 键要求双拼；方案不符报 `InvalidNineKeyScheme`，组字中切换报 `CompositionActive`。
     pub fn set_key_grid(&mut self, grid: Option<KeyGrid>) -> Result<(), RuntimeError> {
         let scheme = scheme_type(self.cached.scheme);
         let supported = match grid {
@@ -1348,7 +1348,9 @@ impl<E: InputEngine> Runtime<E> {
             Some(KeyGrid::FourteenKey | KeyGrid::NineKeyShuangpin(_)) => {
                 scheme == Some(SchemeType::Quanpin)
             }
-            Some(KeyGrid::FourteenKeyShuangpin(_)) => scheme == Some(SchemeType::Shuangpin),
+            Some(KeyGrid::FourteenKeyShuangpin(_) | KeyGrid::EighteenKeyShuangpin(_)) => {
+                scheme == Some(SchemeType::Shuangpin)
+            }
         };
         if !supported {
             return Err(RuntimeError::InvalidNineKeyScheme);
@@ -2027,10 +2029,14 @@ impl<E: InputEngine> Runtime<E> {
         // consumed, with its candidates, and the caret at its end.
         self.engine.command(Command::Cancel)?;
         for byte in selection.reading.bytes() {
-            // 14 键的组码只认 `grid_key`；分词键 `'` 和九键的数字本来就从 `character` 进。
+            // 字母网格的组码只认 `grid_key`；分词键 `'` 和九键的数字本来就从 `character` 进。
             if matches!(
                 selection.grid,
-                Some(KeyGrid::FourteenKey | KeyGrid::FourteenKeyShuangpin(_))
+                Some(
+                    KeyGrid::FourteenKey
+                        | KeyGrid::FourteenKeyShuangpin(_)
+                        | KeyGrid::EighteenKeyShuangpin(_)
+                )
             ) && byte != b'\''
             {
                 self.engine.grid_key(byte)?;
@@ -3396,6 +3402,7 @@ fn key_grid_name(grid: Option<KeyGrid>) -> &'static str {
         Some(KeyGrid::NineKey) => "nine_key",
         Some(KeyGrid::FourteenKey | KeyGrid::FourteenKeyShuangpin(_)) => "fourteen_key",
         Some(KeyGrid::NineKeyShuangpin(_)) => "nine_key_shuangpin",
+        Some(KeyGrid::EighteenKeyShuangpin(_)) => "eighteen_key",
     }
 }
 

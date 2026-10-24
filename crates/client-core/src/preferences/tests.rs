@@ -5,6 +5,24 @@
 use super::*;
 
 #[test]
+fn eighteen_key_shuangpin_layout_persists_with_the_selected_profile() {
+    let mut document = serde_json::to_value(Preferences::default()).unwrap();
+    document["touch_shuangpin_layout"] = "eighteen_key".into();
+    document["shuangpin_profile"] = "microsoft".into();
+    document["touch_keyboard_layout"] = "nine_key".into();
+    let configured: Preferences =
+        serde_json::from_value(document).expect("共享偏好必须接受 18 键双拼布局");
+    let directory = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(directory.path());
+    store.save(0, configured).unwrap();
+    let loaded = store.load().unwrap().preferences;
+    let persisted = serde_json::to_value(&loaded).unwrap();
+    assert_eq!(persisted["touch_shuangpin_layout"], "eighteen_key");
+    assert_eq!(loaded.shuangpin_profile, ShuangpinProfile::Microsoft);
+    assert_eq!(loaded.touch_keyboard_layout, TouchKeyboardLayout::NineKey);
+}
+
+#[test]
 fn touch_shuangpin_layout_defaults_persists_and_rejects_unsupported_layouts() {
     let defaults = Preferences::default();
     let legacy = serde_json::to_value(&defaults).unwrap();
@@ -2845,6 +2863,7 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
             symbols: true,
             quick_phrase: true,
             quick_phrase_frequency: true,
+            ..MixedInputPreferences::default()
         }
     );
     fs::write(store.path(), &bytes).unwrap();
@@ -2859,6 +2878,7 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
                 quick_phrase: true,
                 quick_phrase_frequency: true,
                 minimum_prefix: mask % 8 + 1,
+                ..MixedInputPreferences::default()
             },
             ..Preferences::default()
         };

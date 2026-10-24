@@ -3142,7 +3142,8 @@ public final class MSIMEInputService extends InputMethodService {
             phrasePrefix, typed,
             drawn ? InputViewValuePolicy.textOr(next, "display_reading", reading) : reading);
         // 九键的 editing_text 是按下的数字键（64426），不能写进输入框：写的是引擎给的拼音读音 `nine_key_reading`（ni'hao），即候选栏原来画的那段读音。光标移走、不经引擎结束组字区时（drawn 为假）不留下任何文字，与组字不进输入框时相同。注音 9 键例外：上面已经按大千的规则标记 reading（转换结果加未完成的数字），照常留在输入框里。14 键的 editing_text 是组码字母（bugao），不写进输入框，读音画在候选栏上；英文和本地模式画的是 26 键，照常标记。
-        boolean fourteenKeyGrid = !nextDedicatedEnglish && touchLayout(next) == FOURTEEN_KEY_LAYOUT;
+        boolean fourteenKeyGrid = !nextDedicatedEnglish && (touchLayout(next) == FOURTEEN_KEY_LAYOUT
+            || touchLayout(next) == KeyboardLayout.EIGHTEEN_KEY_LAYOUT);
         // 九键双拼的 editing_text 也是数字（`nine_key` 在它下面为假），同样写读音。
         boolean shuangpinGrid = !nextDedicatedEnglish && nineKeyShuangpinGrid(next);
         if (ZhuyinInputPolicy.hidesNineKeyComposing(InputViewValuePolicy.booleanValue(
@@ -4877,15 +4878,17 @@ public final class MSIMEInputService extends InputMethodService {
 
     private static int touchLayout(JSONObject value) {
         if (value == null) return STANDARD_TOUCH_LAYOUT;
-        // 14 键看引擎的 `key_grid`，不看 `nine_key`（14 键下它是假）；本地模式要逐个确定的字母，这时回落 26 键。
+        // 字母网格看引擎的 `key_grid`，不看 `nine_key`；本地模式要逐个确定的字母，这时回落 26 键。
         boolean fourteenKey = "fourteen_key".equals(InputViewValuePolicy.textOr(value, "key_grid", "none"))
+            && "none".equals(InputViewValuePolicy.textOr(value, "local_mode", "none"));
+        boolean eighteenKey = "eighteen_key".equals(InputViewValuePolicy.textOr(value, "key_grid", "none"))
             && "none".equals(InputViewValuePolicy.textOr(value, "local_mode", "none"));
         // 九键双拼画在九键的键面上（键面换成声母和韵母，见 ImeLayoutRows），`nine_key` 在它下面为假，要看 `key_grid`。本地模式要逐个确定的字母，与 14 键一样回落 26 键。
         boolean nineKeyShuangpin = nineKeyShuangpinGrid(value)
             && "none".equals(InputViewValuePolicy.textOr(value, "local_mode", "none"));
         return KeyboardLayout.resolveTouchLayout(
             "handwriting".equals(InputViewValuePolicy.textOr(value, "touch_keyboard_layout", "")),
-            InputViewValuePolicy.booleanValue(value, "nine_key", false) || nineKeyShuangpin, fourteenKey,
+            InputViewValuePolicy.booleanValue(value, "nine_key", false) || nineKeyShuangpin, fourteenKey, eighteenKey,
             InputViewValuePolicy.scheme(value, -1),
             InputViewValuePolicy.textOr(value, "touch_keyboard_layout", ""));
     }
