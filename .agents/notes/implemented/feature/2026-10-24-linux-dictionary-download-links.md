@@ -21,7 +21,7 @@ Status: implemented
 
 真实安装布局的 CLI 回归在固定基点因不识别 `--list-downloads` 失败，改后通过；覆盖 full/五笔版本、已有状态、禁网与禁止启动子进程、镜像开关、缺少地址和锁文件、无目录写入及原 SHA-256 校验拒绝。首次配置页 20 项测试和 TypeScript 类型检查通过；新增用例覆盖按需读取与缓存、复制原地址/镜像/目录、失败重试和继续旧配置流程。
 
-安装器定位、注册、下载上限、HTTP 升级与六版本渲染回归通过；前端构建、定向 lint/格式和笔记校验通过。完整 `bash scripts/verify-local.sh --quick` 在 Windows 复用已有标准缓存执行，退出 1：18 个失败阶段均在前一轮的 19 项集合内，30 个可移植失败文件与前一轮相同；原生 Windows 全量工程未配置而跳过，不能把少一个失败当成修复。Linux 两项因无 Docker 跳过；真正 Linux 设置应用的 Rust 编译与单测，以及原生首次配置界面验收仍缺。脚本与 jsdom 结果不能替代这些验证。
+安装器定位、注册、下载上限、HTTP 升级与六版本渲染回归通过；前端构建、定向 lint/格式和笔记校验通过。完整 `bash scripts/verify-local.sh --quick` 在 Windows 复用已有标准缓存执行，退出 1：18 个失败阶段均在前一轮的 19 项集合内，30 个可移植失败文件与前一轮相同；原生 Windows 全量工程未配置而跳过，不能把少一个失败当成修复。Linux 两项在该机因无 Docker 跳过。随后代码提交 `3e16e69103` 的 [Linux 设置应用 CI](https://github.com/metasequoiaime/msime/actions/runs/40062380152/job/120778519839) 完成真正 Linux 环境的全目标 clippy 和 337 项单测，新加入的清单成功读取与失败拒绝测试都通过。原生 Linux 首次配置界面验收仍缺；这些结果不能替代宿主窗口验收。
 
 ## Consequences
 
