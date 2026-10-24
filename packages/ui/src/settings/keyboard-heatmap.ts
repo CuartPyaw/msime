@@ -61,7 +61,12 @@ export function scopedKeyCounts(
 
 /** 只在屏幕键盘上才有的键：九宫格、14 键和其他触屏键。 */
 function softKey(code: string): boolean {
-  return code.startsWith("Nine") || code.startsWith("Fourteen") || code.startsWith("Soft");
+  return (
+    code.startsWith("Nine") ||
+    code.startsWith("Fourteen") ||
+    code.startsWith("Eighteen") ||
+    code.startsWith("Soft")
+  );
 }
 
 /**
@@ -153,6 +158,8 @@ export function keyLabel(code: string, platform?: string): string {
   // 全拼 14 键按键面字母命名（`FourteenQW`、`FourteenL`），与 Android `KeyPressIds.label`、iOS `TypingKeyID` 一样写成「14 键 QW」。
   match = /^Fourteen([A-Z]{1,2})$/.exec(code);
   if (match) return `14 键 ${match[1]}`;
+  match = /^Eighteen([A-Z]{1,2})$/.exec(code);
+  if (match) return `18 键 ${match[1]}`;
   match = /^(Control|Alt|Meta)(Left|Right)$/.exec(code);
   if (match) {
     const side = match[2] === "Left" ? "左" : "右";

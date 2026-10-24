@@ -3397,6 +3397,11 @@ fn layout_key_grid_for(
     match (preferences.touch_keyboard_layout, scheme) {
         (TouchKeyboardLayout::NineKey, Some(SchemeType::Quanpin)) => Some(KeyGrid::NineKey),
         (TouchKeyboardLayout::FourteenKey, Some(SchemeType::Quanpin)) => Some(KeyGrid::FourteenKey),
+        (TouchKeyboardLayout::EighteenKey, Some(SchemeType::Quanpin))
+            if platform == HostPlatform::Android =>
+        {
+            Some(KeyGrid::EighteenKey)
+        }
         (TouchKeyboardLayout::NineKeyShuangpin, Some(SchemeType::Quanpin)) => {
             Some(nine_key_shuangpin_grid(preferences).0)
         }

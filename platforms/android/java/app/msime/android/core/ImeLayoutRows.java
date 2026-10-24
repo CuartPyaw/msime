@@ -1511,6 +1511,7 @@ final class ImeLayoutRows {
         // 注音 9 键的选择条列出当前要钉住的那个音节的各个读音（ㄋㄧˇ、ㄌㄧˇ），拼音九键的列出拼音。
         boolean zhuyin = layout == KeyboardLayout.ZHUYIN_NINE_KEY_LAYOUT;
         boolean fourteenKey = layout == MSIMEInputService.FOURTEEN_KEY_LAYOUT;
+        boolean eighteenKey = layout == KeyboardLayout.EIGHTEEN_KEY_LAYOUT;
         Spellings spellings = Spellings.of(s.view);
         boolean visible = !suppressed && s.keyboardLayer == KeyboardLayout.Layer.LETTERS
             && (MSIMEInputService.drawsKeyGrid(layout) || zhuyin)
@@ -1523,7 +1524,7 @@ final class ImeLayoutRows {
             else ViewPolicy.show(nineKeyPunctuation);
         }
         s.nineKeySpellingScroll.setContentDescription(zhuyin ? "注音读音选择"
-            : fourteenKey ? "14 键拼音选择" : "九键拼音选择");
+            : fourteenKey ? "14 键拼音选择" : eighteenKey ? "18 键拼音选择" : "九键拼音选择");
         if (!visible) {
             s.nineKeySpellingIndices = java.util.List.of();
             s.nineKeySpellingGeneration = -1;
