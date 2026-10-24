@@ -9508,8 +9508,6 @@ public final class MSIMEInputService extends InputMethodService {
         return android.os.Build.VERSION.SDK_INT == 28;
     }
 
-    /** 全文预览使用透明全高窗口；键区保留原高，应用仍只为停靠键盘让出空间。 */
-    /** 全文预览临时扩大透明窗口；键区保留原高，应用仍只为停靠键盘让出空间。 */
     /** 两种编辑预览各自持有透明父窗口，只有最后一个结束时才恢复停靠窗口。 */
     boolean editorPreviewExpanded() {
         return clipboardPreviewExpanded || textTrackpadPreviewExpanded;
