@@ -2090,6 +2090,133 @@ fn end_trigger_modes(
     }
 }
 
+#[test]
+fn shuangpin_manual_tab_filters_only_after_tab() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.shuangpin_profile = ShuangpinProfileKind::Xiaohe;
+        options.shuangpin_helpcode_modes.manual_tab = true;
+        options.helpcode_table = Some(Arc::new(crate::helpcode::HelpcodeKeymap::from_codes(
+            [
+                ("你".to_owned(), "na".to_owned()),
+                ("拟".to_owned(), "xq".to_owned()),
+            ]
+            .into_iter()
+            .collect(),
+        )));
+    });
+    assert!(!session.character(b'\t', false).handled);
+    type_text(&mut session, "nihc");
+    assert_eq!(words(&session)[0], "你好");
+    assert!(session.character(b'\t', false).handled);
+    assert_eq!(session.snapshot().editing_text, "nihc|");
+    type_text(&mut session, "x");
+    assert_eq!(words(&session)[0], "拟好");
+    assert_eq!(session.command(Command::Backspace).commit, None);
+    assert!(session.input.engine.request().end_helpcodes.is_empty());
+    session.command(Command::Backspace);
+    assert_eq!(session.snapshot().editing_text, "nihc");
+    type_text(&mut session, "x");
+    assert!(session.input.engine.request().end_helpcodes.is_empty());
+    assert!(!session.input.has_active_helpcode());
+    session.command(Command::Cancel);
+    session
+        .input
+        .engine
+        .set_shuangpin_helpcode_modes(crate::types::ShuangpinHelpcodeModes::default());
+    type_text(&mut session, "nihcx");
+    assert!(session.input.has_active_helpcode());
+}
+
+#[test]
+fn shuangpin_manual_tab_preserves_microsoft_pairs() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    for (typed, segmentation) in [
+        ("veyige", "zhe'yi'ge"),
+        ("uurufa", "shu'ru'fa"),
+        ("vijxuuru", "zhi'jie'shu'ru"),
+    ] {
+        let mut session = fixture.session_with(|options| {
+            options.scheme = SchemeType::Shuangpin;
+            options.shuangpin_profile = ShuangpinProfileKind::Microsoft;
+            options.shuangpin_helpcode_modes.manual_tab = true;
+        });
+        type_text(&mut session, typed);
+        assert_eq!(
+            session.snapshot().normalized_segmentation,
+            segmentation,
+            "{typed}"
+        );
+        assert!(!session.input.has_active_helpcode(), "{typed}");
+        assert!(session.character(b'\t', false).handled, "{typed}");
+    }
+}
+
+#[test]
+fn shuangpin_manual_tab_owns_only_complete_normal_composition() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    for (scheme, enabled, manual, typed, accepts) in [
+        (SchemeType::Shuangpin, true, true, "", false),
+        (SchemeType::Shuangpin, true, true, "n", false),
+        (SchemeType::Shuangpin, true, true, "nihc", true),
+        (SchemeType::Shuangpin, false, true, "nihc", false),
+        (SchemeType::Shuangpin, true, false, "nihc", false),
+        (SchemeType::Quanpin, true, true, "nihao", false),
+    ] {
+        let mut session = fixture.session_with(|options| {
+            options.scheme = scheme;
+            options.helpcode = enabled;
+            options.shuangpin_helpcode_modes.manual_tab = manual;
+        });
+        type_text(&mut session, typed);
+        assert_eq!(session.snapshot().spelling_symbols.contains('\t'), accepts);
+        assert_eq!(session.character(b'\t', false).handled, accepts);
+    }
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.helpcode_trigger_key = Some(b'=');
+        options.shuangpin_helpcode_modes.manual_tab = true;
+    });
+    type_text(&mut session, "nihc");
+    assert!(!session.snapshot().spelling_symbols.contains('='));
+    assert!(!session.character(b'=', false).handled);
+    session.command(Command::MoveLeft);
+    assert!(!session.snapshot().spelling_symbols.contains('\t'));
+    session.command(Command::MoveEnd);
+    assert!(session.character(b'\t', false).handled);
+    assert!(!session.snapshot().spelling_symbols.contains('\t'));
+    type_text(&mut session, "na");
+    let result = session.finish(0);
+    let commit = result.commit.unwrap();
+    assert!(!commit.contains(['\t', '|']));
+    session.set_dedicated_english(true);
+    type_text(&mut session, "nihc");
+    assert!(!session.snapshot().spelling_symbols.contains('\t'));
+    session.character(b'\t', false);
+    assert_eq!(session.snapshot().editing_text, "nihc");
+}
+
+#[test]
+fn shuangpin_manual_tab_raw_commits_omit_internal_codes() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    for finish in [false, true] {
+        let mut session = fixture.session_with(|options| {
+            options.scheme = SchemeType::Shuangpin;
+            options.shuangpin_helpcode_modes.manual_tab = true;
+        });
+        type_text(&mut session, "nihc");
+        assert!(session.character(b'\t', false).handled);
+        type_text(&mut session, "na");
+        let result = if finish {
+            session.finish(usize::MAX)
+        } else {
+            session.command(Command::CommitRaw)
+        };
+        assert_eq!(result.commit.as_deref(), Some("nihc"));
+    }
+}
+
 /// 末尾间接触发（`trigger_semicolon`）：开关开着时 `;` 在输入串里记成末尾段 `|`，一码重排、
 /// 两码筛选；关着时 `;` 走原路径（小鹤双拼不用这个键，直接还给宿主）。
 #[test]
@@ -4528,6 +4655,48 @@ fn repeated_dedicated_english_preserves_english_t9_composition() {
     session.set_dedicated_english(true);
     assert!(!session.grid_composing());
     assert!(session.snapshot().preedit.is_empty());
+}
+
+#[test]
+fn fourteen_key_shuangpin_separates_touch_groups_from_hardware_letters() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.shuangpin_profile = ShuangpinProfileKind::Xiaohe;
+    });
+    let table = crate::nine_key_shuangpin::resolve_fourteen_key_shuangpin(
+        ShuangpinProfileKind::Xiaohe,
+        None,
+    )
+    .unwrap();
+    session.set_key_grid(Some(KeyGrid::FourteenKeyShuangpin(table)));
+    type_text(&mut session, "nihc");
+    assert!(!session.grid_composing());
+    assert!(!session.grid_key(b'n').handled);
+    assert_eq!(
+        select_word(&mut session, "你好").commit.as_deref(),
+        Some("你好")
+    );
+    for key in *b"nihc" {
+        assert!(session.grid_key(key).handled);
+    }
+    assert!(session.grid_composing());
+    assert_eq!(session.snapshot().editing_text, "bugc");
+    assert_eq!(session.snapshot().scheme, SchemeType::Shuangpin);
+    assert!(!session.character(b'q', false).handled);
+    assert!(words(&session).contains(&"你好".to_owned()));
+    assert_eq!(
+        select_word(&mut session, "你好").commit.as_deref(),
+        Some("你好")
+    );
+    session.set_dedicated_english(true);
+    assert!(!session.grid_key(b'n').handled);
+    session.set_dedicated_english(false);
+    assert!(session.grid_key(b'n').handled);
+    session.command(Command::Cancel);
+    let mut quanpin = fixture.session();
+    quanpin.set_key_grid(Some(KeyGrid::FourteenKeyShuangpin(table)));
+    assert!(!quanpin.grid_key(b'n').handled);
 }
 
 /// 14 键：组码只从 `grid_key` 进九宫格，组里任一字母都归成首字母；硬件键盘的字母照常走全拼，九宫格组字中不处理。

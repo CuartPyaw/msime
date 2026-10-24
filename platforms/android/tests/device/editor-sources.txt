@@ -11,6 +11,7 @@ platforms/android/tests/device/keyboard/EnglishSuggestionPendingChecks.java
 platforms/android/tests/device/core/DeviceSmoke.java
 platforms/android/tests/device/core/PinyinStartupDeviceSmoke.java
 platforms/android/tests/device/core/ImageClipProvider.java
+platforms/android/tests/device/core/EditorProbeProvider.java
 platforms/android/tests/device/clipboard/ClipboardImageDeviceSmoke.java
 platforms/android/tests/device/candidate/CandidatePanelDeviceSmoke.java
 platforms/android/tests/device/candidate/CandidateCanvasDeviceSmoke.java
@@ -48,6 +49,7 @@ platforms/android/tests/device/candidate/CandidateGlossDeviceSmoke.java
 platforms/android/tests/device/keyboard/NineKeyEnglishDeviceSmoke.java
 platforms/android/tests/device/keyboard/NineKeyPanelDeviceSmoke.java
 platforms/android/tests/device/keyboard/FourteenKeyDeviceSmoke.java
+platforms/android/tests/device/keyboard/FourteenKeyShuangpinDeviceChecks.java
 platforms/android/tests/device/keyboard/NumberPadDeviceSmoke.java
 platforms/android/tests/device/keyboard/NineKeyShuangpinDeviceSmoke.java
 platforms/android/tests/device/keyboard/ShuangpinKeyFaceChecks.java
@@ -234,3 +236,5 @@ platforms/android/tests/device/keyboard/ToolbarHistoryDeviceChecks.java
 platforms/android/tests/device/keyboard/PortraitSplitDeviceChecks.java
 platforms/android/tests/device/keyboard/KeyboardFeedbackDeviceChecks.java
 platforms/android/tests/device/candidate/RelativeDateDeviceSmoke.java
+
+platforms/android/tests/device/clipboard/ClipboardCategoriesDeviceSmoke.java

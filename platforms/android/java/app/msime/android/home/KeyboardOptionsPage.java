@@ -201,11 +201,13 @@ public class KeyboardOptionsPage extends ReloadingDetailPage {
         GroupCard gestures = GroupCard.add(sectionColumn(target, "手势"), "手势");
         boolean swipeSymbols = settings.bool(AndroidLocalSettings.SWIPE_DOWN_SYMBOLS);
         gestures.toggle("滑动输入符号", "沿设定方向滑动输入角标，中文时反方向打开字母与符号选项；关闭后仍可长按", swipeSymbols,
-            checked -> saveLocalSetting(AndroidLocalSettings.SWIPE_DOWN_SYMBOLS, checked));
+            checked -> KeyboardSheets.saveLocal(this, AndroidLocalSettings.SWIPE_DOWN_SYMBOLS, checked,
+                this::reload, this::reload));
         String swipeDirection = settings.choice(AndroidLocalSettings.SWIPE_SYMBOLS_DIRECTION);
-        GroupCard.Row directionRow = gestures.nav("滑动方向", "该方向直接输入角标，中文时反方向打开选项；关闭滑动输入符号后两种滑动都不生效",
-            swipeDirectionLabel(swipeDirection), () -> pickSwipeDirection(swipeDirection));
-        directionRow.setEnabled(swipeSymbols);
+        GroupCard.Row[] directionRow = new GroupCard.Row[1];
+        directionRow[0] = gestures.nav("滑动方向", "该方向直接输入角标，中文时反方向打开选项；关闭滑动输入符号后两种滑动都不生效",
+            swipeDirectionLabel(swipeDirection), () -> pickSwipeDirection(swipeDirection, directionRow[0]));
+        directionRow[0].setEnabled(swipeSymbols);
         // 九键的滑动单独一项、默认关闭（#5580）：九键原来没有滑动，和 26 键共用上面那个默认开着的开关会改变老用户的点按。
         if (quanpinNineKey) {
             String nineKeySwipe = settings.choice(AndroidLocalSettings.NINE_KEY_SWIPE);
@@ -260,6 +262,8 @@ public class KeyboardOptionsPage extends ReloadingDetailPage {
         String columns = settings.choice(AndroidLocalSettings.CLIPBOARD_COLUMNS);
         clipboard.nav("排列", "剪贴板面板里一行显示几条记录", clipboardColumnsLabel(columns),
             () -> pickClipboardColumns(columns));
+        clipboard.nav("剪贴板分类", "自定义分类名称，在键盘中手动移动记录", "管理",
+            () -> SettingsNavigator.open(requireContext(), PageId.CLIPBOARD_CATEGORIES, null));
         int historyLimit = ClipboardHistoryPolicy.limit(preferences);
         clipboard.nav("历史记录上限", "达到上限后，最旧的未固定记录会被新记录替换",
             historyLimit + " 条", () -> pickClipboardLimit(historyLimit), true);
@@ -409,11 +413,15 @@ public class KeyboardOptionsPage extends ReloadingDetailPage {
         });
     }
 
-    private void pickSwipeDirection(String selected) {
+    private void pickSwipeDirection(String selected, GroupCard.Row row) {
         OptionSheet sheet = new OptionSheet(requireContext(), "滑动方向", null);
         for (String value : new String[] {SwipeHintPolicy.DOWN, SwipeHintPolicy.UP}) {
             sheet.option(swipeDirectionLabel(value), value.equals(selected),
-                () -> saveLocalSetting(AndroidLocalSettings.SWIPE_SYMBOLS_DIRECTION, value));
+                () -> {
+                    row.setValue(swipeDirectionLabel(value));
+                    KeyboardSheets.saveLocal(this, AndroidLocalSettings.SWIPE_SYMBOLS_DIRECTION, value,
+                        this::reload, this::reload);
+                });
         }
         sheet.show();
     }

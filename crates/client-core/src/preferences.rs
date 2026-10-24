@@ -80,6 +80,21 @@ pub enum TouchKeyboardLayout {
     NineKeyShuangpin,
 }
 
+/// 触屏双拼的字母键布局；与全拼的布局独立保存，切换方案后仍保留选择。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TouchShuangpinLayout {
+    #[default]
+    TwentySixKey,
+    FourteenKey,
+}
+
+impl TouchShuangpinLayout {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// 触屏九宫格数字层的排列。桌面宿主原样保留、不使用。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -1148,6 +1163,9 @@ pub struct Preferences {
     /// Linux 聚焦输入框时显示当前中英文状态，与切换提示独立。新装与缺字段的旧文档默认关闭；其他宿主保留但不使用。
     #[serde(default)]
     pub input_mode_focus_hud: bool,
+    /// Linux 允许屏幕角落的附加模式提示；关闭后保留光标旁提示和其他位置的产品标志。缺省开启以兼容旧配置。
+    #[serde(default = "enabled_by_default")]
+    pub input_mode_corner_hud: bool,
     /// 在 macOS 菜单栏放一个状态项，常驻显示当前输入模式（中/双/五/日……，英文时为「英」），不需要把「英」加成系统输入源。默认关闭；只有 macOS 宿主画它（见 `HostCapabilities::input_mode_status_item`），其他宿主保留这个偏好但不画。
     #[serde(default)]
     pub input_mode_status_item: bool,
@@ -1192,6 +1210,9 @@ pub struct Preferences {
     /// Android 大屏竖屏也使用分离键盘；还需宿主的分离主开关开启，默认关闭。其他宿主原样保留。
     #[serde(default)]
     pub touch_keyboard_split_portrait: bool,
+    /// Android 双拼键盘的 26 / 14 键选择；默认 26 键，其他宿主保留该字段。
+    #[serde(default, skip_serializing_if = "TouchShuangpinLayout::is_default")]
+    pub touch_shuangpin_layout: TouchShuangpinLayout,
     /// 触屏键盘列出哪些方案、选中哪一个；桌面宿主原样保留、不使用。
     ///
     /// 总是写进文档，哪怕等于默认值：以前的版本在等于默认值时省略它，于是文档里没有它只能说明是以前的版本写的，按以前的默认列表读（[`TouchKeyboardScheme::LEGACY_DEFAULT_ENABLED`]）。新装的默认值已经不同，再省略就分不出这两种文档。
@@ -1221,6 +1242,9 @@ pub struct Preferences {
     /// 触屏 26 键双拼时在字母键底部画当前方案的声母/韵母提示，读屏也读它。默认关；全拼、独立英文和本地模式本来就不画，不受它影响。桌面宿主原样保留、不使用。
     #[serde(default = "disabled_by_default")]
     pub touch_shuangpin_key_hints: bool,
+    /// Android 日语九键连点同一键时循环假名；关闭后每次轻点都追加键面假名，四向滑动不变。默认开，保留旧文档的输入习惯；其他宿主原样保留。
+    #[serde(default = "enabled_by_default", skip_serializing_if = "is_true")]
+    pub touch_japanese_toggle_input: bool,
     /// 触屏键盘的拼写写进输入框还是只画在候选栏；缺这个键的旧文档读作输入框。
     #[serde(default)]
     pub touch_spelling_position: TouchSpellingPosition,
@@ -3134,6 +3158,7 @@ impl Default for Preferences {
             candidate_follow_cursor: true,
             input_mode_hud: true,
             input_mode_focus_hud: false,
+            input_mode_corner_hud: true,
             input_mode_status_item: false,
             show_app_logo: false,
             expand_candidates: false,
@@ -3147,6 +3172,7 @@ impl Default for Preferences {
             wubi_profile: WubiProfile::default(),
             touch_keyboard_layout: TouchKeyboardLayout::default(),
             touch_keyboard_split_portrait: false,
+            touch_shuangpin_layout: TouchShuangpinLayout::default(),
             touch_keyboard_schemes: TouchKeyboardSchemePreferences::default(),
             touch_key_spacing_tenths: default_touch_key_spacing_tenths(),
             touch_row_spacing_tenths: default_touch_row_spacing_tenths(),
@@ -3156,6 +3182,7 @@ impl Default for Preferences {
             touch_text_edit_button_order: default_text_edit_button_order(),
             touch_twenty_six_key_number_layout: TwentySixKeyNumberLayout::default(),
             touch_shuangpin_key_hints: false,
+            touch_japanese_toggle_input: true,
             touch_spelling_position: TouchSpellingPosition::default(),
             touch_quick_punctuation_symbols: default_touch_quick_symbols(),
             touch_toolbar: TouchToolbarPreferences::default(),
@@ -3519,6 +3546,8 @@ impl Default for HelpcodePreferences {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ShuangpinHelpcodeModes {
+    /// 只在 Tab 后输入辅助码；保留其它触发方式的设置，关闭后恢复。
+    pub manual_tab: bool,
     /// 末尾直接（`shuangpin_helpcode_direct`）：完整音节基座后直接接辅码，`ulpbx` 是单码、`ulpbxY` 是双码；关闭后末尾裸字母不再当辅助码，只有触发键开启的段才认。
     pub direct: bool,
     /// 末尾间接触发键：反引号段（`shuangpin_helpcode_trigger_backtick`）。
@@ -3547,6 +3576,7 @@ pub struct ShuangpinHelpcodeModes {
 impl Default for ShuangpinHelpcodeModes {
     fn default() -> Self {
         Self {
+            manual_tab: false,
             direct: true,
             trigger_backtick: false,
             trigger_semicolon: true,

@@ -368,12 +368,24 @@ export {
   useVoiceInputSettings,
   type UseVoiceInputSettingsOptions,
 } from "./settings/use-voice-input-settings";
+export {
+  useTouchKeyboardSkinEditorState,
+  type UseTouchKeyboardSkinEditorStateOptions,
+  type TouchKeyboardSkinEditorState,
+} from "./keyboard/use-touch-keyboard-skin-editor-state";
 export { AiSkinGeneration, type AiSkinGenerationProps } from "./keyboard/ai-skin-generation";
 export {
   useAiSkinGeneration,
   type UseAiSkinGenerationOptions,
   type AiSkinGenerationState,
 } from "./keyboard/use-ai-skin-generation";
+export {
+  useTouchKeyboardSkinLibrary,
+  type TouchKeyboardSkinLibraryState,
+  type TouchSkinLibraryNameEditor,
+  type TouchSkinLibraryConfirmation,
+  type TouchSkinLibrarySaveResult,
+} from "./keyboard/use-touch-keyboard-skin-library";
 export type {
   AiSkinClient,
   AiSkinProposal,

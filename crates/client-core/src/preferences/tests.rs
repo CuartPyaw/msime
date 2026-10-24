@@ -5,33 +5,29 @@
 use super::*;
 
 #[test]
-fn candidate_translation_font_size_is_optional_bounded_and_round_trips() {
-    let mut json = serde_json::to_value(Preferences::default()).unwrap();
-    assert!(json.get("candidate_translation_font_size").is_none());
-    for size in [12, 21, 32] {
-        json["candidate_translation_font_size"] = serde_json::json!(size);
-        let preferences: Preferences = serde_json::from_value(json.clone()).unwrap();
-        assert!(preferences.validate().is_ok());
-        assert_eq!(
-            serde_json::to_value(preferences).unwrap()["candidate_translation_font_size"],
-            size
-        );
-    }
-    for size in [0, 11, 33, 255] {
-        json["candidate_translation_font_size"] = serde_json::json!(size);
-        let preferences: Preferences = serde_json::from_value(json.clone()).unwrap();
-        assert!(matches!(
-            preferences.validate(),
-            Err(PreferencesError::InvalidCandidateFontSize)
-        ));
-    }
-    json["candidate_translation_font_size"] = serde_json::Value::Null;
-    let preferences: Preferences = serde_json::from_value(json).unwrap();
-    assert!(preferences.validate().is_ok());
-    assert!(serde_json::to_value(preferences)
-        .unwrap()
-        .get("candidate_translation_font_size")
-        .is_none());
+fn touch_shuangpin_layout_defaults_persists_and_rejects_unsupported_layouts() {
+    let defaults = Preferences::default();
+    let legacy = serde_json::to_value(&defaults).unwrap();
+    assert!(legacy.get("touch_shuangpin_layout").is_none());
+    assert_eq!(
+        serde_json::from_value::<Preferences>(legacy.clone())
+            .unwrap()
+            .touch_shuangpin_layout,
+        TouchShuangpinLayout::TwentySixKey
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let configured = Preferences {
+        touch_shuangpin_layout: TouchShuangpinLayout::FourteenKey,
+        shuangpin_profile: ShuangpinProfile::Microsoft,
+        touch_keyboard_layout: TouchKeyboardLayout::NineKey,
+        ..defaults
+    };
+    store.save(0, configured.clone()).unwrap();
+    assert_eq!(store.load().unwrap().preferences, configured);
+    let mut invalid = legacy;
+    invalid["touch_shuangpin_layout"] = "nine_key".into();
+    assert!(serde_json::from_value::<Preferences>(invalid).is_err());
 }
 
 #[test]
@@ -2841,8 +2837,6 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
     assert_eq!(
         store.load().unwrap().preferences.mixed_input,
         MixedInputPreferences {
-            enabled: true,
-            first_page_count: 1,
             english: false,
             minimum_prefix: 3,
             emoji: true,
@@ -2857,8 +2851,6 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
     for mask in 0..32 {
         let preferences = Preferences {
             mixed_input: MixedInputPreferences {
-                enabled: true,
-                first_page_count: 1,
                 english: mask & 1 != 0,
                 emoji: mask & 2 != 0,
                 kaomoji: mask & 4 != 0,
