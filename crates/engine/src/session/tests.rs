@@ -421,22 +421,25 @@ fn next_word_prediction_works_after_shuangpin_and_nine_key_selection() {
 }
 
 #[test]
-fn next_word_prediction_works_after_fourteen_key_selection() {
+fn next_word_prediction_works_after_letter_grid_selection() {
     let fixture = prediction_fixture();
-    let mut session = fixture.session_with(|options| options.next_word_prediction = true);
-    session.set_key_grid(Some(KeyGrid::FourteenKey));
-    for value in b"chi" {
-        assert!(session.grid_key(*value).handled);
+    for grid in [KeyGrid::FourteenKey, KeyGrid::EighteenKey] {
+        let mut session = fixture.session_with(|options| options.next_word_prediction = true);
+        session.set_key_grid(Some(grid));
+        for value in b"chi" {
+            assert!(session.grid_key(*value).handled);
+        }
+        assert_eq!(
+            select_word(&mut session, "吃").commit.as_deref(),
+            Some("吃")
+        );
+        assert!(session.snapshot().prediction);
+        assert!(session.snapshot_for_host(false).prediction);
+        assert_eq!(
+            select_word(&mut session, "饭").commit.as_deref(),
+            Some("饭")
+        );
     }
-    assert_eq!(
-        select_word(&mut session, "吃").commit.as_deref(),
-        Some("吃")
-    );
-    assert!(session.snapshot().prediction);
-    assert_eq!(
-        select_word(&mut session, "饭").commit.as_deref(),
-        Some("饭")
-    );
 }
 
 #[test]
