@@ -16523,6 +16523,56 @@ fn telemetry_abi_runs_a_session_through_a_crash_and_clears_when_turned_off() {
     assert_eq!(unknown["ok"], false);
 }
 
+/// iOS App 事后收到的 MetricKit 诊断：带 `pid` 时记到该进程未结束的会话名下且只记一次，`outside_session` 只报 `crash`。
+#[test]
+fn telemetry_abi_attributes_a_diagnosed_crash_to_the_session_of_its_process() {
+    use crate::ffi::reporting::*;
+    let root = tempfile::tempdir().unwrap();
+    let directory = root.path().join("telemetry");
+    let begin =
+        json!({"directory": directory, "platform": "ios", "version": "0.52.0", "enabled": true});
+    let started = reporting_call(msime_client_telemetry_begin, begin.clone());
+    let session = started["value"]["session_id"].as_str().unwrap().to_owned();
+    let record = std::path::PathBuf::from(started["value"]["crash_record_path"].as_str().unwrap());
+    let diagnosed = |extra: Value| {
+        let mut request = json!({"directory": directory, "message": "Crash exception 10 code 0 signal 6", "stack": "0 MSIMEKeyboardExtension + 1"});
+        request
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        reporting_call(msime_client_telemetry_record_crash, request)
+    };
+    let pid = std::process::id();
+    assert_eq!(diagnosed(json!({"pid": pid}))["value"], true);
+    assert!(record.is_file());
+    assert_eq!(diagnosed(json!({"pid": pid}))["value"], false);
+    assert_eq!(diagnosed(json!({"outside_session": true}))["value"], true);
+    assert_eq!(
+        diagnosed(json!({"pid": pid, "session": session}))["ok"],
+        false
+    );
+    assert_eq!(
+        diagnosed(json!({"pid": pid, "outside_session": true}))["ok"],
+        false
+    );
+    assert_eq!(diagnosed(json!({"outside_session": false}))["value"], false);
+
+    let next = reporting_call(msime_client_telemetry_begin, begin);
+    assert_eq!(next["value"]["previous_session_crashed"], true);
+    assert_eq!(next["value"]["crashes"], 2);
+    // 崩溃已经报过，同一进程再送来的诊断不再记。
+    assert_eq!(diagnosed(json!({"pid": pid}))["value"], false);
+    let store = msime_client_services::telemetry::TelemetryStore::new(&directory);
+    let session_crashes: Vec<_> = store
+        .queued()
+        .unwrap()
+        .into_iter()
+        .filter(|event| serde_json::to_value(event.kind).unwrap() == json!("session_crash"))
+        .map(|event| event.id)
+        .collect();
+    assert_eq!(session_crashes, [format!("session-{session}")]);
+}
+
 #[test]
 fn telemetry_abi_reads_consent_from_the_shared_preferences() {
     use crate::ffi::reporting::*;
