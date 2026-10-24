@@ -28,6 +28,8 @@ inline PanelContext panel_context() {
   if (input) input.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
   bytes.resize(static_cast<size_t>(input.gcount()));
   auto options = bytes.size() <= 1024 * 1024 ? Json::parse(bytes, nullptr, false) : Json();
+  // 配置缺失或损坏时用空值表示不可用，不能将解析器的 discarded 状态写进请求 JSON。
+  if (!options.is_object()) options = Json();
   if (!injected && options.is_object() && options.contains("preferences_directory") && options.at("preferences_directory").is_string()) {
     const auto value = std::filesystem::u8path(options.at("preferences_directory").get<std::string>());
     if (value.is_absolute()) directory = value;

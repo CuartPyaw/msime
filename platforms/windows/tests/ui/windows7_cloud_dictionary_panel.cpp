@@ -1,4 +1,5 @@
 #include "../../panels/win7/CloudDictionaryWindow.h"
+#include "../../panels/win7/PanelContext.h"
 #include "../../settings/win7/PreferencesStore.h"
 #include <cassert>
 #include <cstdio>
@@ -22,6 +23,19 @@ int main() {
   const auto length = GetEnvironmentVariableW(L"MSIME_CLIENT_STATE_DIR", nullptr, 0); std::wstring previous(length, L'\0');
   if (length) previous.resize(GetEnvironmentVariableW(L"MSIME_CLIENT_STATE_DIR", previous.data(), length));
   assert(SetEnvironmentVariableW(L"MSIME_CLIENT_STATE_DIR", directory.c_str()));
+  const auto options_length = GetEnvironmentVariableW(L"MSIME_CLIENT_HOST_OPTIONS", nullptr, 0); std::wstring previous_options(options_length, L'\0');
+  if (options_length) previous_options.resize(GetEnvironmentVariableW(L"MSIME_CLIENT_HOST_OPTIONS", previous_options.data(), options_length));
+  const auto options_path = directory / L"runtime-options.json";
+  assert(SetEnvironmentVariableW(L"MSIME_CLIENT_HOST_OPTIONS", options_path.c_str()));
+  const auto context = [] { return msime::windows::win7::panel_context(); };
+  assert(context().options.is_null());
+  for (const auto* bytes : {"{broken", "[]", "null", "7"}) {
+    { std::ofstream output(options_path, std::ios::binary); output << bytes; }
+    assert(context().options.is_null());
+  }
+  { std::ofstream output(options_path, std::ios::binary); output << "{\"synthetic\":true}"; }
+  assert(context().options.at("synthetic") == true);
+  assert(DeleteFileW(options_path.c_str()));
   PreferencesStore store(directory.u8string()); const auto initial = store.load(); assert(initial.snapshot);
   const auto main_thread = GetCurrentThreadId(); std::mutex mutex;
   std::string user = "synthetic-a", error; std::vector<Json> requests;
@@ -38,6 +52,7 @@ int main() {
     assert(GetCurrentThreadId() != main_thread); const auto request = Json::parse(bytes), action = request.at("action");
     assert(request.at("snapshot_directory").get<std::string>().find("win7-cloud-snapshots-") != std::string::npos);
     assert(!request.contains("client_agent")); std::lock_guard<std::mutex> lock(mutex); requests.push_back(request);
+    assert(request.at("options").is_null());
     if (change_during_request) { user = user == "synthetic-a" ? "synthetic-b" : "synthetic-a"; change_during_request = false; }
     if (!error.empty()) return Json{{"ok", false}, {"error", error}}.dump();
     if (malformed) return Json{{"ok", true}, {"value", {{"entries", 7}}}}.dump();
@@ -103,6 +118,7 @@ int main() {
     DestroyWindow(host);
   }
   assert(SetEnvironmentVariableW(L"MSIME_CLIENT_STATE_DIR", length ? previous.c_str() : nullptr));
+  assert(SetEnvironmentVariableW(L"MSIME_CLIENT_HOST_OPTIONS", options_length ? previous_options.c_str() : nullptr));
   std::error_code error_code; std::filesystem::remove_all(directory, error_code);
   std::puts("Windows 7 cloud dictionary: native queries, revisions, canonical candidates, file requests, snapshot confirmations, conflicts and account changes passed");
 }
