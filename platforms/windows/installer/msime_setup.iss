@@ -1,4 +1,4 @@
-; Metasequoia IME — Inno Setup script
+﻿; Metasequoia IME — Inno Setup script
 ; 源文件根目录：本脚本所在目录
 ;
 ; 编译方法：
@@ -79,6 +79,8 @@ SolidCompression=yes
 WizardStyle=modern dynamic
 PrivilegesRequired=admin
 UsedUserAreasWarning=no
+; TSF 的宿主应用会持有只读词库；发生资源更新时，也要让 Restart Manager 检查这些文件。
+CloseApplicationsFilter=*.exe,*.dll,*.chm,*.db,*.bin,*.dat
 #ifdef Windows7Architecture
 MinVersion=6.1sp1
 #ifdef Windows7X86
@@ -176,9 +178,23 @@ Source: "{#MySourceRoot}\tsf_dll\64\*.dll"; \
 
 ; server_exe 含本地语音识别运行时（sherpa-onnx-c-api.dll、onnxruntime.dll、onnxruntime_providers_shared.dll）。Server 从自身目录 LoadLibrary 加载它们，因此必须与 MetasequoiaImeServer.exe 同目录；ignoreversion 保证升级时换成本包锁定的版本。PDB 和链接器的 .ilk 不装，见上面 TSF 一节。
 Source: "{#MySourceRoot}\server_exe\*"; \
-    Excludes: "*.pdb,*.ilk"; \
+    Excludes: "*.pdb,*.ilk,resources\*"; \
     DestDir: "{autopf}\{#MyEditionInstallDir}\server"; \
     Flags: ignoreversion recursesubdirs createallsubdirs
+
+
+; 资源锁只允许平面目录中的已校验文件。逐项写入编译时摘要，不按时间戳猜测内容相同。
+#define ResourceFindHandle
+#define ResourceFindResult
+#sub InstallResource
+  #define ResourceName FindGetFileName(ResourceFindHandle)
+  #define ResourceSource MySourceRoot + "\server_exe\resources\" + ResourceName
+Source: "{#ResourceSource}"; DestDir: "{autopf}\{#MyEditionInstallDir}\server\resources"; Flags: ignoreversion; Check: ResourceNeedsReplacement('{#GetSHA256OfFile(ResourceSource)}')
+#endsub
+#for {ResourceFindHandle = ResourceFindResult = FindFirst(MySourceRoot + "\server_exe\resources\*", faReadOnly | faHidden | faSysFile | faArchive); ResourceFindResult; ResourceFindResult = FindNext(ResourceFindHandle)} InstallResource
+#if ResourceFindHandle
+  #call FindClose(ResourceFindHandle)
+#endif
 
 #ifndef LightPackage
 ; 包内故意不带 config.toml。通配复制再排除一次，防止以后又把用户配置打进包内。
@@ -979,6 +995,22 @@ begin
     IsUserSkinDirectory(FileName) or
     (CompareText(FileName, DataDirMarkerName) = 0) or
     (not IsPackageAppDataItem(FileName));
+end;
+
+{ 已加载 TIP 的应用会保留词库连接。相同摘要的不可变资源无需覆盖；变化或无法读取的文件仍走正常安装与占用检查，不能跳过真实更新。不得缓存：准备阶段之后旧文件可能被清理。 }
+function ResourceNeedsReplacement(const ExpectedHash: String): Boolean;
+var
+  Destination: String;
+begin
+  Result := True;
+  Destination := ExpandConstant(CurrentFilename);
+  if not FileExists(Destination) then
+    exit;
+  try
+    Result := CompareText(GetSHA256OfFile(Destination), ExpectedHash) <> 0;
+  except
+    Log('Unable to verify existing resource; normal replacement is required.');
+  end;
 end;
 
 function InitializeUninstall(): Boolean;
