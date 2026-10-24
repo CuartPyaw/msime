@@ -12,15 +12,16 @@ use crate::format::{
     build_table_name, quanpin_table, MAXIMUM_NUMBERED_SYLLABLES, SHIPPED_INITIALS,
 };
 use crate::pinyin::jianpin::{
-    build_key_like_pattern, build_mixed_jianpin_scan_limit, can_match_exact_key, is_pure_jianpin,
-    key_prefix_upper_bound, matches_mixed_segments, needs_mixed_jianpin_query, QuerySource,
+    build_key_like_pattern, build_mixed_jianpin_scan_limit, can_match_exact_key,
+    extract_initial_token, is_pure_jianpin, key_prefix_upper_bound, matches_mixed_segments,
+    needs_mixed_jianpin_query, QuerySource,
 };
 #[cfg(test)]
 use crate::pinyin::segment::split_segments;
 use crate::pinyin::segment::{join_segments, segments_to_jianpin};
 use crate::pinyin::syllables::{
-    canonical_lattice_syllable, has_only_complete_pinyin_segments, intact_pinyin_set,
-    prefix_pinyin_set,
+    canonical_lattice_syllable, has_only_complete_pinyin_segments, intact_pinyin_list,
+    intact_pinyin_set, is_intact, prefix_pinyin_set,
 };
 
 pub const BUSY_TIMEOUT: Duration = Duration::from_millis(250);
@@ -470,6 +471,49 @@ impl PinyinDatabase {
         }
         // 唯一跨度没有分组与去重需求，直接接管 SQL 页，避免复制同一份行存储。
         let mut rows = self.batch_rows(&table, &[key.as_str()], span_limit);
+        rows.sort_by_key(|row| std::cmp::Reverse(row.weight));
+        rows
+    }
+
+    /// 双拼仅补最后一个声母；枚举合法完整音节后精确查库，词边保留完整读音。
+    pub(crate) fn query_lattice_span_with_trailing_initial(
+        &self,
+        span: &[String],
+        span_limit: usize,
+    ) -> Vec<DictRow> {
+        if has_only_complete_pinyin_segments(span) {
+            return self.query_lattice_span(span, span_limit);
+        }
+        let Some((initial, leading)) = span.split_last() else {
+            return Vec::new();
+        };
+        if self.connection.is_none()
+            || span_limit == 0
+            || is_intact(initial)
+            || extract_initial_token(initial) != initial
+            || (!leading.is_empty() && !has_only_complete_pinyin_segments(leading))
+        {
+            return Vec::new();
+        }
+        let Some(table) = build_table_name(span) else {
+            return Vec::new();
+        };
+        let mut prefix = String::new();
+        for syllable in leading {
+            prefix.push_str(canonical_lattice_syllable(syllable));
+            prefix.push('\'');
+        }
+        let mut keys = Vec::new();
+        for syllable in intact_pinyin_list() {
+            if extract_initial_token(syllable) != initial {
+                continue;
+            }
+            let key = format!("{prefix}{}", canonical_lattice_syllable(syllable));
+            if !keys.contains(&key) {
+                keys.push(key);
+            }
+        }
+        let mut rows = self.batch_rows(&table, &keys, span_limit);
         rows.sort_by_key(|row| std::cmp::Reverse(row.weight));
         rows
     }
@@ -1671,6 +1715,50 @@ mod tests {
         );
         assert!(database
             .query_lattice_span(&strings(&["gun", "q"]), 32)
+            .is_empty());
+    }
+
+    #[test]
+    fn lattice_trailing_initial_is_bounded_exact_elsewhere_and_keeps_full_keys() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("msime-pinyin.db");
+        Connection::open(&path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TABLE tbl_2_g(key TEXT,value TEXT,weight INTEGER);\
+                 INSERT INTO tbl_2_g VALUES('gong''ju','工具',700),\
+                 ('gong''ji','公鸡',100),('gong''jing','工井',500),\
+                 ('gong''zuo','工作',9000);\
+                 CREATE TABLE tbl_1_z(key TEXT,value TEXT,weight INTEGER);\
+                 INSERT INTO tbl_1_z VALUES('zi','子',100),('zhi','知',9000);\
+                 CREATE TABLE tbl_2_j(key TEXT,value TEXT,weight INTEGER);\
+                 INSERT INTO tbl_2_j VALUES('ju''gong','居功',300);\
+                 CREATE TABLE tbl_others_n(key TEXT,value TEXT,weight INTEGER);\
+                 INSERT INTO tbl_others_n VALUES('ni''ni''ni''ni''ni''ni''ni''qi','合成八字词',100),\
+                 ('ni''ni''ni''ni''ni''ni''ni''qing''jiu','合成九字词',9000);",
+            )
+            .unwrap();
+        let database = PinyinDatabase::open(&path);
+        let query = |keys: &[&str], limit| {
+            database.query_lattice_span_with_trailing_initial(&strings(keys), limit)
+        };
+        let rows = query(&["gong", "j"], 32);
+        assert_eq!(values(&rows), ["工具", "工井", "公鸡"]);
+        assert_eq!(rows[0].key, "gong'ju");
+        assert_eq!(values(&query(&["gong", "j"], 1)), ["工具"]);
+        assert_eq!(values(&query(&["gong", "ji"], 32)), ["公鸡"]);
+        assert_eq!(values(&query(&["z"], 32)), ["子"]);
+        assert_eq!(values(&query(&["jv", "g"], 32)), ["居功"]);
+        assert_eq!(
+            values(&query(&["ni", "ni", "ni", "ni", "ni", "ni", "ni", "q"], 32)),
+            ["合成八字词"]
+        );
+        assert!(query(&["gong", "j"], 0).is_empty());
+        assert!(query(&["g", "j"], 32).is_empty());
+        assert!(query(&["gong", "ia"], 32).is_empty());
+        assert!(query(&[], 32).is_empty());
+        assert!(database
+            .query_lattice_span(&strings(&["gong", "j"]), 32)
             .is_empty());
     }
 

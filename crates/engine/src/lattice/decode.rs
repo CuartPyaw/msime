@@ -312,8 +312,8 @@ pub fn edge_log_prob(weight: i64, syllables: usize, options: &LatticeOptions<'_>
     }
 }
 
-/// Build the span graph over `syllables` (each span looked up once) and beam-search it, then rescore with the trigram table (WL:110-186, WL:385-485). The product decodes through `merge_lattice_candidates`, which keeps the graph for the typo pass; this is the C++ `decode_word_lattice` the reference tests drive.
-#[cfg(test)]
+/// 建词格、束搜索并做三元重排。调用方负责音节准入，查询行必须携带完整读音。
+/// 普通整句合并仍走 `merge_lattice_candidates`，为纠错复用同一张图。
 pub fn decode_sentences(
     syllables: &[String],
     lookup: &mut LatticeLookup<'_>,
