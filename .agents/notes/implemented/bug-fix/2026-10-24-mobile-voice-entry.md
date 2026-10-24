@@ -29,7 +29,12 @@ iOS 麦克风仍由主 App 持有；后台会话未开或已过期时直接进�
 
 ## Verification
 
-Android 主机门禁通过，包含 266 个 JVM 冒烟和 240 个设备套件源文件编译。原生宿主设备回归及 iOS 模拟器测试继续进行。
+- Android 主机门禁通过，包含 266 个 JVM 冒烟和 240 个设备套件源文件编译；同源 `arm64-v8a` 原生库构建及 ABI 校验通过，原生 APK 构建、对齐及发布证书签名校验通过。
+- 签名包覆盖安装到 API 28、35 模拟器，两端的 `VoicePolishReplyDeviceSmoke` 均通过，覆盖真实控件的结束、取消、自动上屏、重复与旧结果抑制，以及输入位置变化后保留结果。`MoreToolsDeviceSmoke` 均通过，实际经系统输入法弹出键盘、打开功能菜单并返回键盘。
+- 整机打字补测：API 35 的 `DeviceSmoke` 通过组词、提交、删除及密码框直输；API 28 的 `MicrosoftShuangpinDeviceSmoke` 通过双拼按键与引擎路由。API 28 原有方案为鹤双，直接执行要求全拼的 `DeviceSmoke` 时组词预期不匹配，不能算该全拼用例通过；补测使用套件内显式配置并恢复的双拼方案。
+- 初次验收曾复用旧原生库，因缺少当前代码需要的设置字段导致键盘初始化失败；最终包的原生库与宿主均从本次同一份源码构建，重新安装后完成上述整机回归，没有增加吞错或兼容分支。
+- iOS 27 arm64 模拟器的 `VoiceSessionTests`、`SpaceVoicePanelTests`、`MorePanelFoldTests` 和 `VoiceTextHandoffTests` 共 35 项通过，0 失败、0 跳过；包含工具栏启动、真实会话通知交接、结束采集后自动插入合成文字和恢复键盘，以及取消、迟到状态回调和菜单去重。
+- 本地 `verify-local.sh --quick`、`pnpm run verify-notes` 与 `git diff --check` 通过。Android、iOS 的真机麦克风与实际识别服务尚未验收；以上语音回归使用合成输入，不录音、不联网。
 
 ## Consequences
 
