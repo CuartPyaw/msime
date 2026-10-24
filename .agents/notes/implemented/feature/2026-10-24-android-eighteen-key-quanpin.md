@@ -49,6 +49,8 @@ API 28 在原 APK 的真实设置中确认缺少十八键选项。新 APK 已通
 
 专项复用 `FourteenKeyDeviceSmoke -e eighteen_key true`，不增加 instrumentation 清单项，并接入 `smoke.sh` 的 API 28 核心和 API 35 完整路径。长按选字已通过；本地模式退出后的键面恢复与修正后的六种几何尚未完成验收。重复运行期间观测到合成编辑器 ANR、原生设置独立启动超时和本机负载均值超过 200，后续需在可正常启动应用的设备状态下完成验证；不据此宣称几何修正已通过。
 
-API 28 上四个共享 crate 的完整 Android 单测通过：base 36 项（另 2 项忽略、3 项硬链接过滤），core 533 项（另 1 项忽略），providers 254 项（另 2 项忽略），services 主进程 1250 项（另 10 项忽略、4 项子进程用例过滤，子进程分别通过）。API 35 的 base、providers、services 同样通过；core 两次均在未改动的 `resources::tests::a_recorded_verification_only_matches_the_files_it_recorded` 失败，532 项通过、1 项忽略，改写文件前后记录的时间戳相同；尚未将此结果记作整套通过，也没有增加失败豁免。iOS 统计文件仅完成 Swift 语法解析，共享 Apple 桥与原生宿主尚未在本分支构建。
+API 28 上四个共享 crate 的完整 Android 单测通过：base 36 项（另 2 项忽略、3 项硬链接过滤），core 533 项（另 1 项忽略），providers 254 项（另 2 项忽略），services 主进程 1250 项（另 10 项忽略、4 项子进程用例过滤，子进程分别通过）。API 35 的 base、providers、services 同样通过；core 两次均在未改动的 `resources::tests::a_recorded_verification_only_matches_the_files_it_recorded` 失败，532 项通过、1 项忽略，改写文件前后记录的时间戳相同；尚未将此结果记作整套通过，也没有增加失败豁免。本机 iOS 统计文件仅完成 Swift 语法解析。PR #9564 的 CI 已构建共享 Apple 桥与 iOS 测试宿主；唯一报告断言失败的用例是 `TypingStatisticsTests.testKeyIDsAreTheSharedWhitelist`：实现已追加十八个键位，但三处测试仍要求 141 个，实际为 159 个。现同步这三处预期，保留逐键可记录和未知键整批拒绝断言，等待新提交的 iOS CI 验证；不把修正前的运行记为通过。macOS arm64 CI 已通过，x86_64 与 sanitizer 仍按分支范围跳过。
 
 完整 services 套件暴露的账号会话采用断言，在未修改的基线 `d364cf00af28d9f9019c9fd581fbd453fa00be53` 也会失败，不作为本功能已通过的验证。HTTP 重定向用例受远端代理影响，测试进程清除代理后通过。基线与功能的对照复用同一个标准 Cargo 目录；切回功能源码后刷新源文件时间，避免解包保留旧时间而错误复用基线编译产物。
+
+API 35 按仓库流程预先启动原生设置，再以 `--no-restart` 附着产品进程；失败时截图确认原生键盘设置已打开，但被 `Quickstep isn't responding` 弹窗遮挡，未到十八键选择步骤。以当时的可访问性树定位并点击「等待」，重新观察就绪状态后再继续专项；保留失败截图作为环境状态证据。
