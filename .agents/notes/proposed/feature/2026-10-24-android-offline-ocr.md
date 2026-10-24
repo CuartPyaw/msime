@@ -1,0 +1,37 @@
+# Agent Note: Android 键盘内拍照与可选离线 OCR 模块
+
+Status: proposed
+
+## Problem
+
+#9207 要求在键盘区域完成相机预览、拍照、离线识别和选字上屏。报告人的补充明确要求模块不进入基础安装包，由用户从本项目 GitHub 下载后手动导入。外部相机应用、仅导入图片或 Google Play 按需下载不能代替该流程。
+
+## Proposal
+
+先在 API 28 和 35 上验证一个独立 OCR 模块能否通过公开接口、隔离的类加载器及自己的资源和原生库运行，同时保留已经初始化的手写识别器。试验模块使用固定的 `com.google.mlkit:text-recognition-chinese:16.0.1`，以中文与拉丁文字合成图验证真正识别；宿主探针不申请网络权限。探针不是产品验收，不包含相机或编辑器插入，也不代表已经实现本 issue。
+
+候选模块接口只传递 Android `Context`、`Bitmap` 和文本行，不暴露 Google 类型。基础 APK 不依赖 OCR 模型和运行库；普通 Gradle 构建不包含试验模块。正式导入需要核验项目分发的模块身份、接口版本、ABI 和完整性，限制读取大小，先发布完整版本再切换，输入法进程只读。相机仅在用户打开面板并授权后工作，关闭面板或切换编辑器必须停止相机、取消识别并拒绝迟到结果。识别内容只在当前面板中待选，不写日志或自动复制。
+
+参考实现固定为 `LeanBitLab/LeanType@be774536dfb415634da176831852e0b8eed247dc` 及 `LeanBitLab/LeanType-OCR-Plugin@968949a7b54b8f0e3a4a5063ca03812554cf23ef`，仅用于研究，不复制未提交源码。其插件使用 ML Kit 私有初始化和识别文本日志，不沿用这两点。公开初始化接口见 [Google MlKit API](https://developers.google.com/android/reference/com/google/mlkit/common/MlKit)；模型安装方式见 [文本识别 Android 指南](https://developers.google.com/ml-kit/vision/text-recognition/v2/android)。
+
+## Related notes audit
+
+[手写会话清理](../../implemented/bug-fix/2026-10-17-android-handwriting-session-reset.md)部分相关，继续持有手写生命周期；OCR 不得重置它的单例或复用它的请求代次。[按需语音运行库](../../implemented/feature/2026-10-20-macos-on-demand-voice-runtime-and-wubi.md)部分相关，说明可选原生资源分发，不提供 OCR 推理接口。现有活跃笔记没有相机 OCR 的决定。
+
+## Alternatives considered
+
+- **在基础包内捆绑 OCR**：使用官方默认初始化，接入和设备兼容验证最简单；但违反报告人明确的可选模块与基础包体积要求。
+- **原样加载参考插件**：已经包含多语言模型和 APK 加载流程；但接口示例与实现不一致，且会操作私有 ML Kit 状态、记录识别文本，不能直接采用。
+- **ONNX 开源 OCR 模型与现有可选运行库**：模型许可和推理链更可控，并能避免 Google SDK 的诊断收集；现有语音 API 不能直接执行 OCR，还需要检测、裁剪、矫正与识别管线。保留为真实备选，公开 API 探针或隐私、许可边界不能满足要求时重访，尚未否定。
+- **安装另一个 OCR 应用并绑定服务**：SDK 初始化和权限可按应用隔离；但增加系统安装流程，与用户要求的手动导入资源模块有差异，尚未作为实现方案。
+
+## Acceptance criteria
+
+- 不装模块时基础输入法可用，基础 APK 不包含 OCR 模型、OCR 原生库和识别依赖；不自动下载模块。
+- 用户手动导入项目配套模块后，在键盘内授权相机、拍照并离线识别中文和英文，选择部分文字或全部上屏，保留当前编辑器焦点。
+- API 28/35 真实设备验证导入、损坏/错误 ABI 拒绝、撤权、相机释放、会话切换、迟到结果以及手写识别共存；完整门禁和产品入口验收仍必须补齐。
+- 分发前记录实际引擎、模型和全部依赖的固定来源、许可、通知与分发限制；不把示例代码许可证当作 Google SDK 或模型许可证。
+
+## Risks
+
+动态模块在 Android 14 起要求代码文件只读，资源与原生库需要按真实 Android 限制验证。ML Kit 的公开初始化是否能在隔离类加载器中完成组件发现尚未证明。官方说明识别输入和输出留在设备，但 SDK 仍可能收集诊断数据；无网络探针通过不能证明有网络权限的正式输入法进程绝不发诊断请求，正式方案必须处理并披露这一边界。相机生命周期和焦点代次也尚未实现。
