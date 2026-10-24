@@ -5,6 +5,7 @@
 #endif
 #include <windows.h>
 #include <pathcch.h>
+#include <dxgi1_3.h>
 #include <string_view>
 
 namespace msime::windows::compat {
@@ -15,11 +16,22 @@ struct VoiceApi {
   using PreciseTime = VOID(WINAPI*)(LPFILETIME);
   using Mitigation = BOOL(WINAPI*)(HANDLE, PROCESS_MITIGATION_POLICY, PVOID, SIZE_T);
   using Path = HRESULT(WINAPI*)(PWSTR, size_t);
+  using Factory = HRESULT(WINAPI*)(UINT, REFIID, void**);
   Create create = nullptr;
   PreciseTime precise_time = nullptr;
   Mitigation mitigation = nullptr;
   Path remove_backslash = nullptr;
   Path remove_file_spec = nullptr;
+  Factory factory2 = nullptr;
+
+  HRESULT create_factory(UINT flags, REFIID iid, void** output) const {
+    if (factory2) return factory2(flags, iid, output);
+    if (!output) return E_POINTER;
+    *output = nullptr;
+    // Win7 的 DXGI 1.1 仍提供真实工厂；不伪造新接口或忽略无法兑现的调试标志。
+    if (flags) return DXGI_ERROR_UNSUPPORTED;
+    return CreateDXGIFactory1(iid, output);
+  }
 
   HANDLE create_file(LPCWSTR name, DWORD access, DWORD share, DWORD disposition,
                      LPCREATEFILE2_EXTENDED_PARAMETERS parameters) const {
@@ -112,6 +124,7 @@ inline const VoiceApi& voice_api() {
     loaded.create = voice_function<VoiceApi::Create>(kernel, "CreateFile2");
     loaded.precise_time = voice_function<VoiceApi::PreciseTime>(kernel, "GetSystemTimePreciseAsFileTime");
     loaded.mitigation = voice_function<VoiceApi::Mitigation>(kernel, "GetProcessMitigationPolicy");
+    loaded.factory2 = voice_function<VoiceApi::Factory>(GetModuleHandleW(L"dxgi.dll"), "CreateDXGIFactory2");
     // 旧系统没有 PathCch；只从系统目录加载，模块在进程生命周期内保留。
     wchar_t location[MAX_PATH + 16]{};
     const UINT length = GetSystemDirectoryW(location, MAX_PATH);

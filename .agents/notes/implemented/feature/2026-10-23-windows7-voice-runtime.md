@@ -22,6 +22,10 @@ ONNX 保留完整 CPU 运算集合，不启用 CUDA 或 DirectML。sherpa 保留
 
 运行测试发现，给 `LoadLibraryExW(..., LOAD_WITH_ALTERED_SEARCH_PATH)` 传正斜杠路径时，识别 DLL 可能拾取系统自带的 ONNX 1.17.1，而非同目录的 1.28.2。仅看主 DLL 的路径、导入清单或“加载成功”发现不了它。共享 `LocalAsr.cpp` 对带目录的路径先解析为绝对路径，再用 `make_preferred()` 转成 Windows 分隔符；无目录的库名保持原有搜索方式。新公共入口回归必须检查实际加载的 ONNX 文件与指定识别库相邻，不能改用另一份裸加载逻辑代替产品入口。
 
+Win7 实机暴露固定 ONNX 设备发现的静态 `CreateDXGIFactory2` 依赖。专用构建将它经已有强制包含适配为导出探测：现代系统透传全部参数和返回值，缺失时只在零标志下调用真实 `CreateDXGIFactory1`，不伪造新接口或接受无法提供的调试标志；CPU 推理与上游设备发现的失败处理保留。静态导入门禁同时拒绝 `CreateDXGIFactory2`，并在 `dumpbin` 的 `Summary` 停止解析，避免将 `_RDATA` 段名误认作最后一个库的导入。
+
+延迟加载回归用明确系统目录再次加载后核对模块身份，兼容 Win7 WOW64 已加载模块报告 `System32` 别名；不以路径字符串前缀代替系统模块身份。
+
 ## Related notes
 
 - [完整 Win7 支持](../../proposed/feature/2026-10-23-windows7-support.md)：部分落地。运行库属于其本地语音依赖切片，完整设置、面板和实机验收仍未完成。
@@ -32,7 +36,7 @@ ONNX 保留完整 CPU 运算集合，不启用 CUDA 或 DirectML。sherpa 保留
 
 Windows 11 的 x64 与 x86 构建均通过已知阻断导入检查、具名和序号 C ABI 核对，以及实际合成 ONNX Add 图和启用完整优化的 1×1 Conv 图的 CPU 会话、张量与结果验证。卷积使用三个输入通道与十六个输出通道，检查全部输出。sherpa 测试核对版本、共享识别器依赖的全部在线、离线与 VAD 导出、实际相邻 ONNX 路径，并用合成音频样本验证跨 DLL 的缓冲分配、读写与释放。强制缺少 API 的测试与系统 PathCch 对照根、UNC 和长路径，实际验证文件句柄、共享拒绝、目录句柄、时钟与不支持的策略查询。
 
-共享识别公共入口的正斜杠路径回归已分别使用 x64 和 x86 的本次兼容 DLL 在 Windows 11 上通过；x64 的既有 `shared-voice-local-asr` 也通过。小型兼容 API 测试接入现有 Windows CI；完整运行库从源码构建仍为显式开发命令，尚未接入普通产品发布。没有在 Win7 上运行实际识别模型或麦克风，也未验证完整产品安装。
+共享识别公共入口的正斜杠路径回归已分别使用 x64 和 x86 的本次兼容 DLL 在 Windows 11 上通过；x64 的既有 `shared-voice-local-asr` 也通过。Windows 7 SP1 x64 实机同时运行两个架构的核心装载、延迟导入、系统适配、实际 Add／优化 Conv 推理和 sherpa 依赖／缓冲生命周期检查，十项全部通过。系统不支持的缓解策略和新版 DXGI 接口保留真实失败，上游 CPU 推理仍产生正确结果。小型兼容 API 测试接入现有 Windows CI；完整运行库从源码构建仍为显式开发命令，尚未接入普通产品发布。没有在 Win7 上运行实际识别模型或麦克风，也未验证完整产品安装。
 
 ## Alternatives considered
 

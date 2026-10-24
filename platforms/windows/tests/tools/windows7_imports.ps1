@@ -9,7 +9,7 @@ function Check-Import {
     param([string]$Library, [string]$Import, [string]$Expected = '', [switch]$Delayed)
     $importLines = @(
         $(if ($Delayed) { 'Section contains the following delay load imports:' } else { 'Section contains the following imports:' }),
-        ('    ' + $Library), $Import
+        ('    ' + $Library), $Import, '  Summary', '        1000 _RDATA'
     )
     Set-Item function:dumpbin -Value {
         $global:LASTEXITCODE = 0
@@ -32,6 +32,7 @@ Check-Import 'WS2_32.dll' '                             Ordinal   117'
 Check-Import 'unverified.dll' '                             Ordinal   115'
 Check-Import 'WS2_32.dll' '                             Ordinal   115' -Delayed
 Check-Import 'kernel32.dll' '                            A6 GetDpiForWindow'
+Check-Import 'dxgi.dll' '                             5 CreateDXGIFactory2'
 Check-Import 'kernel32.dll' '                            A6 GetTickCount64' 'GetTickCount64'
 Check-Import 'onnxruntime.dll' '                             Ordinal   1'
 Write-Output 'Windows 7 导入检查：固定 Winsock 序号、未知序号与系统接口边界通过。'

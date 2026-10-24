@@ -18,8 +18,12 @@ inline HRESULT WINAPI msime_win7_remove_backslash(PWSTR path, size_t capacity) {
 inline HRESULT WINAPI msime_win7_remove_file_spec(PWSTR path, size_t capacity) {
   return msime::windows::compat::voice_api().path_remove_file_spec(path, capacity);
 }
+inline HRESULT WINAPI msime_win7_create_factory(UINT flags, REFIID iid, void** output) {
+  return msime::windows::compat::voice_api().create_factory(flags, iid, output);
+}
 #define CreateFile2 msime_win7_create_file
 #define GetSystemTimePreciseAsFileTime msime_win7_precise_time
 #define GetProcessMitigationPolicy msime_win7_mitigation
 #define PathCchRemoveBackslash msime_win7_remove_backslash
 #define PathCchRemoveFileSpec msime_win7_remove_file_spec
+#define CreateDXGIFactory2 msime_win7_create_factory

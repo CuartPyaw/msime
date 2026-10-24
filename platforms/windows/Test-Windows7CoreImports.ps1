@@ -14,6 +14,7 @@ $library = ''
 $imports = [Collections.Generic.List[object]]::new()
 $libraries = [Collections.Generic.List[object]]::new()
 foreach ($line in $lines) {
+    if ($line -match '^\s+Summary\s*$') { break }
     if ($line -match 'Section contains the following delay load imports:') {
         $delayed = $true
         $library = ''
@@ -66,7 +67,7 @@ $unsupported = @(
     'GetSystemTimePreciseAsFileTime', 'WaitOnAddress', 'WakeByAddressSingle', 'WakeByAddressAll',
     'GetTempPath2W', 'GetTempPath2A', 'CreateFile2', 'SetThreadDescription', 'GetThreadDescription',
     'ActivateAudioInterfaceAsync', 'RoOriginateErrorW', 'GetProcessMitigationPolicy',
-    'PathCchRemoveFileSpec', 'PathCchRemoveBackslash'
+    'PathCchRemoveFileSpec', 'PathCchRemoveBackslash', 'CreateDXGIFactory2'
 )
 foreach ($entry in $imports) {
     if ($entry.Delayed) {

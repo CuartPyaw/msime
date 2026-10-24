@@ -5,10 +5,29 @@
 #include <string>
 #include <vector>
 
+namespace {
+UINT factory_flags = 0;
+HRESULT WINAPI synthetic_factory(UINT flags, REFIID iid, void** output) {
+  assert(iid == __uuidof(IDXGIFactory1)); factory_flags = flags;
+  *output = reinterpret_cast<void*>(1); return S_FALSE;
+}
+}
+
 int main() {
   using msime::windows::compat::VoiceApi;
   const VoiceApi fallback;
   const auto& native = msime::windows::compat::voice_api();
+  IDXGIFactory1* factory = nullptr; IDXGIFactory1* expected_factory = nullptr;
+  const auto actual_factory = fallback.create_factory(0, __uuidof(IDXGIFactory1), reinterpret_cast<void**>(&factory));
+  const auto expected_result = CreateDXGIFactory1(__uuidof(IDXGIFactory1), reinterpret_cast<void**>(&expected_factory));
+  assert(actual_factory == expected_result && (factory != nullptr) == (expected_factory != nullptr));
+  if (factory) factory->Release(); if (expected_factory) expected_factory->Release();
+  void* output = reinterpret_cast<void*>(1);
+  assert(fallback.create_factory(DXGI_CREATE_FACTORY_DEBUG, __uuidof(IDXGIFactory1), &output) == DXGI_ERROR_UNSUPPORTED && output == nullptr);
+  assert(fallback.create_factory(0, __uuidof(IDXGIFactory1), nullptr) == E_POINTER);
+  VoiceApi forwarding; forwarding.factory2 = synthetic_factory;
+  assert(forwarding.create_factory(123, __uuidof(IDXGIFactory1), &output) == S_FALSE && factory_flags == 123 && output == reinterpret_cast<void*>(1));
+  assert(reinterpret_cast<FARPROC>(native.factory2) == GetProcAddress(GetModuleHandleW(L"dxgi.dll"), "CreateDXGIFactory2"));
   const std::vector<std::wstring> paths{
       L"", L"synthetic", L"synthetic\\", L"synthetic\\child", L"C:", L"C:synthetic",
       L"C:\\", L"C:\\synthetic", L"C:\\synthetic\\", L"C:\\synthetic\\child",
@@ -74,5 +93,5 @@ int main() {
   parameters.dwSize = 0;
   assert(fallback.create_file(root, GENERIC_READ, FILE_SHARE_READ, OPEN_EXISTING, &parameters) == INVALID_HANDLE_VALUE);
   assert(GetLastError() == ERROR_INVALID_PARAMETER);
-  std::puts("Win7 voice API: native path comparison, real file handles, clock and absent policy passed");
+  std::puts("Win7 voice API: DXGI factory forwarding/fallback, native path comparison, real file handles, clock and absent policy passed");
 }

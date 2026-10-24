@@ -10,6 +10,7 @@
 #include <cassert>
 #include <cwchar>
 #include <initializer_list>
+#include <string>
 
 extern "C" FARPROC WINAPI msime_windows7_delay_notify(unsigned, PDelayLoadInfo) noexcept;
 
@@ -65,7 +66,11 @@ int main() {
         wchar_t system[MAX_PATH];
         const UINT system_length = GetSystemDirectoryW(system, MAX_PATH);
         assert(system_length != 0 && system_length < MAX_PATH);
-        assert(_wcsnicmp(path, system, system_length) == 0 && path[system_length] == L'\\');
+        // Win7 WOW64 的已加载模块可能仍报告 System32 别名；用明确的系统路径重新加载并核对模块身份。
+        const auto filename = std::wcsrchr(path, L'\\'); assert(filename);
+        const auto expected = LoadLibraryW((std::wstring(system, system_length) + filename).c_str());
+        assert(expected == module);
+        FreeLibrary(expected);
         const char* name = library[0] == 'c' ? "CoTaskMemFree" :
             library[0] == 'm' ? "ActivateAudioInterfaceAsync" : "RoOriginateErrorW";
         if (const FARPROC native = GetProcAddress(module, name)) {
