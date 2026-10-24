@@ -142,6 +142,8 @@ extern BOOL (*MSIMEInputModeEnabledProbe)(NSString *identifier);
 @property(nonatomic, readonly) msime::mac::ToggleChord englishCandidatesToggleChord;
 @property(nonatomic, readonly) msime::mac::ToggleChord fullWidthToggleChord;
 @property(nonatomic, readonly) msime::mac::ToggleChord punctuationToggleChord;
+/// 自定义语音开始／结束热键；缺省不绑定，固定语音键由原有偏好独立控制。
+@property(nonatomic, readonly) msime::mac::ToggleChord voiceInputToggleChord;
 @property(nonatomic) BOOL traditionalOutput;
 @property(nonatomic) BOOL fullWidthInput;
 @property(nonatomic) BOOL chinesePunctuation;

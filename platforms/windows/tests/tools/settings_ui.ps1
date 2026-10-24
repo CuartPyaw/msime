@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$Program,
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
-    [switch]$InputOnly
+    [switch]$InputOnly,
+    [switch]$VoiceHotkeyOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -603,6 +604,87 @@ function Select-ComboChoice($window, [string]$id, [string]$label) {
     $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
     $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
 }
+# 仅操作独立合成窗口，验证录键经过原生事件、共享预检及真实偏好保存。
+function Assert-VoiceToggleRecorder($window, [IntPtr]$handle) {
+    function Read-VoiceBinding {
+        $saved = Get-Content -LiteralPath (Join-Path $state 'preferences.json') -Raw | ConvertFrom-Json
+        $field = $saved.preferences.keybindings.PSObject.Properties['toggle_voice_input']
+        if ($field) { return [string]$field.Value }
+        return ''
+    }
+    function Wait-VoiceBinding([string]$expected) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            if ((Read-VoiceBinding) -eq $expected) { return }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        throw "语音绑定保存值不符：期望 $expected，实际 $(Read-VoiceBinding)"
+    }
+    function Wait-VoiceRecorder([string]$expected = '') {
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $button = Find-ById $window 'voice-toggle-recorder'
+            if ($button -and -not $button.Current.IsOffscreen -and $button.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $button.Current.IsEnabled -and
+                (-not $expected -or $button.Current.Name -eq "语音输入开始／结束：$expected")) { return $button }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        $actual = if ($button) { "Name=$($button.Current.Name), Offscreen=$($button.Current.IsOffscreen), Focus=$($button.Current.HasKeyboardFocus)" } else { '控件不存在' }
+        Save-Window $window 'voice-hotkey-failed.png'
+        throw "语音录键控件缺失或显示值不符：期望 $expected，实际 $actual"
+    }
+    function Show-VoiceRecorder {
+        # 滚动是一次准备动作；录键中只读状态，避免 UIA 滚动把焦点从按钮移走并取消录键。
+        $content = Find-ById $window 'settings-content'
+        if ($content) {
+            [object]$scroll = $null
+            if ($content.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scroll) -and $scroll.Current.VerticallyScrollable) {
+                $scroll.SetScrollPercent(-1, 100)
+            }
+        }
+        return Wait-VoiceRecorder
+    }
+    function Record-VoiceKeys([string]$keys) {
+        $button = Show-VoiceRecorder
+        [SettingsWindowProbe]::SetForegroundWindow($handle) | Out-Null
+        $button.SetFocus()
+        if ([SettingsWindowProbe]::GetForegroundWindow() -ne $handle) { throw '合成设置窗口未获得前台焦点' }
+        $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Wait-VoiceRecorder '请按组合键…' | Out-Null
+        [System.Windows.Forms.SendKeys]::SendWait($keys)
+    }
+    Open-Page $window 'voice'
+    Select-PageTab $window 'voice-tab-input' '服务配置'
+    Record-VoiceKeys '^%{F8}'
+    Wait-VoiceBinding 'Ctrl+Alt+F8'
+    Show-VoiceRecorder | Out-Null
+    Wait-VoiceRecorder 'Ctrl+Alt+F8' | Out-Null
+    Start-Sleep -Milliseconds 150
+    Save-Window $window 'voice-hotkey-bound.png'
+    Record-VoiceKeys '{ESC}'
+    Wait-VoiceBinding 'Ctrl+Alt+F8'
+    Record-VoiceKeys '^{F9}'
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $conflict = Find-ByName $window '与现有快捷键冲突，请换一个组合键'
+        if ($conflict) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $conflict) { throw '原生录键没有显示固定语音键冲突' }
+    Wait-VoiceBinding 'Ctrl+Alt+F8'
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+    Open-Page $window 'about'
+    Open-Page $window 'voice'
+    Select-PageTab $window 'voice-tab-input' '服务配置'
+    Show-VoiceRecorder | Out-Null
+    Wait-VoiceRecorder 'Ctrl+Alt+F8' | Out-Null
+    Record-VoiceKeys '{BACKSPACE}'
+    Wait-VoiceBinding ''
+    Show-VoiceRecorder | Out-Null
+    Wait-VoiceRecorder '未绑定' | Out-Null
+    Start-Sleep -Milliseconds 150
+    Save-Window $window 'voice-hotkey-cleared.png'
+    Write-Host '语音原生录键、取消、固定键冲突、切页恢复与解绑通过'
+}
 function Assert-SentenceModelSettings($window, [string]$theme) {
     Open-Page $window 'typing'
     Select-PageTab $window 'input-tab-candidates' '语法模型'
@@ -791,6 +873,19 @@ function Save-Window($element, [string]$file) {
 try {
     New-Item -ItemType Directory -Force $state | Out-Null
     $env:MSIME_CLIENT_STATE_DIR = $state
+    if ($VoiceHotkeyOnly) {
+        if (-not [SettingsWindowProbe]::SetDllDirectory([IO.Path]::GetDirectoryName($programPath))) { throw 'Settings DLL path could not be set' }
+        $defaults = [SettingsWindowProbe]::DefaultPreferences() | ConvertFrom-Json
+        if (-not $defaults.ok) { throw 'Default preferences could not be loaded' }
+        $document = @{format_version = 1; revision = 1; preferences = $defaults.value}
+        [IO.File]::WriteAllText((Join-Path $state 'preferences.json'), ($document | ConvertTo-Json -Depth 64))
+        $window = Start-SettingsWindow 'settings:voice'
+        Assert-VoiceToggleRecorder $window $process.MainWindowHandle
+        $process.CloseMainWindow() | Out-Null
+        if (-not $process.WaitForExit(10000) -or $process.ExitCode -ne 0) { throw '语音录键验证窗口未正常退出' }
+        $process = $null
+        exit 0
+    }
     New-CanvasPreviewFixture
     if (-not [SettingsWindowProbe]::SetDllDirectory([IO.Path]::GetDirectoryName($programPath))) { throw 'Settings DLL path could not be set' }
     $defaults = [SettingsWindowProbe]::DefaultPreferences() | ConvertFrom-Json

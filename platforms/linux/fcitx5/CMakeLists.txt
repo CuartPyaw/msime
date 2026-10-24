@@ -283,6 +283,9 @@ if(BUILD_TESTING)
   add_test(NAME fcitx5-cloud-clipboard COMMAND fcitx5-native-test --cloud-clipboard)
   set(MSIME_FCITX5_TEST_RESOURCES "" CACHE PATH "Verified resources directory for the native Fcitx5 test")
   if(MSIME_FCITX5_TEST_RESOURCES)
+    add_test(NAME fcitx5-custom-voice-hotkey
+      COMMAND fcitx5-native-test "${MSIME_FCITX5_TEST_RESOURCES}" --voice-hotkey)
+    set_tests_properties(fcitx5-custom-voice-hotkey PROPERTIES TIMEOUT 60)
     add_test(NAME fcitx5-helpcode-trigger
       COMMAND fcitx5-native-test "${MSIME_FCITX5_TEST_RESOURCES}" --helpcode-trigger)
     set_tests_properties(fcitx5-helpcode-trigger PROPERTIES TIMEOUT 60)
