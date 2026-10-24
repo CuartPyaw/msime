@@ -12,7 +12,7 @@ Status: implemented
 
 宿主在主线程用弱引用记录最近实际提交账号请求的控制器。当前焦点控制器有权取消尚未交接的旧等待页，以保留关闭翻译、切换服务或离开输入框的意图；非焦点控制器仅能取消仍属于自己的等待页。非焦点计时器不能向后端提交请求，避免旧页在交接后重新覆盖当前页。取消前先释放归属，避免同步回调中接管的新请求被旧取消的收尾覆盖。
 
-正在发送的请求仍按现有后端规则完成并填充缓存；不修改显示视图代次、词典查找、翻译偏好或公开桥接接口。不据此声明已复现报告人的应用与服务组合。
+正在发送的请求仍按现有后端规则完成并填充缓存；不修改显示视图代次、词典查找、翻译偏好或公开桥接接口。不据此声明已复现报告人的应用与服务组合。方法级回归同时接入通用契约发现和 macOS CI 的原生构建矩阵，避免 Linux 契约作业的环境跳过成为唯一的 CI 结果。
 
 ## Alternatives considered
 
@@ -23,7 +23,7 @@ Status: implemented
 
 基线实际方法首先失败于“迟到的旧控制器不能取消新控制器的等待页”。修复后八项原生回归通过：迟到取消、无请求旁观者、当前所有者取消、同控制器换页、取消回调中接管、新所有者取消、当前焦点退出清理旧页、失焦计时器拒绝发送。方法与弱引用声明取自实际控制器源码，使用合成后端与 Foundation，经 Clang 的 `-Wall -Wextra -Werror -UNDEBUG` 编译运行，不复制被测决策逻辑。
 
-`MSIME_CHECK_JOBS=2 bash scripts/run-checks.sh` 完整通过，`pnpm run verify-notes` 的树、格式、归档三项校验通过。完整 `InputController.mm` 与既有 `ShortcutTest.mm` 均通过 Clang 的 C++17、ARC、`-Wall -Wextra -Werror` 语法检查，不依赖已有 Rust 库或新构建树。完整宿主链接、既有控制器运行套件及仓库 quick 尚未完成；方法级原生回归与整文件语法检查不替代这些门禁。报告人的服务来源和实际应用路径仍未现场复验，关联采用 `Refs #9397`。
+macOS CI 新步骤使用系统 `/usr/bin/python3`，该解释器实际运行八项回归通过；新增 workflow 接线通过 `actionlint`。该接线在远端运行开始后补充，本机单独验证，不将旧运行的 workflow 范围跳过写成接线已受检。`MSIME_CHECK_JOBS=2 bash scripts/run-checks.sh` 完整通过，`pnpm run verify-notes` 的树、格式、归档三项校验通过。完整 `InputController.mm` 与既有 `ShortcutTest.mm` 均通过 Clang 的 C++17、ARC、`-Wall -Wextra -Werror` 语法检查，不依赖已有 Rust 库或新构建树。完整宿主链接、既有控制器运行套件及仓库 quick 尚未完成；方法级原生回归与整文件语法检查不替代这些门禁。报告人的服务来源和实际应用路径仍未现场复验，关联采用 `Refs #9397`。
 
 ## Consequences
 
