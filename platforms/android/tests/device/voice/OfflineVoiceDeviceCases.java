@@ -355,11 +355,11 @@ final class OfflineVoiceDeviceCases {
 
     private void externalResult() throws Exception {
         Context context = instrumentation.getTargetContext();
-        if ((scenario.equals("offline-permission-home") || scenario.equals("offline-permission-deny")) && context.checkSelfPermission(
+        if ((scenario.equals("offline-permission-home") || scenario.equals("offline-permission-deny") || scenario.equals("offline-recreate")) && context.checkSelfPermission(
                 android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) {
             throw new AssertionError("Revoke RECORD_AUDIO before testing permission-stage Home");
         }
-        if (scenario.equals("offline-permission-home") || scenario.equals("offline-permission-deny")) {
+        if (scenario.equals("offline-permission-home") || scenario.equals("offline-permission-deny") || scenario.equals("offline-recreate")) {
             var automation = instrumentation.getUiAutomation();
             var info = automation.getServiceInfo();
             info.flags |= android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
@@ -399,20 +399,41 @@ final class OfflineVoiceDeviceCases {
             }
             instrumentation.runOnMainSync(() -> context.startActivity(request));
             await(() -> activity != null, "External activity did not start");
-            if (scenario.equals("offline-permission-home")) {
+            if (scenario.equals("offline-permission-home") || scenario.equals("offline-recreate")) {
                 await(this::permissionVisible, "Microphone permission dialog did not appear");
                 instrumentation.waitForIdleSync();
                 if (finished()) throw new AssertionError("Permission dialog cancelled a visible request");
                 var started = activity.getClass().getDeclaredField("started");
                 started.setAccessible(true);
                 if (started.getBoolean(activity)) throw new AssertionError("Recording started before permission");
-                try (var input = instrumentation.getUiAutomation().executeShellCommand("input keyevent 3")) {
-                    try (var stream = new java.io.FileInputStream(input.getFileDescriptor())) {
-                        byte[] discard = new byte[4096];
-                        while (stream.read(discard) != -1) { }
+                if (scenario.equals("offline-recreate")) {
+                    Activity original = activity;
+                    instrumentation.runOnMainSync(original::recreate);
+                    await(original::isDestroyed, "Activity recreation did not destroy the old instance");
+                    await(() -> activity != original, "System did not create a replacement activity");
+                    await(this::finished, "Recreated request remained visible");
+                    // 已销毁窗口的迟到结果不得再投递；新实例也不能重新开始录音。
+                    var deliver = original.getClass().getDeclaredMethod("returnResult", String.class);
+                    deliver.setAccessible(true);
+                    instrumentation.runOnMainSync(() -> {
+                        try { deliver.invoke(original, "synthetic stale reconstruction result"); }
+                        catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+                    });
+                    instrumentation.runOnMainSync(() -> {
+                        try {
+                            if (started.getBoolean(activity))
+                                throw new AssertionError("Recreated activity started recording");
+                        } catch (ReflectiveOperationException error) { throw new AssertionError(error); }
+                    });
+                } else {
+                    try (var input = instrumentation.getUiAutomation().executeShellCommand("input keyevent 3")) {
+                        try (var stream = new java.io.FileInputStream(input.getFileDescriptor())) {
+                            byte[] discard = new byte[4096];
+                            while (stream.read(discard) != -1) { }
+                        }
                     }
+                    await(this::finished, "Home did not cancel permission-stage request");
                 }
-                await(this::finished, "Home did not cancel permission-stage request");
             } else if (scenario.equals("offline-permission-deny") || scenario.equals("offline-no-model")) {
                 try {
                     if (scenario.equals("offline-permission-deny"))
@@ -493,9 +514,21 @@ final class OfflineVoiceDeviceCases {
                 throw new AssertionError("Cancelled request retained caller-supplied results");
             }
         } finally {
-            pending.cancel();
-            context.unregisterReceiver(receiver);
-            if (activity != null) instrumentation.runOnMainSync(activity::finish);
+            try {
+                if (activity != null) instrumentation.runOnMainSync(activity::finish);
+                // 重建可留下已结束请求的系统权限窗口；清理后才能恢复权限或开始下一项。
+                if (scenario.equals("offline-recreate") && permissionVisible()) {
+                    try (var input = instrumentation.getUiAutomation().executeShellCommand("input keyevent 4");
+                            var stream = new java.io.FileInputStream(input.getFileDescriptor())) {
+                        byte[] discard = new byte[4096];
+                        while (stream.read(discard) != -1) { }
+                    }
+                    await(() -> !permissionVisible(), "Recreated permission window was not dismissed");
+                }
+            } finally {
+                pending.cancel();
+                context.unregisterReceiver(receiver);
+            }
         }
     }
 
