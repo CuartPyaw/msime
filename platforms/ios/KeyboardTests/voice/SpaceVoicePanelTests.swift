@@ -2,7 +2,7 @@ import ObjectiveC
 import UIKit
 import XCTest
 
-/// 空格长按与语音结果面板：长按按住说话（会话没开时转交主 App 开启），面板仍负责待插入结果；光标拖动裁决方式同 Android 的 `SpaceGesturePolicy`。
+/// 空格长按、点按语音入口与聆听面板：识别完成直接上屏，会话未开时由主 App 开启；光标拖动裁决方式同 Android。
 @MainActor
 final class SpaceVoicePanelTests: XCTestCase {
   private var storedScheme = InputSchemePreference.scheme
@@ -152,7 +152,7 @@ final class SpaceVoicePanelTests: XCTestCase {
     }
   }
 
-  /// VoiceOver 通过空格键的 语音输入 操作进入面板。测试宿主没有完全访问权限，结果永远无法从 App 传回：键盘会直接提示这一点，而不是打开面板。
+  /// 没有完全访问权限时，读屏语音操作说明原因，不打开聆听面板。
   func testVoiceOverOpensVoiceAndExplainsMissingFullAccess() throws {
     let controller = makeController()
     let space = try XCTUnwrap(spaceKeys(in: controller).first)
@@ -161,7 +161,7 @@ final class SpaceVoicePanelTests: XCTestCase {
     XCTAssertFalse(controller.hasFullAccess)
     XCTAssertTrue(voice.actionHandler?(voice) ?? false)
     controller.view.layoutIfNeeded()
-    XCTAssertFalse(descendants(controller.view).contains { $0.accessibilityIdentifier == "keyboardVoicePanel" })
+    XCTAssertFalse(descendants(controller.view).contains { $0.accessibilityIdentifier == "keyboardVoiceListening" })
     let label = try XCTUnwrap(descendants(controller.view).first { $0.accessibilityIdentifier == "diagnosticLabel" } as? UILabel)
     XCTAssertEqual(label.text, "语音输入需要开启键盘的“允许完全访问”。")
   }

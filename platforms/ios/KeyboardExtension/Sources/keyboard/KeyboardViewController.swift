@@ -2453,6 +2453,9 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         self?.closeKeyboardPicker(); self?.resetCandidateCache()
       },
     ]
+    if !toolbarRowHidden && !scriptShortcut.isHidden {
+      tools.removeAll { $0.id == "voiceInput" }
+    }
     return tools
   }
 
