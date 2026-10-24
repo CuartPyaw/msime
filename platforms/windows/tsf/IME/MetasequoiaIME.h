@@ -1,6 +1,7 @@
 #pragma once
 #include "../HostFocusState.h"
 #include "../WubiCommitOwner.h"
+#include "../../common/GroupedPanelKeyLease.h"
 
 #include "KeyHandlerEditSession.h"
 #include "MetasequoiaIMEBaseStructure.h"
@@ -257,7 +258,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
     HRESULT _HandleSmartPunctuationRevert(TfEditCookie ec, _In_ ITfContext *pContext, WCHAR wch);
 
     // key event handlers for composition object.
-    HRESULT _HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContext, WCHAR wch, uint64_t requestId);
+    HRESULT _HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContext, WCHAR wch, uint64_t requestId, bool groupedPanelKey = false);
     HRESULT _HandleCompositionFinalize(TfEditCookie ec, _In_ ITfContext *pContext, BOOL fCandidateList);
     HRESULT _HandleCompositionConvert(TfEditCookie ec, _In_ ITfContext *pContext, BOOL isWildcardSearch);
     HRESULT _HandleCompositionBackspace(TfEditCookie ec, _In_ ITfContext *pContext, uint64_t requestId);
@@ -497,6 +498,7 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
         bool capsLockOn = false;
         bool windowsKeyDown = false;
         HWND foregroundWindow = nullptr;
+        msime::panel_key::Owner groupedOwner;
     };
     enum class KeyDownDispatchResult
     {
@@ -504,6 +506,11 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
         Retry,
         AwaitingCompletion
     };
+    bool _HasGroupedPanelComposition() const;
+    bool _CaptureGroupedPanelOwner(msime::panel_key::Owner &owner, ITfContext **context);
+    bool _HandleGroupedPanelKey(const msime::panel_key::Request &request);
+    bool _IsGroupedPanelReplayCurrent(uint64_t token);
+    msime::panel_key::Leases _groupedPanelLeases;
     bool _HasDeferredKeyBarrier() const;
     bool _DeferredKeyQueueHasCapacity() const;
     void _EnsureDeferredKeyProjection();
@@ -516,7 +523,8 @@ class CMetasequoiaIME : public ITfTextInputProcessorEx,
                                   _Out_ WCHAR *classifiedWch, _Out_ UINT *classifiedCode,
                                   _Out_ _KEYSTROKE_STATE *keyState, _In_opt_ const DeferredKeyDown *replayedKey = nullptr);
     bool _QueueDeferredKeyDown(_In_ ITfContext *pContext, WPARAM wParam, LPARAM lParam, WCHAR translatedWch,
-                               UINT modifiersDown, const _KEYSTROKE_STATE &keyState);
+                               UINT modifiersDown, const _KEYSTROKE_STATE &keyState,
+                               const msime::panel_key::Owner *groupedOwner = nullptr);
     bool _QueueDeferredPreservedKey(_In_ ITfContext *pContext, REFGUID preservedKey);
     void _ClearDeferredKeyDowns();
     void _ScheduleDeferredKeyDownDrain(bool allowSyncFallback = true);
