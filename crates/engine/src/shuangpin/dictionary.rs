@@ -23,8 +23,10 @@ use crate::helpcode::{
 use crate::ime::online_batch::{
     replace_cached_online_candidate_batch, replace_online_candidate_batch,
 };
-use crate::lattice::decode::{decode_constrained_sentences, SentenceNgramTables};
-use crate::lattice::merge::{merge_lattice_candidates, whole_sentence_insert_position};
+use crate::lattice::decode::{decode_constrained_sentences, decode_sentences, SentenceNgramTables};
+use crate::lattice::merge::{
+    merge_decoded, merge_lattice_candidates, whole_sentence_insert_position, DecodedSentences,
+};
 use crate::lattice::neural::{
     shared_sentence_model, NeuralReranker, CONTEXT_CHARACTERS, MAX_RERANK_PATHS,
 };
@@ -357,7 +359,7 @@ impl ShuangpinDictionary {
         while let Some(cut) = prefix.rfind('\'') {
             prefix = &prefix[..cut];
             let prefix_pure = remove_manual_delimiters(prefix);
-            // 未完成尾音节不能解整句，但完整前缀仍可组词；沿用它自己的缓存和按键范围。
+            // 完整前缀作为补全失败时的回退，沿用它自己的缓存和按键范围。
             let rows = if incomplete_tail && prefix_rows.is_empty() {
                 let end = raw_length_for_effective_prefix(rows_key, prefix_pure.len());
                 self.generate_series(&prefix_pure, prefix, &rows_key[..end])
@@ -402,6 +404,13 @@ impl ShuangpinDictionary {
             segmentation,
             self.profile,
         ));
+        if !has_only_complete_pinyin_segments(&segments)
+            && !segments.split_last().is_some_and(|(last, leading)| {
+                !is_intact(last) && has_only_complete_pinyin_segments(leading)
+            })
+        {
+            return Vec::new();
+        }
         let mut options = self.sentence_tables.options(self.sentence_alternatives);
         let scorer;
         if has_collocation {
@@ -417,7 +426,8 @@ impl ShuangpinDictionary {
         options.personal = (!model.is_empty()).then_some(&*model);
         let mut lookup = |span: &[String]| {
             // 先按辅助码过滤再做搜索，不能用普通查询的每段截断提前丢掉目标字。
-            self.database.query_lattice_span(span, UNLIMITED_ROWS)
+            self.database
+                .query_lattice_span_with_trailing_initial(span, UNLIMITED_ROWS)
         };
         let mut paths = decode_constrained_sentences(&segments, &mut lookup, &options, accepts);
         if options.emit > 0 {
@@ -479,6 +489,24 @@ impl ShuangpinDictionary {
         options.personal = (!model.is_empty()).then_some(&*model);
         let database = &self.database;
         let span_limit = options.span_limit;
+        if segments.split_last().is_some_and(|(last, leading)| {
+            !is_intact(last) && has_only_complete_pinyin_segments(leading)
+        }) {
+            let mut lookup = |span: &[String]| {
+                database.query_lattice_span_with_trailing_initial(span, span_limit)
+            };
+            let paths = decode_sentences(segments, &mut lookup, &options);
+            merge_decoded(
+                candidates,
+                segments,
+                typed,
+                &options,
+                &mut self.rerankers,
+                &self.rescoring_context,
+                DecodedSentences { paths, typo: None },
+            );
+            return;
+        }
         let mut lookup = |span: &[String]| database.query_lattice_span(span, span_limit);
         let codes = typo_codes(self.autocorrect_types, segments, segmentation, rows_key);
         let types = self.autocorrect_types;
