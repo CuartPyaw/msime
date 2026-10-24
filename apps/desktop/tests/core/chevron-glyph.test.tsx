@@ -24,3 +24,13 @@ test("共享右向图标支持调用点的尺寸和颜色类名", () => {
   expect(svg?.classList.contains("flex-none")).toBe(true);
   expect(svg?.classList.contains("text-muted")).toBe(true);
 });
+
+test("共享右向图标保留个人资料行的窄高几何", () => {
+  const { container } = render(<ChevronGlyph variant="profile" />);
+  const svg = container.querySelector("svg");
+  expect(svg?.getAttribute("width")).toBe("7");
+  expect(svg?.getAttribute("height")).toBe("12");
+  expect(svg?.getAttribute("viewBox")).toBe("0 0 8 14");
+  expect(svg?.getAttribute("stroke-width")).toBe("2");
+  expect(svg?.querySelector("path")?.getAttribute("d")).toBe("m1 1 6 6-6 6");
+});

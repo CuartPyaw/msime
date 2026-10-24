@@ -2,6 +2,7 @@ import { useId, type ReactNode } from "react";
 import * as account from "./account-style";
 import { accountProviderName } from "./account-labels";
 import { ActionButton } from "../core/action-button";
+import { ChevronGlyph } from "../core/chevron-glyph";
 import { formatZhDate } from "../core/format-date";
 
 export interface AccountIdentityDetailsProps {
@@ -52,25 +53,6 @@ export function AccountIdentityDetails({
   );
 }
 
-function Chevron() {
-  return (
-    <svg
-      width="7"
-      height="12"
-      viewBox="0 0 8 14"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      className={account.profileRowChevron}
-    >
-      <path d="m1 1 6 6-6 6" />
-    </svg>
-  );
-}
-
 /** 「个人资料」分组中的一行：标签、末端的值，点按有操作时还带一个箭头。 */
 function ProfileRow({
   label,
@@ -89,7 +71,7 @@ function ProfileRow({
     <>
       <span className={account.profileRowLabel}>{label}</span>
       <span className={account.profileRowValue}>{value}</span>
-      {onClick && <Chevron />}
+      {onClick && <ChevronGlyph variant="profile" className={account.profileRowChevron} />}
     </>
   );
   if (!onClick) return <div className={account.profileRow}>{body}</div>;
