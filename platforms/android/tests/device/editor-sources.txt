@@ -239,3 +239,7 @@ platforms/android/tests/device/keyboard/KeyboardFeedbackDeviceChecks.java
 platforms/android/tests/device/candidate/RelativeDateDeviceSmoke.java
 
 platforms/android/tests/device/clipboard/ClipboardCategoriesDeviceSmoke.java
+
+platforms/android/tests/device/keyboard/TrackpadEditorActivity.java
+platforms/android/tests/device/keyboard/TextTrackpadDeviceChecks.java
+
