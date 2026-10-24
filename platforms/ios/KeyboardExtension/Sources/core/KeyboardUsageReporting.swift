@@ -14,7 +14,7 @@ enum KeyboardUsageReporting {
   private static var exceptionHandlerInstalled = false
   /// 正在进行的会话 id。在 `queue` 上写；未捕获异常处理函数可能在任何线程读它，所以放在锁里。
   private static let currentSession = OSAllocatedUnfairLock<String?>(initialState: nil)
-  /// C 回调不能捕获上下文，因此异常处理函数通过类型本身的静态方法访问会话锁。
+  /// C 回调不能捕获上下文：只有字面闭包或全局函数能转成 C 函数指针，静态方法的引用不行，闭包里写全类型名调用它，不经隐式的 `self`。
   private static func handleUncaughtException(_ exception: NSException) {
     // 按自己的会话 id 写记录：标记可能已经属于另一个键盘进程刚开始的会话。
     guard let session = currentSession.withLock({ $0 }) else { return }
@@ -31,7 +31,7 @@ enum KeyboardUsageReporting {
     msimeIOSCrashHandlersInstall()
     if !exceptionHandlerInstalled {
       exceptionHandlerInstalled = true
-      NSSetUncaughtExceptionHandler(handleUncaughtException)
+      NSSetUncaughtExceptionHandler { KeyboardUsageReporting.handleUncaughtException($0) }
     }
     queue.async {
       let session = UsageReporting.begin()
