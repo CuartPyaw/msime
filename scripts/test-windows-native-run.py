@@ -358,6 +358,7 @@ def build(
         "No such file or directory",
         "Undefined symbols",
         "undefined reference",
+        "undefined symbol:",  # LLD 与 GNU ld 对同一种缺失链接依赖使用不同诊断。
         # MSVC 的同类诊断：这个原生源文件仍需由 Windows CMake 目标链接系统库。
         "unresolved external symbol",
     )
