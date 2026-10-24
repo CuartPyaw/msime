@@ -77,6 +77,8 @@ extern BOOL (*MSIMEInputModeEnabledProbe)(NSString *identifier);
 - (NSFont *)candidateFontOfSize:(CGFloat)size;
 - (NSFont *)candidateFontOfSize:(CGFloat)size englishFirst:(BOOL)englishFirst;
 @property(nonatomic) NSUInteger preeditFontSize;
+/// 共享偏好中的译文字号，缺省为 12 点；设置入口由共享设置页提供。
+@property(nonatomic, readonly) NSUInteger translationFontSize;
 @property(nonatomic) BOOL showsCandidatePreedit;
 /// The candidate window's own style: `candidate_scale_percent` (50-200, 100 by default), which multiplies the candidate fonts and every length of the window; `candidate_opacity_percent` (50-100, 100 by default), which fades only the card surface, its border and a package background; `candidate_corner_radius` (0-32 points), nil to keep the theme's or the package's card radius; and `candidate_padding` (0-16 points between the card's edge and its candidates), nil to keep the theme's or the package's `pad`. A value outside its range is refused and leaves the setting as it was.
 @property(nonatomic) NSInteger candidateScalePercent;
@@ -129,6 +131,7 @@ extern BOOL (*MSIMEInputModeEnabledProbe)(NSString *identifier);
 /// 中日英循环切换（共享偏好 `keybindings.trilingual_cycle`，默认关）：打开后「切换中英文」那一组快捷键按 中 → 日 → 英 → 中 转圈。顺序和「有组字时先上屏原始字母」在共享层，见 `crates/client-core/src/language_cycle.rs`。
 @property(nonatomic) BOOL trilingualCycle;
 @property(nonatomic) BOOL shiftTapShortcut;
+@property(nonatomic, readonly) BOOL shiftTapRequiresEditable;
 @property(nonatomic) BOOL controlTapShortcut;
 /// 单按 Caps Lock 切换中英文（共享偏好 `keybindings.switch_language_caps_lock`），缺省为关。
 @property(nonatomic) BOOL capsLockTapShortcut;

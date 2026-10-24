@@ -422,7 +422,12 @@ else
   # 当基准，那样「改已封存笔记、重新封存、同批提交」照样通过，等于没查。拿不到分叉点时
   # （无远端、离线）不导出，脚本自动降级为只对磁盘内容做封印自校验。
   agent_base="$(git merge-base origin/develop HEAD 2>/dev/null || true)"
-  export AGENT_NOTE_ROOT="$root/.agents/notes"
+  # Windows Node 不转换环境变量里的 MSYS 路径，否则会把笔记树当成不存在而空扫。
+  if [ "$windows_host" -eq 1 ]; then
+    export AGENT_NOTE_ROOT="$(cygpath -w "$root/.agents/notes")"
+  else
+    export AGENT_NOTE_ROOT="$root/.agents/notes"
+  fi
   if [ -n "$agent_base" ]; then
     export AGENT_NOTE_ARCHIVE_BASE_REF="$agent_base"
   fi
@@ -950,8 +955,9 @@ fi
 # for that reason, and its 86 tests had never run. msime-engine and msime-tauri-mobile-platform
 # were missing too, and nothing else runs their tests on the host target.
 # msime-clipboard-relay 也不在 default-members 里，其他地方都不跑它的测试；它的端到端测试在 127.0.0.1 上起参考中继，用真正的客户端驱动连它。
+# msime-pack-tool 的 run、sdk、validate 各有集成测试；构建插件工具不能代替执行它们。
 for package in msime-path-trust msime-client-base msime-client-core msime-client-providers msime-client-services msime-engine msime-engine-wasm msime-host-api msime-input-runtime msime-host-windows \
-  msime-host-macos msime-mcp-server msime-tauri-mobile-platform msime-clipboard-relay msime-script-runtime msime-desktop; do
+  msime-host-macos msime-mcp-server msime-tauri-mobile-platform msime-clipboard-relay msime-script-runtime msime-pack-tool msime-desktop; do
   # A package that does not build produces no failing test names, which reads as "at baseline" - which is
   # how msime-desktop went unbuildable on macOS without anything noticing. Say so instead.
   status=0 build_failed=0
@@ -1003,7 +1009,7 @@ note "clippy: first-party crates"
 # "frontend not built" indistinguishable on a developer machine.
 clippy_failed=""
 for crate in msime-path-trust msime-client-base msime-client-core msime-client-providers msime-client-services msime-engine msime-engine-wasm msime-host-api msime-host-macos \
-             msime-host-windows msime-input-runtime msime-mcp-server msime-tauri-mobile-platform msime-script-runtime; do
+             msime-host-windows msime-input-runtime msime-mcp-server msime-tauri-mobile-platform msime-script-runtime msime-pack-tool; do
   cargo clippy -p "$crate" --all-targets -- -D warnings >/dev/null 2>&1 ||
     clippy_failed="$clippy_failed  $crate"$'\n'
 done

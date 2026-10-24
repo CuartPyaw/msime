@@ -355,7 +355,7 @@ CandidateWindow::CandidateWindow(Reader reader, Click click, unsigned font_size,
                                  std::vector<std::string> fallback_fonts,
                                  std::optional<bool> dark_theme,
                                  bool horizontal, bool show_preedit, Page page,
-                                 Rendered rendered, bool mouse_wheel)
+                                 Rendered rendered, bool mouse_wheel, bool attach_typing_effect)
     : reader_(std::move(reader)), click_(std::move(click)), page_(std::move(page)),
       rendered_(std::move(rendered)),
       font_size_(font_size),
@@ -413,7 +413,8 @@ CandidateWindow::CandidateWindow(Reader reader, Click click, unsigned font_size,
                             nullptr, descriptor.hInstance, this);
   if (!window_)
     throw std::runtime_error("Candidate window unavailable");
-  TypingEffectSignal::instance().attach(window_);
+  if (attach_typing_effect)
+    TypingEffectSignal::instance().attach(window_);
   // 与 macOS 候选窗每个子视图的 accessibilityLabel 对应：读屏通过 UI Automation 读到每行候选、页码、翻页箭头、预编辑和 logo。
   accessible_ = std::make_unique<AccessibleWindow>(window_);
   // 悬停提示，与 macOS 每个候选按钮的 toolTip 对应。建不出来不算候选窗失败，只是没有提示。
@@ -679,6 +680,8 @@ void CandidateWindow::invalidate_geometry() {
     InvalidateRect(window_, nullptr, FALSE);
 }
 void CandidateWindow::hide_now() {
+  if (flyout_) flyout_->hide();
+  menu_target_ = {};
   KillTimer(window_, image_frame_timer);
   image_frames_.stop();
   image_epoch_ = 0;
@@ -726,12 +729,22 @@ bool CandidateWindow::exit_lease_lost() const {
          !lease_current_(exit_value_->lease);
 }
 
+std::optional<CandidatePresentation> CandidateWindow::read_presentation() const {
+  auto value = reader_();
+  // 非阻塞读取争用不代表组字结束。只沿用仍属当前焦点的可见帧，真实快照（包括明确隐藏）始终优先。
+  if (!value && !finishing_animation_ && shown_ && shown_->visible &&
+      lease_current_ && lease_current_(shown_->lease))
+    return shown_;
+  return value;
+}
+
 void CandidateWindow::hide_for(const std::optional<CandidatePresentation> &value) {
-  // 读取不阻塞，读不到快照常常只是这一轮没抢到锁或闸门，不能据此打断正在播的退场，也不能把还开着的卡片（连同展开的网格）硬收掉：没在退场时走 hide()，有退场的皮肤开始退场，下一次读到可见快照就取消它；没有退场的主题和以前一样立即收起。退场那一帧的租约已经不是当前焦点（焦点换走了）时，旧候选不能留在新的前台上，立即收起，和 macOS 隐私收起时 finishExit 一样；刚开始的退场也当场查一次，之后每一帧的 paint 和这里都会查。读到了快照时，退场只在组字正常结束时开始。
+  // 当前焦点里的可见旧帧已经由 read_presentation 保留。剩下的读空只能继续租约已确认的正常退场，不能据此新开退场或保留未知归属的候选。
   if (!value) {
-    hide();
-    if (exit_lease_lost())
-      hide_immediately();
+    if (finishing_animation_ && exit_value_ && lease_current_ &&
+        lease_current_(exit_value_->lease))
+      return;
+    hide_immediately();
     return;
   }
   if (value->composition_ended)
@@ -897,7 +910,7 @@ void CandidateWindow::keep_on_top() {
   topmost_at_ = now;
 }
 void CandidateWindow::reposition() {
-  auto value = reader_();
+  auto value = read_presentation();
   if (!value || !value->visible) {
     hide_for(value);
     return;
@@ -1313,8 +1326,14 @@ CandidateWindow::wrap_measure(const CandidatePresentation &value) {
                           width, font_fallback_.Get());
   };
 }
+void CandidateWindow::set_typing_effect_active(bool active) {
+  if (active)
+    TypingEffectSignal::instance().attach(window_);
+  else
+    TypingEffectSignal::instance().detach(window_);
+}
 void CandidateWindow::take_typing_effect() {
-  const std::optional<uint32_t> packed = TypingEffectSignal::instance().take();
+  const std::optional<uint32_t> packed = TypingEffectSignal::instance().take(window_);
   if (!packed)
     return;
   // A 0 decodes to no combo and no flash, which kills both timers below and clears a count still on the card.
@@ -1425,8 +1444,10 @@ void CandidateWindow::paint() {
   Painting painting(window_);
   if (!painting.dc)
     throw std::runtime_error("Candidate painting unavailable");
-  auto value = reader_(); // Never paint the last cached owner's text unless an exit animation owns that last frame.
-  if ((!value || !value->visible) && finishing_animation_ && exit_value_ && !exit_lease_lost())
+  // 与定位共用读取规则：争用时只画当前租约的已显示帧，失焦不能沿用旧内容。
+  auto value = read_presentation();
+  if ((!value || (!value->visible && value->composition_ended)) &&
+      finishing_animation_ && exit_value_ && lease_current_ && !exit_lease_lost())
     value = exit_value_;
   if (!value || !value->visible) {
     hide_for(value);
@@ -2831,6 +2852,11 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
       case WM_CANCELMODE:
       case WM_CAPTURECHANGED:
       case WM_MOUSELEAVE:
+        // 失焦时同步关闭非模态菜单，旧候选的文字和操作不能留在原桌面上。
+        if (message == WM_CANCELMODE) {
+          if (self->flyout_) self->flyout_->hide();
+          self->menu_target_ = {};
+        }
         // 拖滚动条时指针可以离开卡片，捕获还在就接着拖，只收起悬停。
         if (message == WM_MOUSELEAVE && self->thumb_grab_ && GetCapture() == window) {
           self->hovered_cell_.reset();
