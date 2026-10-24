@@ -320,7 +320,7 @@ final class KeyboardExtensionEditorUITests: XCTestCase {
         }
       default:
         for label in ["字母 N", "字母 I"] {
-          let key = editor.keys[label]
+          let key = editor.buttons[label]
           XCTAssertTrue(key.waitForExistence(timeout: 5))
           key.tap()
         }
@@ -336,6 +336,9 @@ final class KeyboardExtensionEditorUITests: XCTestCase {
     let field = editor.textFields["systemKeyboardEditor"]
     XCTAssertTrue(field.waitForExistence(timeout: 10), "独立编辑器测试应用必须已安装")
     _ = try activeSystemKeyboard(in: editor, field: field)
+    let initial = field.value as? String ?? ""
+    XCTAssertTrue(initial.isEmpty || initial == field.placeholderValue, "独立编辑器必须从空文档开始")
+    var committedPrefix = ""
     typeSyllable("quanpin")
     for round in 0..<3 {
       for scheme in ["shuangpin", "quanpin", "nineKey", "fourteenKey"] {
@@ -343,8 +346,8 @@ final class KeyboardExtensionEditorUITests: XCTestCase {
         selectInHost(scheme)
         editor.activate()
         _ = try activeSystemKeyboard(in: editor, field: field)
-        let initial = field.value as? String ?? ""
-        let prefix = initial == field.placeholderValue ? "" : initial
+        // 输入框的 value 包含预编辑，正文基线只记录此前已选词提交的文字。
+        let prefix = committedPrefix
         typeSyllable(scheme)
         let expand = editor.buttons["expandCandidates"]
         XCTAssertTrue(expand.waitForExistence(timeout: 5))
@@ -357,13 +360,24 @@ final class KeyboardExtensionEditorUITests: XCTestCase {
         XCTAssertTrue(candidate.waitForNonExistence(timeout: 5), "收起后不能留下旧面板")
         expand.tap()
         XCTAssertTrue(candidate.waitForExistence(timeout: 8), "收起后必须能再次展开")
+        let separator = try XCTUnwrap(candidate.label.range(of: "："))
+        let selected = String(candidate.label[separator.upperBound...].prefix { $0 != "，" })
+        XCTAssertNotNil(selected.range(of: "^[\\p{Han}]+$", options: .regularExpression))
+        keepScreenshot("候选面板-第\(round + 1)轮-\(scheme)", in: editor)
         candidate.tap()
+        let expected = prefix + selected
+        let received = XCTNSPredicateExpectation(
+          predicate: NSPredicate(format: "value == %@", expected), object: field)
+        XCTAssertEqual(XCTWaiter.wait(for: [received], timeout: 5), .completed,
+                       "选中的候选必须精确追加到已提交正文，不能保留预编辑或覆盖旧文")
         let committed = field.value as? String ?? ""
         XCTAssertTrue(committed.hasPrefix(prefix), "选词不能覆盖已有正文")
         let appended = String(committed.dropFirst(prefix.count))
         XCTAssertNotNil(appended.range(of: "^[\\p{Han}]+$", options: .regularExpression),
                         "完整候选必须跨进程提交汉字，不能残留本次原始编码")
         XCTAssertNotEqual(editor.buttons["returnKey"].label, "确认", "单音节选词后必须结束组字")
+        committedPrefix = expected
+        keepScreenshot("候选上屏-第\(round + 1)轮-\(scheme)", in: editor)
         typeSyllable(scheme)
       }
       print("CANDIDATE_PANEL_SCHEME_SWITCH round=\(round + 1) schemes=4 completed=1")
