@@ -1086,6 +1086,7 @@ static NSArray<NSString *> *PinyinSpellings(NSString *text) {
     NSPopUpButton *_toolbarFontSizeButton;
     NSNumber *_sharedInputModeShortcut;
     NSNumber *_sharedShiftTapShortcut;
+    BOOL _sharedShiftTapRequiresEditable;
     NSNumber *_sharedControlTapShortcut;
     NSNumber *_sharedCapsLockTapShortcut;
     NSNumber *_sharedTrilingualCycle;
@@ -2231,10 +2232,14 @@ static NSString *SkinFilesIdentity(const std::vector<std::string> &paths) {
     id vimApps = preferences[@"vim_mode_apps"];
     _sharedVimModeApps = [vimApps isKindOfClass:NSArray.class] ? ValidVimModeApps(vimApps) : nil;
     id keys = preferences[@"keybindings"];
+    // 新开关没有旧版偏好回退；移除字段也应恢复默认关闭。
+    _sharedShiftTapRequiresEditable = NO;
     if ([keys isKindOfClass:NSDictionary.class]) {
         // 中日英循环切换：缺键读作关，和共享偏好的默认值（对齐旧版 Windows 出厂值）一致。
         id cycle = keys[@"trilingual_cycle"];
         if (LocalModeBoolean(cycle)) _sharedTrilingualCycle = cycle;
+        id editable = keys[@"switch_language_shift_requires_editable"];
+        if (LocalModeBoolean(editable)) _sharedShiftTapRequiresEditable = [editable boolValue];
         id shift = keys[@"switch_language_shift"];
         if (LocalModeBoolean(shift)) {
             // The shared Tauri setting reaches both native Shift routes.
@@ -2685,6 +2690,7 @@ static NSString *SkinFilesIdentity(const std::vector<std::string> &paths) {
     if (_sharedShiftTapShortcut) return _sharedShiftTapShortcut.boolValue;
     return [_defaults objectForKey:ShiftTapShortcutKey] == nil || [_defaults boolForKey:ShiftTapShortcutKey];
 }
+- (BOOL)shiftTapRequiresEditable { return _sharedShiftTapRequiresEditable; }
 - (void)setShiftTapShortcut:(BOOL)value {
     _sharedInputModeShortcut = nil;
     _sharedShiftTapShortcut = nil;

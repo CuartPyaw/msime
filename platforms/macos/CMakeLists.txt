@@ -119,7 +119,7 @@ target_sources(MSIMEClientInputMethod PRIVATE src/voice/DoubaoVoiceRequest.mm sr
 target_sources(MSIMEClientInputMethod PRIVATE src/core/DesktopInputSession.mm)
 target_sources(MSIMEClientInputMethod PRIVATE src/core/UsageReporting.mm)
 target_sources(MSIMEClientInputMethod PRIVATE src/core/DesktopCloudClipboard.mm)
-target_link_libraries(MSIMEClientInputMethod PRIVATE "-framework CoreGraphics" "-framework CoreText" "-framework UniformTypeIdentifiers")
+target_link_libraries(MSIMEClientInputMethod PRIVATE "-framework ApplicationServices" "-framework CoreGraphics" "-framework CoreText" "-framework UniformTypeIdentifiers")
 file(GLOB_RECURSE MSIME_BACKEND_SWIFT CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/backend/account/*.swift"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/backend/clients/*.swift"
@@ -985,7 +985,7 @@ target_link_libraries(voice-session-delivery-test PRIVATE apple-client "-framewo
 add_test(NAME voice-session-delivery COMMAND voice-session-delivery-test)
 add_executable(shortcut-test tests/input/ShortcutTest.mm src/core/DiagnosticLog.cpp src/core/BoundedFileReader.mm src/core/UpdateController.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/settings/ShuangpinKeymapPanel.mm src/input/InputSourceRegistration.mm src/core/FloatingToolbarPanel.mm src/dictionary/DictionaryWindowController.mm src/core/ClientDictionaryRuntime.mm)
 target_compile_options(shortcut-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
-target_link_libraries(shortcut-test PRIVATE apple-client "-framework AppKit" "-framework InputMethodKit" "-framework Carbon")
+target_link_libraries(shortcut-test PRIVATE apple-client "-framework AppKit" "-framework InputMethodKit" "-framework Carbon" "-framework ApplicationServices")
 # 控制器撤回大写锁定用的 IOKit；别的控制器测试经 MSIME_CONTROLLER_TEST_LIBS 一并拿到。
 target_link_libraries(shortcut-test PRIVATE "-framework IOKit")
 target_compile_options(shortcut-test PRIVATE "-F${MSIME_SPARKLE_ROOT}")
@@ -1037,6 +1037,12 @@ target_link_libraries(toggle-hotkey-event-test PRIVATE "-framework AppKit")
 add_test(NAME toggle-hotkey-event COMMAND toggle-hotkey-event-test)
 # 重绑路径（改键后新键命中、旧键不命中）单独可跑：全量 shortcut suite 在无图形会话的机器上先倒在皮肤颜色断言。
 add_test(NAME shortcut-toggle-hotkeys COMMAND shortcut-test --toggle-hotkeys)
+add_executable(editable-shift-focus-test tests/input/EditableShiftFocusTest.mm)
+target_compile_options(editable-shift-focus-test PRIVATE -Wall -Wextra -Werror -UNDEBUG -fobjc-arc)
+target_link_libraries(editable-shift-focus-test PRIVATE "-framework AppKit" "-framework ApplicationServices")
+add_test(NAME editable-shift-focus COMMAND editable-shift-focus-test)
+add_test(NAME shortcut-editable-shift COMMAND shortcut-test --editable-shift)
+set_tests_properties(shortcut-editable-shift PROPERTIES ENVIRONMENT "CFFIXED_USER_HOME=${MSIME_SHORTCUT_TEST_HOME}")
 get_target_property(MSIME_CONTROLLER_TEST_SOURCES shortcut-test SOURCES)
 list(REMOVE_ITEM MSIME_CONTROLLER_TEST_SOURCES tests/input/ShortcutTest.mm)
 add_executable(http-voice-controller-test tests/voice/HTTPVoiceControllerTest.mm ${MSIME_CONTROLLER_TEST_SOURCES})

@@ -53,6 +53,7 @@ NOT_APPLICABLE = {
     "touch_row_spacing_tenths": "the touch keyboard; the macOS screen keyboard panel draws the default spacing whatever is stored, and the page offers no slider (`touch_keyboard_spacing` is false)",
     "touch_keyboard_height_adjustment": "the touch keyboard and the Windows panel window; the macOS screen keyboard window has a fixed height, and the page offers no slider (`touch_keyboard_height` is false)",
     "touch_keyboard_split_portrait": "仅 Android 大屏触屏键盘支持竖屏分离；macOS 屏幕键盘不采用分离布局，共享设置页不提供此开关",
+    "android_text_trackpad": "仅 Android 原生键盘提供文本轨迹板；macOS 使用系统编辑器的鼠标与触控板编辑，不提供该移动端面板",
     "touch_voice_shortcut": "the touch keyboard",
     "android_text_trackpad": "仅 Android 原生文本编辑页提供触控板、长按打开、点击选区和放大镜；macOS 使用系统文本编辑与物理键盘，共享设置页不提供此项",
     "touch_japanese_toggle_input": "仅 Android 原生日语九键支持连点循环；macOS 使用物理键盘罗马字输入，共享设置页不提供此开关",

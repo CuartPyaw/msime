@@ -2647,6 +2647,9 @@ impl Default for NavigationPreferences {
 pub struct KeybindingPreferences {
     #[serde(default = "enabled_by_default")]
     pub switch_language_shift: bool,
+    /// macOS 单按 Shift 只在可确认的可编辑焦点生效；依赖辅助功能权限，默认关闭。
+    #[serde(default)]
+    pub switch_language_shift_requires_editable: bool,
     #[serde(default)]
     pub switch_language_ctrl: bool,
     /// Linux 已默认处理这个组合键；关闭时交还应用，不改输入法框架的全局绑定。
@@ -2940,6 +2943,7 @@ impl Default for KeybindingPreferences {
     fn default() -> Self {
         Self {
             switch_language_shift: true,
+            switch_language_shift_requires_editable: false,
             switch_language_ctrl: false,
             switch_language_ctrl_space: true,
             switch_language_ctrl_alt_space: true,

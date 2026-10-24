@@ -6147,6 +6147,101 @@ static void TestShiftChordRecoversWithoutFlagsChanged() {
     }
 }
 
+// 焦点和鼠标监视器是系统边界，用替身驱动真实控制器，CI 无需辅助功能授权。
+@interface EditableShiftController : ModeController
+@property(nonatomic, strong) id focusIdentity;
+@property(nonatomic) pid_t focusPID;
+@property(nonatomic) NSUInteger focusCaptures;
+@property(nonatomic) NSUInteger modeSwitchCalls;
+@property(nonatomic) NSUInteger monitorStarts;
+@property(nonatomic) BOOL monitoring;
+@property(nonatomic) BOOL allowMonitoring;
+@end
+@implementation EditableShiftController
+- (msime::mac::EditableShiftFocus)editableShiftFocusForClient:(id)sender {
+    (void)sender;
+    ++self.focusCaptures;
+    return {self.focusPID, self.focusIdentity};
+}
+- (BOOL)startEditableShiftMouseMonitoring {
+    ++self.monitorStarts;
+    self.monitoring = self.allowMonitoring;
+    return self.allowMonitoring;
+}
+- (void)stopEditableShiftMouseMonitoring { self.monitoring = NO; }
+- (void)toggleInputModeFromModifierTap {
+    ++self.modeSwitchCalls;
+    [super toggleInputModeFromModifierTap];
+}
+@end
+
+static void TestEditableShiftController() {
+    NSString *suite = [@"msime.editable-shift." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    assert(!prefs.shiftTapRequiresEditable);
+    NSDictionary *restricted = @{@"keybindings":@{@"switch_language_shift_requires_editable":@YES}};
+    [prefs applySharedInputPreferences:restricted];
+    assert(prefs.shiftTapRequiresEditable);
+    assert([[prefs sharedPreferencesByMerging:restricted][@"keybindings"][@"switch_language_shift_requires_editable"] boolValue]);
+    for (NSDictionary *removed : @[@{}, @{@"keybindings":@{}}, @{@"keybindings":NSNull.null},
+                                   @{@"keybindings":@{@"switch_language_shift_requires_editable":@"true"}}]) {
+        [prefs applySharedInputPreferences:removed];
+        assert(!prefs.shiftTapRequiresEditable);
+        [prefs applySharedInputPreferences:restricted];
+    }
+    MSIMEAppearancePreferences *reopened = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    [reopened applySharedInputPreferences:restricted];
+    assert(reopened.shiftTapRequiresEditable);
+    EditableShiftController *controller = [EditableShiftController alloc];
+    ShortcutClient *client = [ShortcutClient new];
+    [controller setValue:prefs forKey:@"appearance"];
+    [controller setValue:client forKey:@"activeClient"];
+    controller.allowMonitoring = YES;
+    controller.focusPID = 1;
+    controller.focusIdentity = @"synthetic-empty-field";
+    prefs.englishMode = NO;
+    auto down = TapEvent(NSEventTypeFlagsChanged, 56, NSEventModifierFlagShift, 1.0);
+    auto up = TapEvent(NSEventTypeFlagsChanged, 56, 0, 1.1);
+    assert(![controller handleEvent:down client:client]);
+    assert(controller.monitoring);
+    assert([controller handleEvent:up client:client]);
+    assert(prefs.englishMode && controller.modeSwitchCalls == 1 && !controller.monitoring);
+    for (int failure = 0; failure < 6; ++failure) {
+        [controller resetModifierTap];
+        controller.focusPID = 1;
+        controller.focusIdentity = failure == 0 ? nil : @"synthetic-empty-field";
+        controller.allowMonitoring = failure != 5;
+        assert(![controller handleEvent:down client:client]);
+        if (failure == 1) controller.focusIdentity = nil; // 权限撤回或焦点未知。
+        if (failure == 2) controller.focusIdentity = @"other-field";
+        if (failure == 3) controller.focusPID = 2;
+        if (failure == 4) [controller cancelEditableShiftTap]; // 鼠标事件原样放行，但取消本轮。
+        assert(![controller handleEvent:up client:client]);
+        assert(prefs.englishMode && controller.modeSwitchCalls == 1 && !controller.monitoring);
+    }
+    // 焦点无法确认不会进入模式切换，自然也不会走切换 HUD。
+    controller.focusIdentity = nil;
+    controller.allowMonitoring = YES;
+    const NSUInteger captures = controller.focusCaptures;
+    [prefs applySharedInputPreferences:@{}];
+    assert(![controller handleEvent:down client:client]);
+    assert([controller handleEvent:up client:client]);
+    assert(!prefs.englishMode && controller.modeSwitchCalls == 2);
+    assert(controller.focusCaptures == captures && !controller.monitoring);
+    [prefs applySharedInputPreferences:restricted];
+    prefs.controlTapShortcut = YES;
+    assert(![controller handleEvent:TapEvent(NSEventTypeFlagsChanged, 59, NSEventModifierFlagControl, 2.0) client:client]);
+    assert([controller handleEvent:TapEvent(NSEventTypeFlagsChanged, 59, 0, 2.1) client:client]);
+    assert(prefs.englishMode && controller.modeSwitchCalls == 3);
+    controller.focusIdentity = @"synthetic-empty-field";
+    assert(![controller handleEvent:down client:client]);
+    [controller resetModifierTap];
+    assert(!controller.monitoring && ![controller handleEvent:up client:client]);
+    assert(controller.modeSwitchCalls == 3);
+    [defaults removePersistentDomainForName:suite];
+}
+
 static void TestModifierTaps() {
     for (NSNumber *key in @[@56, @60, @59, @62]) {
         const auto code = key.unsignedShortValue;
@@ -12256,6 +12351,10 @@ int main(int argc, char **argv) {
             return 0;
         }
         // 可重绑切换热键的重绑路径单独可跑：全量 suite 里皮肤颜色断言在无图形会话的机器上先于它中止。
+        if (argc == 2 && std::string(argv[1]) == "--editable-shift") {
+            TestEditableShiftController();
+            return 0;
+        }
         if (argc == 2 && std::string(argv[1]) == "--toggle-hotkeys") {
             TestToggleHotkeyRebinding();
             return 0;
@@ -14204,6 +14303,7 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestInitialLearningThroughRealKeys(NO, NO); }
         @autoreleasepool { TestInitialLearningThroughRealKeys(NO, YES); }
         @autoreleasepool { TestSmartPunctuationVersionNumberThroughRealSession(); }
+        @autoreleasepool { TestEditableShiftController(); }
         @autoreleasepool { TestModifierTaps(); }
         @autoreleasepool { TestShiftChordRecoversWithoutFlagsChanged(); }
         @autoreleasepool { TestInputModeStatusItem(); }

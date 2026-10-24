@@ -59,6 +59,7 @@
 #include "InputControllerPhysicalKeys.h"
 #include "InputSchemeTraits.h"
 #include "../core/ModifierTap.h"
+#include "../core/EditableShiftFocus.h"
 #include "../core/VimMode.h"
 #import "../settings/ShuangpinKeymapPanel.h"
 #import "../core/FloatingToolbarPanel.h"
@@ -1730,6 +1731,10 @@ static NSImage *MSIMECandidateLogoImage() {
     // The ASCII punctuation key behind the transition about to be applied, or 0. Set only on the punctuation-key routes and consumed by the next apply:, so pairing can read the last mark of a commit that finished a composition (`nihao(` gives `你好（`) without ever rewriting a candidate that merely ends in a mark.
     unichar _punctuationKeyInFlight;
     MSIMEModifierTap _modifierTap;
+    msime::mac::EditableShiftGate _editableShiftGate;
+    id _editableShiftLocalMouseMonitor;
+    id _editableShiftGlobalMouseMonitor;
+    NSTimer *_editableShiftMouseTimer;
     // 单按 Caps Lock 切换中英文：大写锁定打开的那一刻布防，轮询到松开时认定是轻点还是长按。
     msime::input::CapsLockTap _capsLockTap;
     NSTimer *_capsLockTapTimer;
@@ -5006,6 +5011,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
 }
 - (void)dealloc {
     [MSIMEInputSessionRecoveryPanel dismissForDelegate:self];
+    [self stopEditableShiftMouseMonitoring];
     [self stopSettledScoring];
     [_capsLockTapTimer invalidate];
     [[NSNotificationCenter defaultCenter] removeObserver:self];
@@ -5702,7 +5708,7 @@ static constexpr NSUInteger MSIMEIdleDictionarySessionLimit = 4;
         MSIMEVoiceProviderSocket(), _voiceGeneration);
     [self cancelCandidateTranslations];
     [self cancelCloudCandidates];
-    _modifierTap.reset();
+    [self resetModifierTap];
     [self abandonCapsLockTap];
     _preferenceLoadState.reset();
     if (_activeClient) {
@@ -5748,7 +5754,7 @@ static constexpr NSUInteger MSIMEIdleDictionarySessionLimit = 4;
     [self cancelCloudCandidates];
     [self resetCandidateAnchor];
     [self claimCandidatePanel];
-    _modifierTap.reset();
+    [self resetModifierTap];
     [self abandonCapsLockTap];
     [super activateServer:sender];
     [self ensureAppearance];
@@ -5921,7 +5927,7 @@ static __weak MSIMEInputController *MSIMEMusicOwner;
     [self resetCandidateAnchor];
     [self cancelCandidateTranslations];
     [self cancelCloudCandidates];
-    _modifierTap.reset();
+    [self resetModifierTap];
     [self abandonCapsLockTap];
     _requestedPageSize = 0;
     _preferenceLoadState.reset();
@@ -6511,7 +6517,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [self cancelCloudCandidates];
     [self discardGlossSensePage];
     [self discardExpandedCandidates];
-    _modifierTap.reset();
+    [self resetModifierTap];
     [self abandonCapsLockTap];
     MSIMESetBackendSelectionObservation([NSNotificationCenter defaultCenter], self, @selector(handwritingCandidateSelected:), NO);
     _preferenceLoadState.reset();
@@ -6927,6 +6933,64 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         MSIMERecordKeyPresses([self keyPressStatisticsDirectory], std::move(*flush), wait);
 }
 
+- (void)stopEditableShiftMouseMonitoring {
+    [_editableShiftMouseTimer invalidate];
+    _editableShiftMouseTimer = nil;
+    if (_editableShiftLocalMouseMonitor) [NSEvent removeMonitor:_editableShiftLocalMouseMonitor];
+    if (_editableShiftGlobalMouseMonitor) [NSEvent removeMonitor:_editableShiftGlobalMouseMonitor];
+    _editableShiftLocalMouseMonitor = nil;
+    _editableShiftGlobalMouseMonitor = nil;
+}
+- (void)cancelEditableShiftTap {
+    _editableShiftGate.cancel();
+    [self stopEditableShiftMouseMonitoring];
+}
+- (void)resetModifierTap {
+    _modifierTap.reset();
+    _editableShiftGate.reset();
+    [self stopEditableShiftMouseMonitoring];
+}
+- (BOOL)startEditableShiftMouseMonitoring {
+    const NSEventMask mask = NSEventMaskLeftMouseDown | NSEventMaskRightMouseDown | NSEventMaskOtherMouseDown |
+        NSEventMaskLeftMouseUp | NSEventMaskRightMouseUp | NSEventMaskOtherMouseUp |
+        NSEventMaskLeftMouseDragged | NSEventMaskRightMouseDragged | NSEventMaskOtherMouseDragged | NSEventMaskScrollWheel;
+    __weak MSIMEInputController *weakSelf = self;
+    _editableShiftLocalMouseMonitor = [NSEvent addLocalMonitorForEventsMatchingMask:mask handler:^NSEvent *(NSEvent *event) {
+        [weakSelf cancelEditableShiftTap];
+        return event;
+    }];
+    _editableShiftGlobalMouseMonitor = [NSEvent addGlobalMonitorForEventsMatchingMask:mask handler:^(NSEvent *event) {
+        (void)event;
+        [weakSelf cancelEditableShiftTap];
+    }];
+    // 轻点上限为半秒；丢失松键通知也不能让监视器一直挂着。
+    _editableShiftMouseTimer = [NSTimer timerWithTimeInterval:0.5 repeats:NO block:^(NSTimer *timer) {
+        (void)timer;
+        [weakSelf cancelEditableShiftTap];
+    }];
+    [NSRunLoop.mainRunLoop addTimer:_editableShiftMouseTimer forMode:NSRunLoopCommonModes];
+    return _editableShiftLocalMouseMonitor != nil && _editableShiftGlobalMouseMonitor != nil;
+}
+- (msime::mac::EditableShiftFocus)editableShiftFocusForClient:(id)sender {
+    if ([self secureEventInputActive]) return {};
+    NSString *bundle = [sender respondsToSelector:@selector(bundleIdentifier)] ? [sender bundleIdentifier] : nil;
+    return msime::mac::CaptureEditableShiftFocus(bundle);
+}
+- (BOOL)observeModifierTap:(NSEvent *)event client:(id)sender {
+    const BOOL restricted = _appearance.shiftTapRequiresEditable && _appearance.shiftTapShortcut;
+    const bool wasArmed = _editableShiftGate.armed();
+    const bool allowed = _editableShiftGate.observe(event, restricted, [self, sender] {
+        return [self editableShiftFocusForClient:sender];
+    });
+    if (_editableShiftGate.armed() && !wasArmed && ![self startEditableShiftMouseMonitoring])
+        [self cancelEditableShiftTap];
+    if (!_editableShiftGate.armed()) [self stopEditableShiftMouseMonitoring];
+    const bool tap = _modifierTap.observe(event, _appearance.shiftTapShortcut, _appearance.controlTapShortcut);
+    const bool shift = event.type == NSEventTypeFlagsChanged && (event.keyCode == 56 || event.keyCode == 60);
+    // Control 轻点和其他切换快捷键不受可编辑焦点限制。
+    return tap && (!shift || allowed);
+}
+
 - (BOOL)handleKeyEvent:(NSEvent *)event client:(id)sender {
     CGEventRef nativeEvent = event.CGEvent;
     if (nativeEvent && CGEventGetIntegerValueField(nativeEvent, kCGEventSourceUserData) == MSIMEVoiceCommitEventTag) return NO;
@@ -6947,7 +7011,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     if (!sender) {
         _voicePermissionToken = nil;
         [_voiceOverlay dismissFailure];
-        _modifierTap.reset();
+        [self resetModifierTap];
         [self abandonCapsLockTap];
         _voiceHoldShortcut.reset();
         _backspaceHoldArmed = NO;
@@ -6968,7 +7032,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         [self cancelCandidateTranslations];
         [self cancelCloudCandidates];
         [self resetCandidateAnchor];
-        _modifierTap.reset();
+        [self resetModifierTap];
         _preferenceLoadState.reset();
         [self flushPendingPairedClosing];
         _pairedPunctuation.clear();
@@ -7003,7 +7067,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     NSUserDefaults *voiceDefaults = NSUserDefaults.standardUserDefaults;
     if (event.type == NSEventTypeKeyDown && event.keyCode == 53) [_voiceOverlay dismissFailure];
     if (_voicePermissionToken && event.type == NSEventTypeKeyDown && event.keyCode == 53) {
-        _voicePermissionToken = nil; _voiceHoldShortcut.reset(); _modifierTap.reset(); return YES;
+        _voicePermissionToken = nil; _voiceHoldShortcut.reset(); [self resetModifierTap]; return YES;
     }
     const BOOL voiceEnabled = MSIMEVoiceInputEnabled(voiceDefaults);
     if (!voiceEnabled) _voiceHoldShortcut.reset();
@@ -7016,7 +7080,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         // 空格锁定固定为开：空格只在按住录音组合键期间才被拦下，平常打字不受影响。设置页不再给这个开关（`voice_space_lock_switch`），存下的 false 也不再读。
         true
     }, _voiceService.active, physicalModifierFlags) : MSIMEVoiceHoldShortcut::Result{};
-    if (voiceShortcut.consumed || voiceShortcut.action != MSIMEVoiceHoldShortcut::Action::None) _modifierTap.reset();
+    if (voiceShortcut.consumed || voiceShortcut.action != MSIMEVoiceHoldShortcut::Action::None) [self resetModifierTap];
     // MSIME-Windows shows the overlay's cancel and confirm buttons once the hold is locked (ControlCommand::Lock).
     if (voiceShortcut.consumed && _voiceHoldShortcut.locked() && _voiceService.active) [_voiceOverlay setRecordingLocked:YES];
     if (voiceShortcut.action == MSIMEVoiceHoldShortcut::Action::Toggle) {
@@ -7029,7 +7093,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         [self cancelHTTPVoiceInput]; [self cancelDoubaoVoiceInput]; [self cancelLiveVoiceInput];
     }
     if (voiceShortcut.consumed) return YES;
-    if (_modifierTap.observe(event, _appearance.shiftTapShortcut, _appearance.controlTapShortcut)) {
+    if ([self observeModifierTap:event client:sender]) {
         [self toggleInputModeFromModifierTap];
         return YES;
     }
