@@ -194,12 +194,19 @@ pub extern "C" fn msime_client_set_caps_lock(handle: u64, enabled: bool) -> *mut
     })
 }
 
-/// 标出隐私会话：隐私模式或不允许学习的输入框。只影响打字统计（选词位置和上屏效率不计），学习仍由偏好里的 `learning` 决定。
+/// 标出隐私会话：隐私模式或不允许学习的输入框。不记打字统计，并立即禁止上屏后联想；学习仍由偏好里的 `learning` 决定。
 #[no_mangle]
 pub extern "C" fn msime_client_set_private_session(handle: u64, enabled: bool) -> *mut c_char {
     response(|| {
         with_session(handle, |session| {
+            let changed = session.statistics_private != enabled;
             session.statistics_private = enabled;
+            if changed {
+                session
+                    .runtime
+                    .set_prediction_allowed(!enabled)
+                    .map_err(|error| error.to_string())?;
+            }
             Ok(Value::Bool(enabled))
         })
     })

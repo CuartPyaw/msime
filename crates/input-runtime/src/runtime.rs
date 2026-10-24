@@ -741,6 +741,13 @@ impl<E: InputEngine> Runtime<E> {
         self.refresh()
     }
 
+    /// 更新即时隐私门禁，并使之前显示的联想候选身份过期。
+    pub fn set_prediction_allowed(&mut self, allowed: bool) -> Result<(), RuntimeError> {
+        self.advance()?;
+        self.engine.set_prediction_allowed(allowed);
+        self.refresh()
+    }
+
     /// 整个候选列表只回一个词的完整五笔码，是否在第四键提交。
     ///
     /// 这是宿主状态而不是 Engine 状态：它决定本 runtime 要不要执行提交，所以组字中途改也安全，不需要重建 Engine。下一键生效，因此已经打进组字的四码不会因为把开关关掉而自己上屏。
@@ -814,7 +821,7 @@ impl<E: InputEngine> Runtime<E> {
 
     /// 将已解码的选词字符转成当前页的候选动作，供统计与生命周期共用：五笔的自定义键在前，通用「二三候选」键在后。
     pub fn candidate_shortcut(&self, action: Action) -> Action {
-        if !self.focused {
+        if !self.focused || self.cached.prediction {
             return action;
         }
         self.wubi_candidate_shortcut(&action)
@@ -1397,6 +1404,7 @@ impl<E: InputEngine> Runtime<E> {
                 .map(|(index, text)| self.candidate(index, text)),
         );
         View {
+            prediction: self.cached.prediction,
             scheme: self.cached.scheme,
             chinese_text: scheme_type(self.cached.scheme).is_some_and(SchemeType::is_chinese),
             script_conversion: script_conversion(self.cached.scheme, &self.cached.local_mode),
@@ -1618,7 +1626,7 @@ impl<E: InputEngine> Runtime<E> {
             && self.phrase_prefix.is_empty()
             && self.cached.preedit.is_empty()
             && self.cached.editing_text.is_empty()
-            && self.cached.candidates.is_empty()
+            && (self.cached.prediction || self.cached.candidates.is_empty())
     }
 
     /// 是否有组字：暂存词段、预编辑、读音或候选任一非空。
@@ -1628,7 +1636,7 @@ impl<E: InputEngine> Runtime<E> {
         !self.phrase_prefix.is_empty()
             || !self.cached.preedit.is_empty()
             || !self.cached.editing_text.is_empty()
-            || !self.cached.candidates.is_empty()
+            || (!self.cached.prediction && !self.cached.candidates.is_empty())
     }
 
     /// 最近一次 `dispatch` 或 `focus` 里发生了什么，见 [`DispatchFacts`]。
@@ -2449,6 +2457,9 @@ impl<E: InputEngine> Runtime<E> {
 
     /// 内置的呈现排序：逐键重排、整句读法降位、在线候选的座位。refresh、展开和落定重排三处都走这里，免得三处的步骤漂移。返回是否挪动了候选。
     fn order_presentation(&mut self) -> bool {
+        if self.cached.prediction {
+            return false;
+        }
         let mut moved = self.rerank();
         moved |= self.demote_runner_up_readings();
         moved |= self.normalize_online_slots();
@@ -2612,6 +2623,7 @@ impl<E: InputEngine> Runtime<E> {
             Ok(snapshot) => snapshot,
             Err(error) => {
                 self.cached = EngineSnapshot {
+                    prediction: false,
                     scheme: 255,
                     nine_key: false,
                     key_grid: None,
@@ -2710,6 +2722,7 @@ impl<E: InputEngine> Runtime<E> {
             || cached.candidate_positions != previous.candidate_positions
             || cached.candidate_corrected != previous.candidate_corrected
             || cached.candidate_list_open != previous.candidate_list_open
+            || cached.prediction != previous.prediction
         {
             self.bump_candidates_epoch();
         }
@@ -2922,6 +2935,34 @@ impl<E: InputEngine> Runtime<E> {
         // Cache maintenance belongs to the session, including while its host
         // has no focus. Ordinary input must still pass through unchanged.
         if !self.focused && !matches!(&action, Action::ResetCache) {
+            return Ok(self.transition(empty_result(false)));
+        }
+        // 空闲联想没有可编辑的组字；导航键清掉建议后交还编辑器，不能沿用普通候选的高亮导航。
+        if self.cached.prediction
+            && matches!(
+                &action,
+                Action::NextCandidate
+                    | Action::PreviousCandidate
+                    | Action::NextPage
+                    | Action::PreviousPage
+                    | Action::FirstCandidate
+                    | Action::FirstCandidateOrHome
+                    | Action::LastCandidate
+                    | Action::Command(
+                        Command::MoveLeft
+                            | Command::MoveRight
+                            | Command::MoveHome
+                            | Command::MoveEnd
+                            | Command::ConversionLeft
+                            | Command::ConversionRight
+                    )
+                    | Action::SegmentMoveLeft
+                    | Action::SegmentMoveRight
+            )
+        {
+            self.advance()?;
+            self.engine.command(Command::Cancel)?;
+            self.refresh()?;
             return Ok(self.transition(empty_result(false)));
         }
         // 只在当前页有目标候选时接管；否则继续原标点路径，不能像越界数字键那样吞掉。
@@ -3178,6 +3219,7 @@ impl<E: InputEngine> Runtime<E> {
                             && self.cached.spelling_symbols.as_bytes().contains(&value))
                         || self.cached.nine_key
                         || self.cached.key_grid.is_some_and(KeyGrid::uses_digits)
+                        || self.cached.prediction
                         || len == 0
                     {
                         return Ok(result);
@@ -3255,7 +3297,7 @@ impl<E: InputEngine> Runtime<E> {
             {
                 self.engine.character(b' ', false)
             }
-            Action::SelectHighlighted if len > 0 => {
+            Action::SelectHighlighted if len > 0 && !self.cached.prediction => {
                 pick = Some((SelectionHow::Highlighted, self.highlighted));
                 self.engine.select(self.engine_index(self.highlighted))
             }

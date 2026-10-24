@@ -95,6 +95,7 @@ using CCompositionProcessorEngine = Engine;
 template<typename... Args> void DebugTsfIssue47(Args...) {}
 // 生产前缀规则
 struct CMetasequoiaIME {
+    std::atomic<bool> _localSessionResetPending{false};
     msime::tsf::WubiCommitOwner _wubiCommitOwner;
     std::atomic<bool> _localSessionResetPending{false};
     Engine *_pCompositionProcessorEngine = nullptr;

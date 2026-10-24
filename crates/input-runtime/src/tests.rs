@@ -1050,6 +1050,7 @@ impl InputEngine for Fixture {
             return Err(RuntimeError::Engine("injected snapshot failure".into()));
         }
         Ok(EngineSnapshot {
+            prediction: false,
             scheme: self.scheme,
             nine_key: self.key_grid == Some(KeyGrid::NineKey),
             key_grid: self.key_grid,
@@ -2661,6 +2662,7 @@ impl PhraseEngine {
 impl InputEngine for PhraseEngine {
     fn snapshot(&self) -> Result<EngineSnapshot, RuntimeError> {
         Ok(EngineSnapshot {
+            prediction: false,
             scheme: 0,
             nine_key: false,
             nine_key_spellings: Vec::new(),
@@ -5159,6 +5161,7 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOpti
         single_character_only: false,
         learning: false,
         learn_english_on_enter: true,
+        next_word_prediction: false,
         autocorrect_transposition: true,
         autocorrect_neighbor: true,
         fuzzy_pinyin_rules: 0,
@@ -5229,6 +5232,189 @@ fn real_engine_options(root: &std::path::Path) -> msime_engine::host::EngineOpti
         japanese_dictionary: String::new(),
         wubi_dictionary: String::new(),
     }
+}
+
+fn prediction_runtime() -> (tempfile::TempDir, Runtime) {
+    let directory = tempfile::tempdir().unwrap();
+    let mut options = real_engine_options(directory.path());
+    options.next_word_prediction = true;
+    let database = std::path::Path::new(&options.dictionaries).join("msime-pinyin.db");
+    rusqlite::Connection::open(database)
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE tbl_1_c(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+         INSERT INTO tbl_1_c VALUES('chi','c','吃',1000);
+         CREATE TABLE tbl_2_c(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+         INSERT INTO tbl_2_c VALUES('chi''fan','cf','吃饭',100);
+         INSERT INTO tbl_2_c VALUES('chi''hao','ch','吃好',90);",
+        )
+        .unwrap();
+    let engine = msime_engine::host::Session::new(&options).unwrap();
+    let mut runtime = Runtime::new(engine, 6).unwrap();
+    runtime.focus(true).unwrap();
+    for value in b"chi" {
+        runtime
+            .dispatch(Action::Character {
+                value: *value,
+                shift: false,
+            })
+            .unwrap();
+    }
+    let id = runtime
+        .view()
+        .candidates
+        .iter()
+        .find(|row| row.text == "吃")
+        .unwrap()
+        .id;
+    assert_eq!(
+        runtime
+            .dispatch(Action::Select(id))
+            .unwrap()
+            .commit
+            .as_deref(),
+        Some("吃")
+    );
+    (directory, runtime)
+}
+
+#[test]
+fn next_word_prediction_is_idle_and_only_explicit_selection_commits_it() {
+    let (_directory, mut runtime) = prediction_runtime();
+    assert!(runtime.is_idle());
+    assert!(!runtime.has_composition());
+    assert!(runtime.view().prediction);
+    let id = runtime
+        .view()
+        .candidates
+        .iter()
+        .find(|row| row.text == "饭")
+        .unwrap()
+        .id;
+    assert_eq!(
+        runtime
+            .dispatch(Action::Select(id))
+            .unwrap()
+            .commit
+            .as_deref(),
+        Some("饭")
+    );
+}
+
+#[test]
+fn next_word_prediction_passes_space_return_and_digits_to_the_editor() {
+    for action in [
+        Action::SelectHighlighted,
+        Action::Command(Command::CommitRaw),
+        Action::Character {
+            value: b'1',
+            shift: false,
+        },
+        Action::Command(Command::Backspace),
+        Action::Finish,
+    ] {
+        let (_directory, mut runtime) = prediction_runtime();
+        let transition = runtime.dispatch(action).unwrap();
+        assert!(!transition.handled && transition.commit.is_none());
+        assert!(transition.view.candidates.is_empty());
+    }
+}
+
+#[test]
+fn next_word_prediction_does_not_survive_focus_or_a_new_generation() {
+    let (_directory, mut runtime) = prediction_runtime();
+    let id = runtime.view().candidates[0].id;
+    runtime
+        .dispatch(Action::Character {
+            value: b'n',
+            shift: false,
+        })
+        .unwrap();
+    assert!(matches!(
+        runtime.dispatch(Action::Select(id)),
+        Err(RuntimeError::StaleCandidate)
+    ));
+    let (_directory, mut runtime) = prediction_runtime();
+    let transition = runtime.focus(false).unwrap();
+    assert!(transition.commit.is_none() && transition.view.candidates.is_empty());
+}
+
+#[test]
+fn next_word_prediction_privacy_gate_clears_and_suppresses_suggestions_immediately() {
+    let (_directory, mut runtime) = prediction_runtime();
+    let id = runtime.view().candidates[0].id;
+    runtime.set_prediction_allowed(false).unwrap();
+    assert!(runtime.view().candidates.is_empty());
+    assert!(matches!(
+        runtime.dispatch(Action::Select(id)),
+        Err(RuntimeError::StaleCandidate)
+    ));
+    for value in b"chi" {
+        runtime
+            .dispatch(Action::Character {
+                value: *value,
+                shift: false,
+            })
+            .unwrap();
+    }
+    let id = runtime
+        .view()
+        .candidates
+        .iter()
+        .find(|row| row.text == "吃")
+        .unwrap()
+        .id;
+    assert_eq!(
+        runtime
+            .dispatch(Action::Select(id))
+            .unwrap()
+            .commit
+            .as_deref(),
+        Some("吃")
+    );
+    assert!(runtime.view().candidates.is_empty());
+}
+
+#[test]
+fn next_word_prediction_leaves_navigation_and_shortcuts_to_the_editor() {
+    for (index, action) in [
+        Action::NextCandidate,
+        Action::PreviousCandidate,
+        Action::NextPage,
+        Action::PreviousPage,
+        Action::FirstCandidateOrHome,
+        Action::LastCandidate,
+        Action::Command(Command::MoveRight),
+        Action::Command(Command::ConversionLeft),
+        Action::SegmentMoveLeft,
+        Action::SegmentMoveRight,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (_directory, mut runtime) = prediction_runtime();
+        runtime.set_left_right_navigation(true);
+        let transition = runtime.dispatch(action).unwrap();
+        assert!(
+            !transition.handled && transition.commit.is_none(),
+            "action {index}"
+        );
+        assert!(transition.view.candidates.is_empty(), "action {index}");
+    }
+}
+
+#[test]
+fn next_word_prediction_is_not_held_as_a_phrase_piece() {
+    let (_directory, mut runtime) = prediction_runtime();
+    runtime.set_phrase_preedit(true);
+    let composition_epoch = runtime.composition_epoch();
+    let id = runtime.view().candidates[0].id;
+    let transition = runtime.dispatch(Action::Select(id)).unwrap();
+    assert_eq!(transition.commit.as_deref(), Some("饭"));
+    assert!(transition.view.editing_text.is_empty());
+    assert!(runtime.is_idle());
+    assert_eq!(runtime.composition_epoch(), composition_epoch);
+    assert!(runtime.focus(false).unwrap().commit.is_none());
 }
 
 #[test]
@@ -5964,6 +6150,7 @@ impl InputEngine for DigitCommitsEngine {
         };
         let count = words.len();
         Ok(EngineSnapshot {
+            prediction: false,
             scheme: KOREAN_SCHEME,
             nine_key: false,
             nine_key_spellings: Vec::new(),
@@ -6955,6 +7142,7 @@ impl InputEngine for WubiMixedEngine {
         };
         let count = words.len();
         Ok(EngineSnapshot {
+            prediction: false,
             scheme: self.scheme,
             nine_key: false,
             nine_key_spellings: Vec::new(),
@@ -8044,6 +8232,7 @@ struct SpellingMarksEngine {
 impl InputEngine for SpellingMarksEngine {
     fn snapshot(&self) -> Result<EngineSnapshot, RuntimeError> {
         Ok(EngineSnapshot {
+            prediction: false,
             scheme: self.scheme,
             nine_key: false,
             nine_key_spellings: Vec::new(),
