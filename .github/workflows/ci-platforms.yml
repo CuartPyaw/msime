@@ -303,7 +303,8 @@ jobs:
           rustup toolchain install
           rustup target add wasm32-unknown-unknown
           cargo test --locked -p msime-script-runtime
-          cargo test --locked -p msime-pack-tool --test sdk
+          # SDK 之外，命令行退出码、包校验和事件夹具也有独立集成测试。
+          cargo test --locked -p msime-pack-tool
           bash scripts/test-script-plugins.sh
           # 随桌面安装包分发的官方插件包：重新构建，核对 latex-symbols 的生成器没有漂移、每个包过 msime-pack validate --builtin、uuid 的内容哈希等于 plugins/official-packs.json 锁定的值。锁以这台 ubuntu 的构建为准，和发版工作流的 official-plugins 作业相同；工具链或插件源码一变哈希就变，所有用户的授权随之作废，这一步让它在 PR 里变红、在 diff 里看得见。
           bash scripts/build-official-plugins.sh --check
@@ -522,6 +523,12 @@ jobs:
         run: |
           & platforms/windows/tests/tools/settings_ui.ps1 -Program target/windows-full/x64/settings/msime-client-settings.exe -OutputDirectory target/windows-full/x64/settings-screenshots
           if ($LASTEXITCODE -ne 0) { throw 'Settings UI smoke failed' }
+      - name: Inspect custom voice recorder
+        if: ${{ needs.changes.outputs.windows == 'true' }}
+        shell: powershell
+        run: |
+          & platforms/windows/tests/tools/settings_ui.ps1 -Program target/windows-full/x64/settings/msime-client-settings.exe -OutputDirectory target/windows-full/x64/settings-screenshots/voice-hotkey -VoiceHotkeyOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Voice hotkey UI smoke failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() && needs.changes.outputs.windows == 'true' }}
         with:

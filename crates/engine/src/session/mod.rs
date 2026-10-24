@@ -160,15 +160,25 @@ impl Session {
         self.input.set_zhuyin_nine_key(nine_key);
     }
 
-    /// 14 键的一键：`letter` 是这一组里的任一字母，由 `KeyGrid::code_of` 归成组码交给九宫格会话，宿主约定送这一组的首字母。不复用 `character`，因为硬件键盘的字母也走 `character`，物理 q 不能变成有歧义的 QW 组。只在 14 键、全拼、没有本地模式、不在专用英文里、26 键没有组字（或九宫格正在组字）时处理 `a`–`z`，其余不处理，状态不变。
+    /// 字母归组键盘的一键：`letter` 是这一组里的任一字母，由 `KeyGrid::code_of` 归成组码交给九宫格会话，宿主约定送首字母。不复用硬件键盘的 `character`。全拼使用当前的十四键或十八键表，双拼使用自己的十四键表；本地模式、专用英文或已有 26 键组字时不处理，状态不变。
     pub fn grid_key(&mut self, letter: u8) -> KeyResult {
-        let Some(grid @ KeyGrid::FourteenKey) = self.key_grid else {
+        let Some(
+            grid @ (KeyGrid::FourteenKey | KeyGrid::EighteenKey | KeyGrid::FourteenKeyShuangpin(_)),
+        ) = self.key_grid
+        else {
             return KeyResult::unhandled();
         };
         let Some(code) = grid.code_of(letter) else {
             return KeyResult::unhandled();
         };
-        if self.input.scheme() != SchemeType::Quanpin
+        let supported = match grid {
+            KeyGrid::FourteenKey | KeyGrid::EighteenKey => {
+                self.input.scheme() == SchemeType::Quanpin
+            }
+            KeyGrid::FourteenKeyShuangpin(_) => self.input.scheme() == SchemeType::Shuangpin,
+            _ => false,
+        };
+        if !supported
             || self.input.local_mode != LocalInputMode::None
             || self.input.dedicated_english
             || !(self.input.preedit().is_empty() || self.nine_key.active())
@@ -179,10 +189,14 @@ impl Session {
         self.after_nine_key(result)
     }
 
-    /// 九宫格组码已经到上限时，这一键能不能先选掉首选、再接着打（`NineKeySession::limit_pick_ready`）。`grid_key` 为真时 `value` 是 `grid_key` 收到的 14 键字母，否则是 `character` 收到的九键或九键双拼数字；两条路由各自只认自己的网格。
+    /// 九宫格组码已经到上限时，这一键能不能先选掉首选、再接着打（`NineKeySession::limit_pick_ready`）。`grid_key` 为真时 `value` 是 `grid_key` 收到的归组字母，否则是 `character` 收到的九键或九键双拼数字；两条路由各自只认自己的网格。
     pub fn grid_limit_pick_ready(&self, value: u8, grid_key: bool) -> bool {
         let code = match self.key_grid {
-            Some(grid @ KeyGrid::FourteenKey) if grid_key => grid.code_of(value),
+            Some(
+                grid @ (KeyGrid::FourteenKey
+                | KeyGrid::EighteenKey
+                | KeyGrid::FourteenKeyShuangpin(_)),
+            ) if grid_key => grid.code_of(value),
             Some(KeyGrid::NineKey | KeyGrid::NineKeyShuangpin(_)) if !grid_key => Some(value),
             _ => None,
         };
@@ -514,10 +528,18 @@ impl Session {
     }
 
     pub fn snapshot(&self) -> SessionSnapshot {
-        self.snapshot_with_helpcode_visibility(true)
+        self.snapshot_with_display_options(true, false)
     }
 
-    pub(crate) fn snapshot_with_helpcode_visibility(&self, show_helpcode: bool) -> SessionSnapshot {
+    pub(crate) fn snapshot_for_host(&self, show_helpcode: bool) -> SessionSnapshot {
+        self.snapshot_with_display_options(show_helpcode, true)
+    }
+
+    fn snapshot_with_display_options(
+        &self,
+        show_helpcode: bool,
+        segmented_quanpin: bool,
+    ) -> SessionSnapshot {
         if self.nine_key.active() {
             return self.nine_key.snapshot();
         }
@@ -529,8 +551,10 @@ impl Session {
         for item in &mut candidates {
             input.apply_english_word_case(item.source, &mut item.word);
         }
-        let preedit = if !self.shuangpin_preedit_uses_raw
-            && input.scheme() == SchemeType::Shuangpin
+        // 宿主显示全拼分词；参考回放的底层快照仍保留原文。
+        let segmented_preedit = (segmented_quanpin && input.scheme() == SchemeType::Quanpin)
+            || (!self.shuangpin_preedit_uses_raw && input.scheme() == SchemeType::Shuangpin);
+        let preedit = if segmented_preedit
             && input.local_mode == LocalInputMode::None
             && !input.dedicated_english
         {

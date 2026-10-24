@@ -110,6 +110,13 @@ uint32_t MSIMETextClientPrecedingUnicodeScalar(id<MSIMETextClient> client) {
     return selected.length == 0 ? MSIMETextClientScalarBefore(client, selected.location, nil) : 0;
 }
 
+void MSIMEApplyTransitionWithWriteGuard(NSDictionary *transition, id<MSIMETextClient> client,
+                                       MSIMEInlinePreeditStyle style, NSString *closing,
+                                       BOOL *clientHasMarkedText, BOOL (^isCurrent)(void)) {
+    MSIMEApplyTransitionWithCommitObserver(transition, client, style, closing,
+                                           clientHasMarkedText, isCurrent, nil);
+}
+
 void MSIMEApplyTransitionWithPreeditStyle(NSDictionary *transition, id<MSIMETextClient> client,
                                           MSIMEInlinePreeditStyle style) {
     MSIMEApplyTransitionWithPendingClosing(transition, client, style, nil);
@@ -131,6 +138,7 @@ void MSIMEApplyTransitionWithCommitObserver(NSDictionary *transition, id<MSIMETe
                                             BOOL *clientHasMarkedText, BOOL (^isCurrent)(void),
                                             void (^didCommit)(NSString *text)) {
     if (![transition isKindOfClass:NSDictionary.class] || (isCurrent && !isCurrent())) return;
+
     if (!closing.length) closing = nil;
     id commit = transition[@"commit"];
     // A commit ends the pair: the closing mark goes in with the text it was holding open, and the
@@ -144,6 +152,7 @@ void MSIMEApplyTransitionWithCommitObserver(NSDictionary *transition, id<MSIMETe
         if (isCurrent && !isCurrent()) return;
         if (didCommit) didCommit(commit);
         if (isCurrent && !isCurrent()) return;
+
     }
     NSDictionary *view = transition[@"view"];
     if (![view isKindOfClass:NSDictionary.class]) return;
