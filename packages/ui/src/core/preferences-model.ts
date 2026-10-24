@@ -108,6 +108,8 @@ export type Preferences = PunctuationPreferences &
       | "handwriting"
       | "fourteen_key"
       | "nine_key_shuangpin";
+    /** Android 双拼的 26 / 14 键选择；缺省为 26 键，与全拼布局独立保存。 */
+    touch_shuangpin_layout?: "twenty_six_key" | "fourteen_key";
     touch_keyboard_schemes?: TouchKeyboardSchemePreferences;
     touch_key_spacing_tenths?: number;
     touch_row_spacing_tenths?: number;
@@ -153,6 +155,8 @@ export type Preferences = PunctuationPreferences &
     input_mode_hud?: boolean;
     /** Linux 聚焦输入框时提示当前模式，独立于切换提示，缺省关闭。 */
     input_mode_focus_hud?: boolean;
+    /** Linux 允许屏幕角落的附加模式提示，缺省开启；关闭后保留光标旁提示。 */
+    input_mode_corner_hud?: boolean;
     /** macOS 菜单栏里常驻显示当前输入模式（中/双/五/日……，英文时为「英」）的状态项，默认关闭。 */
     input_mode_status_item?: boolean;
     candidate_layout?: "horizontal" | "vertical";

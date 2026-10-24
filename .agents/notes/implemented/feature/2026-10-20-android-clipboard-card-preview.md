@@ -22,6 +22,8 @@ Status: implemented
 
 预览期间复用宿主已有的全屏透明输入法窗口机制，将窗口、系统 `inputArea` 与根视图临时铺满；停靠键区保留打开前的像素高度和底部位置，内容、可见区域的 insets 仍只让应用为这块键区让出空间，根窗口触摸区域也只包含键区。这样 API 28 的子窗口画面裁剪边界包含了上方空间。布局完成后才用稳定根视图创建非焦点 `PopupWindow`，正文窗口独立处理触摸，外点关闭并让该次触摸继续到达原应用或操作行。不申请系统悬浮窗权限，也不改变浮动键盘或跟随光标候选栏的设置。
 
+应用避让边界保存扩展前的屏幕上沿，再按当前窗口原点换算；不能在窗口和子视图尚未一起完成布局时采用键区的过渡坐标。API 28 的临时扩窗决定由[Android 9 窗口 insets 修复](../../implemented/bug-fix/2026-10-24-android-api28-ime-window-insets.md)部分取代：首次显示起保持全高透明父窗口，预览只固定原键区高度，关闭后恢复包裹内容，父窗口高度不变。焦点及坐标观测的回归证据见[设备 CI 回归修复](../../implemented/bug-fix/2026-10-22-android-device-ci-regressions.md)。
+
 渲染新的历史列表、关闭面板、收起键盘、切换编辑器、重建或移除键盘视图时撤销浮层和待布局回调，清掉正文，恢复原来的窗口尺寸及键区布局，避免窗口或旧文本跨输入框存活。
 
 检索审计：[左滑删除](../../implemented/feature/2026-10-09-android-clipboard-swipe-delete.md)与本篇部分重叠，横滑阈值、两步删除和独立动画器的决定继续成立；[分词拖选](../../implemented/feature/2026-10-08-android-clipboard-segmentation.md)仅作用于分词页，不改变；[历史分页](../../implemented/feature/2026-10-19-clipboard-history-pagination.md)控制列表加载，不改变。
@@ -52,3 +54,5 @@ Status: implemented
 #9343：旧 APK 在 `ClipboardSegmentDragDeviceSmoke -e preview-actions-only true` 查找新增插入动作时确定失败。修复后 API 28/35 的专项及默认完整套件均通过，覆盖 80 行合成原文完整插入、修改进入原生编辑页、保存后返回空白原输入框、再次插入修改结果，以及固定时间戳和置顶状态不丢失；同时回归全文浮层实际像素、滚动、关闭、外点操作、窗口清理、卡片内滚动、左滑和分词拖选。两平台截图均核对底部三按钮可见。
 
 多行插入专项用 `msime_test_multiline` 显式启用既有多行编辑器；普通单行夹具会在无障碍显示中把换行转为空格，不能用它核对换行原文。256 项 JVM 冒烟、215 个设备源码、JNI/Java 契约、完整原生库和原生发布宿主 APK 构建、开发签名与 16 KiB 对齐通过；最终远端 `scripts/verify-local.sh --quick`（`20261023-053834`）、笔记与 diff 检查通过。
+
+[手动分类](2026-10-23-android-clipboard-categories.md)在原内联管理行中增加移动入口；打开分类选择器前沿用重绘关闭全文预览的边界，不新增可取焦点的窗口。

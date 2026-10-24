@@ -11,6 +11,7 @@ platforms/android/tests/device/keyboard/EnglishSuggestionPendingChecks.java
 platforms/android/tests/device/core/DeviceSmoke.java
 platforms/android/tests/device/core/PinyinStartupDeviceSmoke.java
 platforms/android/tests/device/core/ImageClipProvider.java
+platforms/android/tests/device/core/EditorProbeProvider.java
 platforms/android/tests/device/clipboard/ClipboardImageDeviceSmoke.java
 platforms/android/tests/device/candidate/CandidatePanelDeviceSmoke.java
 platforms/android/tests/device/candidate/CandidateCanvasDeviceSmoke.java
@@ -19,6 +20,7 @@ platforms/android/tests/device/candidate/AiCandidateSeatDeviceSmoke.java
 platforms/android/tests/device/keyboard/MoreToolsDeviceSmoke.java
 platforms/android/tests/device/keyboard/PagedTileGridGestureDeviceSmoke.java
 platforms/android/tests/device/keyboard/CopyDeviceInfoDeviceSmoke.java
+platforms/android/tests/device/keyboard/WorldClockDeviceSmoke.java
 platforms/android/tests/device/keyboard/EmojiPickerDeviceSmoke.java
 platforms/android/tests/device/keyboard/PairedPunctuationDeviceSmoke.java
 platforms/android/tests/device/keyboard/NineKeySidebarPairDeviceSmoke.java
@@ -48,11 +50,13 @@ platforms/android/tests/device/candidate/CandidateGlossDeviceSmoke.java
 platforms/android/tests/device/keyboard/NineKeyEnglishDeviceSmoke.java
 platforms/android/tests/device/keyboard/NineKeyPanelDeviceSmoke.java
 platforms/android/tests/device/keyboard/FourteenKeyDeviceSmoke.java
+platforms/android/tests/device/keyboard/FourteenKeyShuangpinDeviceChecks.java
 platforms/android/tests/device/keyboard/NumberPadDeviceSmoke.java
 platforms/android/tests/device/keyboard/NineKeyShuangpinDeviceSmoke.java
 platforms/android/tests/device/keyboard/ShuangpinKeyFaceChecks.java
 platforms/android/tests/device/settings/SettingsDeviceSmoke.java
 platforms/android/tests/device/settings/CommonPhraseNotesDeviceCheck.java
+platforms/android/tests/device/settings/CommonPhraseCategoriesDeviceCheck.java
 platforms/android/tests/device/settings/NoticeQueueDeviceCheck.java
 platforms/android/tests/device/settings/SkinDeleteDeviceCheck.java
 platforms/android/tests/device/settings/SettingsLifecycleSmoke.java
@@ -232,3 +236,10 @@ platforms/android/tests/device/keyboard/HistoryEditorActivity.java
 platforms/android/tests/device/keyboard/ToolbarHistoryDeviceChecks.java
 platforms/android/tests/device/keyboard/PortraitSplitDeviceChecks.java
 platforms/android/tests/device/keyboard/KeyboardFeedbackDeviceChecks.java
+platforms/android/tests/device/candidate/RelativeDateDeviceSmoke.java
+
+platforms/android/tests/device/clipboard/ClipboardCategoriesDeviceSmoke.java
+
+platforms/android/tests/device/keyboard/TrackpadEditorActivity.java
+platforms/android/tests/device/keyboard/TextTrackpadDeviceChecks.java
+
