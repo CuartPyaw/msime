@@ -595,6 +595,20 @@ char *msime_client_voice_capture(uint32_t milliseconds);
  * "windows". Other targets fail with "voice capture devices unavailable". Enumerates through
  * COM: call off the UI thread. Ids and labels may identify the user's hardware: never log them. */
 char *msime_client_voice_capture_devices(void);
+#ifdef _WIN32
+/* 原生语音审阅面板复用 Server 控制协议。create 不录音，返回 {handle:uint64}，至多 32 个活动句柄。
+ * recognize 消费句柄一次，在工作线程阻塞到识别结束，返回 {text}；不自动输入或修改剪贴板。
+ * language 为 1..64 字节 ASCII 语言标签。progress 可空，非空时在调用线程借用 UTF-8 JSON
+ * {phase:connecting|recording|recognizing|processing|complete|cancelled|failed,level:0..1,text?:string}。
+ * 回调不能展开异常，可重入 control；不保留其借用缓冲区，也不记录或落盘音频／文本。
+ * control 可从任何线程调用：0 请求结束录音，1 取消，2 关闭并取消；关闭后句柄永不复用。
+ * 执行中的调用继续持有自己的取消信号；宿主关闭窗口时先 control(2)，再等待 recognize 返回。
+ * 完成／失败不隐式关闭句柄，调用方必须 control(2)。所有返回字符串用 string_free 释放。 */
+char *msime_client_windows_voice_session_create(void);
+char *msime_client_windows_voice_session_control(uint64_t handle, uint32_t operation);
+char *msime_client_windows_voice_session_recognize(uint64_t handle, const uint8_t *language, size_t length,
+    void (*progress)(const uint8_t *, size_t, void *), void *context);
+#endif
 char *msime_client_voice_apply(uint64_t session, uint64_t generation,
                                const uint8_t *text, size_t length);
 /* On-device speech models and user-dictionary hotwords. JSON request buffers of length bytes; standard responses. Error text of the model calls is a stable code beginning with "local_model_".

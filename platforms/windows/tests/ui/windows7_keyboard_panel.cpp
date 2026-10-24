@@ -70,6 +70,8 @@ int main() {
   SendMessageW(button,WM_LBUTTONUP,0,MAKELPARAM(3,3)); assert(sends == calls_before);
   SendMessageW(button,WM_LBUTTONDOWN,MK_LBUTTON,MAKELPARAM(3,3));
   SendMessageW(button,WM_LBUTTONUP,0,MAKELPARAM(3,3)); assert(sends == calls_before + 1);
+  SendMessageW(button,WM_LBUTTONDBLCLK,MK_LBUTTON,MAKELPARAM(3,3)); assert(sends == calls_before + 1);
+  SendMessageW(button,WM_LBUTTONUP,0,MAKELPARAM(3,3)); assert(sends == calls_before + 2);
   // 每次点击重新捕获当前编辑器；前台在发送前变化、面板自己或无前台均拒绝发送。
   foreground = second; click(a); assert(delivered == second);
   auto before = sends; foreground = editor; drift = true; probes = 0; click(a); assert(sends == before); drift = false;

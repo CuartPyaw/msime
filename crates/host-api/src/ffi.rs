@@ -238,6 +238,8 @@ pub mod translation;
 pub mod voice;
 #[cfg(windows)]
 pub mod windows_handwriting;
+#[cfg(windows)]
+pub mod windows_voice;
 
 #[cfg(test)]
 mod preference_schema_tests;
@@ -261,3 +263,5 @@ pub use translation::*;
 pub use voice::*;
 #[cfg(windows)]
 pub use windows_handwriting::*;
+#[cfg(windows)]
+pub use windows_voice::*;

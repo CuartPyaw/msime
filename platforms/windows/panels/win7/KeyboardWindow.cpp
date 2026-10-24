@@ -117,7 +117,7 @@ struct KeyboardWindow::State {
     // 标准按钮的默认鼠标路径会 SetFocus；保留 HWND 可访问名称与按钮语义，鼠标路径只捕获和释放。
     switch (message) {
     case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
-    case WM_LBUTTONDOWN: if (IsWindowEnabled(window)) { SetCapture(window); SendMessageW(window,BM_SETSTATE,TRUE,0); } return 0;
+    case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK: if (IsWindowEnabled(window)) { SetCapture(window); SendMessageW(window,BM_SETSTATE,TRUE,0); } return 0;
     case WM_MOUSEMOVE:
       if (GetCapture() == window) { RECT area{}; GetClientRect(window,&area); POINT point{GET_X_LPARAM(lparam),GET_Y_LPARAM(lparam)}; SendMessageW(window,BM_SETSTATE,PtInRect(&area,point),0); } return 0;
     case WM_LBUTTONUP:
