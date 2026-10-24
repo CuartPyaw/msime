@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+# 原生产品专项：只在专用 AVD 中运行，临时锁固定当次构建的合成模块，不发布模块。
+set -euo pipefail
+repo_root=$(cd "$(dirname "$0")/../../../.." && pwd)
+cd "$repo_root"
+serial=${1:?usage: ocr-product-smoke.sh <dedicated-emulator-serial>}
+android_sdk=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
+adb="$android_sdk/platform-tools/adb"
+[[ "$serial" == emulator-* ]] || { echo 'Dedicated AVD required' >&2; exit 1; }
+avd=$("$adb" -s "$serial" emu avd name | tr -d '\r' | head -1)
+[[ "$avd" == msime-client-test || "$avd" == msime-client-test-api28 ]] || { echo 'Unexpected AVD' >&2; exit 1; }
+[[ $("$adb" -s "$serial" shell getprop ro.product.cpu.abi | tr -d '\r') == x86_64 ]] || exit 1
+mkdir -p target/android
+lock=resources/ocr-module-android.lock.json
+backup=target/android/ocr-product-production-lock.json
+cp "$lock" "$backup"
+trap 'cp "$backup" "$lock"' EXIT
+gradlew=apps/desktop/src-tauri/gen/android/gradlew
+"$gradlew" --project-dir platforms/android/gradle-app --console=plain -PmsimeOcrModule=true \
+  :ocr-module:assembleRelease :ocr-module:lintRelease
+cp platforms/android/gradle-app/ocr-module/build/outputs/apk/release/ocr-module-release-unsigned.apk \
+  target/android/ocr-product-module.apk
+python3 - <<'PY'
+import hashlib, json, subprocess
+from pathlib import Path
+path = Path('resources/ocr-module-android.lock.json')
+lock = json.loads(path.read_text())
+module = Path('target/android/ocr-product-module.apk')
+lock['source_commit'] = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
+lock['artifact'] = {
+    'name': 'msime-ocr-v1.apk',
+    # 保留域名只标识合成测试；OCR 的共享安装入口拒绝下载，不会访问该地址。
+    'url': 'https://example.test/ocr-test-only.apk',
+    'size': module.stat().st_size,
+    'sha256': hashlib.sha256(module.read_bytes()).hexdigest(),
+}
+path.write_text(json.dumps(lock, indent=2) + '\n')
+Path('target/android/ocr-product-test-lock.json').write_text(path.read_text())
+PY
+core_status=0
+MSIME_ANDROID_TEST_SERIAL="$serial" bash platforms/android/tests/device/build-core-test.sh x86_64 || core_status=$?
+bash platforms/windows/bootstrap-vcpkg.sh
+resource_dir=$(cargo run --quiet -p msime-client-core --example install_resources --locked -- target/resources)
+MSIME_ANDROID_ABIS=x86_64 MSIME_ANDROID_OMIT_ON_DEMAND=1 bash platforms/android/build-apk.sh "$resource_dir"
+api=$("$adb" -s "$serial" shell getprop ro.build.version.sdk | tr -d '\r')
+baseline_status=0
+bash platforms/android/tests/device/smoke.sh "$serial" --core || baseline_status=$?
+MSIME_ANDROID_OCR_SMOKE=1 bash platforms/android/tests/device/build-editor.sh
+"$adb" -s "$serial" install -r target/android/editor-test.apk
+# 测试只清除本专项先前生成的模块；应用其余设置和资源不清理。
+"$adb" -s "$serial" shell am force-stop app.msime.android
+"$adb" -s "$serial" shell run-as app.msime.android rm -rf files/bootstrap/state/resource-packs/ocr-module-android
+"$adb" -s "$serial" shell svc wifi disable
+"$adb" -s "$serial" shell svc data disable
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke)
+"$adb" -s "$serial" shell svc wifi enable
+"$adb" -s "$serial" shell svc data enable
+printf '%s\n' "$result" | tee target/android/ocr-product-smoke.log
+[[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* && "$result" != *MSIME_DEVICE_SMOKE_FAILED* ]]
+
+if [[ "$api" == 35 ]]; then
+  bash platforms/android/tests/device/smoke.sh "$serial" || baseline_status=$?
+fi
+printf 'core=%s baseline=%s\n' "$core_status" "$baseline_status" | tee target/android/ocr-product-baseline-status.txt
+[[ "$core_status" == 0 && "$baseline_status" == 0 ]]

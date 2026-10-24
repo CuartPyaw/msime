@@ -2,6 +2,10 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- 用户打开拍照识字时才通过独立设置页申请，不要求设备具备相机。 -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
     <uses-permission android:name="android.permission.READ_CONTACTS" />
     <!-- 关于页「检查更新」下载安装包后交给系统安装器。 -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
@@ -39,6 +43,7 @@
         <activity-alias android:name=".MainActivitySky" android:targetActivity="app.msime.android.home.HomeActivity" android:icon="@drawable/app_icon_sky" android:enabled="false" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter></activity-alias>
         <activity-alias android:name=".MainActivityDusk" android:targetActivity="app.msime.android.home.HomeActivity" android:icon="@drawable/app_icon_dusk" android:enabled="false" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter></activity-alias>
         <activity-alias android:name=".MainActivityVermilion" android:targetActivity="app.msime.android.home.HomeActivity" android:icon="@drawable/app_icon_vermilion" android:enabled="false" android:exported="true"><intent-filter><action android:name="android.intent.action.MAIN" /><category android:name="android.intent.category.LAUNCHER" /></intent-filter></activity-alias>
+        <activity android:name="app.msime.android.OcrSetupActivity" android:exported="false" android:label="拍照识字设置" android:theme="@android:style/Theme.Material.Light.NoActionBar" />
         <activity android:name="app.msime.android.VoiceRecognitionActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@android:style/Theme.Material.Light.Dialog.NoActionBar" />
         <activity android:name="app.msime.android.OfflineVoiceRecognitionActivity" android:label="水杉离线语音输入" android:exported="true" android:excludeFromRecents="true" android:theme="@android:style/Theme.Material.Light.Dialog.NoActionBar">
             <intent-filter>
