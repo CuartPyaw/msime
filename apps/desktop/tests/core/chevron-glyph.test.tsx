@@ -34,3 +34,23 @@ test("共享右向图标保留个人资料行的窄高几何", () => {
   expect(svg?.getAttribute("stroke-width")).toBe("2");
   expect(svg?.querySelector("path")?.getAttribute("d")).toBe("m1 1 6 6-6 6");
 });
+
+test("共享 chevron 保留选择面板的返回几何", () => {
+  const { container } = render(<ChevronGlyph variant="sheet-back" />);
+  const svg = container.querySelector("svg");
+  expect(svg?.getAttribute("width")).toBe("18");
+  expect(svg?.getAttribute("height")).toBe("18");
+  expect(svg?.getAttribute("viewBox")).toBe("0 0 24 24");
+  expect(svg?.getAttribute("stroke-width")).toBe("2.6");
+  expect(svg?.querySelector("path")?.getAttribute("d")).toBe("m15 6-6 6 6 6");
+});
+
+test("共享 chevron 保留鸿蒙子页头的返回几何", () => {
+  const { container } = render(<ChevronGlyph variant="subpage-back" />);
+  const svg = container.querySelector("svg");
+  expect(svg?.getAttribute("width")).toBe("12");
+  expect(svg?.getAttribute("height")).toBe("21");
+  expect(svg?.getAttribute("viewBox")).toBe("0 0 12 21");
+  expect(svg?.getAttribute("stroke-width")).toBe("2.4");
+  expect(svg?.querySelector("path")?.getAttribute("d")).toBe("M10 2 2 10.5 10 19");
+});
