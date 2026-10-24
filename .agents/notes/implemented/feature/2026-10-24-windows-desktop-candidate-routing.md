@@ -4,7 +4,7 @@ Status: implemented
 
 ## Problem
 
-#9439 使用 Sysinternals Desktops 的独立 Windows desktop object。当前一个 Server 的主线程创建一个 `CandidateWindow`，所有 TSF 客户端连接本版本的固定管道；在其他桌面输入时，候选仍只能属于建窗的桌面。改变已有窗口的位置或置顶状态不能改变其桌面归属。
+#9439 使用 Sysinternals Desktops 的独立 Windows desktop object。原实现由一个 Server 的主线程创建一个 `CandidateWindow`，所有 TSF 客户端连接本版本的固定管道；在其他桌面输入时，候选仍只能属于建窗的桌面。改变已有窗口的位置或置顶状态不能改变其桌面归属。
 
 ## Decision
 
@@ -36,9 +36,15 @@ Windows MSVC 已成功编译链接 Server、TSF DLL 与两个新增测试。`win
 
 私有桌面未切换为输入桌面时，其根窗口不可见；候选自身已有 `WS_VISIBLE`，`IsWindowVisible` 仍因祖先不可见而返回假，系统也不会自动绘制。测试因此枚举候选自身的显示标志，并显式发送 `WM_PAINT` 验证绘制资源与回执线程归属。未激活的私有桌面跳过鼠标翻页；这不等于真实桌面显示或输入验收。候选菜单是非模态 `CandidateFlyoutWindow`，失焦时直接隐藏并清除菜单目标，不能用 `EndMenu` 当成其退出路径。
 
-完整 quick 尚待执行。真实 TSF 编辑器、签名产品、已激活桌面的鼠标翻页与菜单操作仍未验收，PR 保持草稿并使用 `Refs #9439`。
+Windows runner 的完整 quick 已执行并退出 1，不能认为门禁通过。Rust workspace 与 Host API 构建完成；TSF 实验编辑器在消除宏冲突后仍被既有 `C4100`／`C4189` 警告阻止，pipe-only 测试还存在 `C4456`，并有 Windows 契约检查失败。没有新增失败基线或关闭 `/WX`。
+
+固定基点 `839cf5d2b6` 的可移植 runner 有 30 项失败；补齐 MSVC 链接诊断收集、公共头文件目录及 `NOMINMAX` 后剩余 6 项，全部已在基点失败集合中，新增原生测试没有新增误报。实际编译器的语法错误和已编译程序的非零退出仍被报告为失败。两个正式原生专项最终均通过（总计 0.74 秒）。Windows 笔记校验修正路径转换后实际扫描 1766 篇与 4 个归档封印通过，本机同组校验通过。
+
+真实 TSF 编辑器、签名产品、已激活桌面的鼠标翻页与菜单操作仍未验收，PR 保持草稿并使用 `Refs #9439`。
 
 ## Related notes audit
+
+[Windows 本地门禁兼容](../testing/2026-10-14-windows-local-gate-portability.md)持有可移植 runner 和工具调用边界。本次验证顺带补齐 MSVC 未解析符号分类及实验编辑器 `NOMINMAX`，就地更新该记录，不把既有失败加进基线。
 
 检索活跃笔记中的 issue 编号、桌面对象和按桌面候选路由，未发现持有同一决定的记录。[游戏 UI-less 与 IMM](../../implemented/bug-fix/2026-10-16-windows-game-uiless-and-imm.md)及[后续候选协议](../../implemented/feature/2026-10-16-windows-source2-profile-and-local-online.md)持有宿主自绘和会话身份边界；本记录部分关联其点击与回包约束，不替代它们。[候选非阻塞读取](../../implemented/bug-fix/2026-10-23-windows-candidate-read-contention.md)持有锁争用下的可见性规则，增加 UI 线程时仍需保留。
 

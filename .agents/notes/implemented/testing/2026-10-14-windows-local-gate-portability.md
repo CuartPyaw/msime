@@ -10,6 +10,10 @@ Status: implemented
 
 保留所有能在 Windows 上执行的检查，补齐测试和示例的目标条件，路径契约按 POSIX 表示比较，测试退出前显式释放 SQLite 连接，并将需要原始字节校验的 Unicode 许可证固定为 LF。只对确实依赖 POSIX 运行时的测试声明 Windows 跳过；Linux 上仍运行它们。引擎诊断示例继续构造符号链接资源视图，Windows 使用对应的文件或目录链接接口，不引入资源复制。C++ 测试使用与接口一致的整数类型，局部变量只改名称，常量协议布局用 `static_assert` 保留检查；不关闭 `/WX` 或屏蔽警告。
 
+`test-windows-native-run.py` 对 MSVC 的 `unresolved external symbol` 与 GNU 的 `undefined reference` 使用同一分类：缺少完整 Windows 目标的伴随源文件或系统库时仍交给 CMake；MSVC 链接器可能写到标准输出，统一收集两个输出流，并同时按稳定的 `LNK2001`／`LNK2019`／`LNK1120` 错误码识别，不依赖显示语言。实际编译错误和已运行测试的断言失败照常失败。独立编译使用与 CMake 一致的 `msimeui/include` 和 `NOMINMAX`，不能把仓库已有公共头文件误报为外部缺失，也不让系统宏改写标准算法。新增 Win32 测试必须另外通过自己的 CMake 目标实际运行，不能把可移植 runner 的跳过当作通过。TSF 实验编辑器以公开的 `NOMINMAX` 编译定义关闭 Windows 的 `min`／`max` 宏，保证其公开头文件与消费者中的标准算法也可编译。
+
+Windows 的笔记根目录通过 `cygpath -w` 传给原生 Node；MSYS 的 `/c/...` 环境变量值不会由 Windows Node 自动转换，原路径曾让验证空扫并报告 0 篇笔记，不能采信为通过。
+
 本机 Python 启动器、Git Bash 搜索次序和原生工具读取 `/dev/fd` 的问题通过临时调用环境处理，不把本机路径、凭据或工具 shim 加入仓库。缺少 SDK、设备或构建依赖的阶段仍如实报告，不能据此声称全门禁通过。
 
 `candidate_layout_reload` 的离线释义夹具用原子 `create_directory` 取得独立目录，名字含单调时钟值，碰撞时换名重试；只清理自己成功创建的目录。多个 worktree 的本机门禁可以同时运行，不能在测试开头删除固定名字的共享目录。
@@ -35,6 +39,10 @@ Status: implemented
 - Windows 示例的运行仍受系统链接创建权限约束，编译通过不等于已运行词库诊断。临时工具 shim 只修正调用环境，不屏蔽失败或替代真实检查；后续运行本机门禁仍需相同的工具环境。
 
 ## Verification
+
+在 [#9439 多桌面路由](../feature/2026-10-24-windows-desktop-candidate-routing.md)的 Windows runner 上，固定基点 `839cf5d2b6` 的可移植 runner 复现 30 项既有失败；新增 `ClientDesktop` 源文件额外暴露 MSVC 链接诊断未分类的问题，其正式 MSVC CMake 测试已运行通过。完整 quick 同时复现未修改的 TSF 实验编辑器被 `min` 宏阻止编译。补齐诊断与编译上下文后，可移植 runner 剩余 6 项失败，均在原 30 项集合内，没有新增失败。真实编译器的未解析符号分类、语法错误保留及非零退出保留三项验证通过；两个新增原生 CMake 专项均实际通过。Windows Node 修正笔记根路径后实际扫描 1766 篇与 4 个归档封印通过。
+
+当前完整 quick 仍退出 1：实验编辑器存在 `C4100`／`C4189`，pipe-only 测试存在 `C4456`，并有 Windows 契约检查失败。没有关闭 `/WX` 或新增失败豁免。下列原记录的 quick 通过结论属于此前验证，不能推广到当前树。
 
 - `cargo check -p msime-input-runtime --all-targets --locked --offline`、215 项测试和 `cargo clippy -p msime-input-runtime --all-targets --locked --offline --no-deps -- -D warnings` 通过。
 - `cargo check --examples -p msime-engine` 通过，两个诊断示例在 Windows 原生目标上编译通过。修改的 Rust 文件通过 `rustfmt --check`。

@@ -45,7 +45,7 @@ struct CandidateSuppressionChange {
   const char *cause;
 };
 // 所属桌面的 UI 线程独占构造、轮询、绘制与销毁；Reader 比窗口长寿，返回经租约验证的值，
-// 不暴露 Engine 状态。上下文菜单在同一线程保留系统的键盘操作与关闭行为。
+// 不暴露 Engine 状态。上下文菜单和关联浮层也由同一线程更新与销毁。
 class CandidateWindow final {
 public:
   using Reader = std::function<std::optional<CandidatePresentation>()>;
