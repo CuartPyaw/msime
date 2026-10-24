@@ -21,6 +21,8 @@ Win7 核心脚本为 x64 和 x86 同样构建、审计、收集 MCP，继续在 
 - [Windows 语音与 AI 能力](../../implemented/feature/2026-10-20-windows-settings-voice-ai-mac-parity.md)：部分重叠，复用既有 MCP 规则，不改变现代设置。
 - [MCP 社区皮肤发布](../../implemented/feature/2026-10-20-mcp-community-skin-publish.md)：互补，服务端能力与账号规则继续由共享 MCP 持有。
 
+Win7 SP1 x64 的交互桌面实际启动 x64 与 x86 `msime-mcp tools`，使用各自的独立合成配置与状态目录完成客户端／服务端握手，退出码均为 0，各返回 8 个工具。PowerShell 2 验收先持有进程句柄再等待退出，避免已退出进程的 `ExitCode` 为空被误判；成功结果还核对实际工具清单。
+
 ## Alternatives considered
 
 - **只展示一段固定 MCP 配置。** 不需要配置写入，但无法反映实际安装路径、运行时选项、已连接权限和配置冲突，因而沿用现有共享状态与安装服务。
