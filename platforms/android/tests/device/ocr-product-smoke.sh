@@ -61,25 +61,43 @@ printf 'core=%s baseline=%s\n' "$core_status" "$baseline_status" > target/androi
 MSIME_ANDROID_OCR_SMOKE=1 bash platforms/android/tests/device/build-editor.sh
 "$adb" -s "$serial" install -r target/android/editor-test.apk
 # release APK 不提供 run-as；专项在目标进程内清理自己先前生成的固定模块。
-instrument_options=()
-if (( api >= 31 )); then
-  "$adb" -s "$serial" shell am start -W -n app.msime.android/app.msime.android.home.HomeActivity >/dev/null
-  instrument_options=(--no-restart)
-fi
+# 每次附着前确认主进程存在；命令异常也记录失败，让后续专项和截图收集继续运行。
+run_product_case() {
+  local options=() output command_status=0 deadline pid
+  if (( api >= 31 )); then
+    "$adb" -s "$serial" shell am start -W -n app.msime.android/app.msime.android.home.HomeActivity >/dev/null || {
+      echo 'MSIME_DEVICE_SMOKE_FAILED: product activity launch failed'; return 0;
+    }
+    deadline=$((SECONDS + 15))
+    while :; do
+      pid=$("$adb" -s "$serial" shell pidof app.msime.android | tr -d '\r' || true)
+      [[ "$pid" =~ ^[1-9][0-9]*$ ]] && break
+      if (( SECONDS >= deadline )); then
+        echo 'MSIME_DEVICE_SMOKE_FAILED: product process did not start'; return 0
+      fi
+      sleep 0.1
+    done
+    options=(--no-restart)
+  fi
+  output=$("$adb" -s "$serial" shell am instrument "${options[@]}" -w "$@" \
+    app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke 2>&1) || command_status=$?
+  printf '%s\n' "$output"
+  if [[ "$command_status" != 0 ]]; then
+    printf 'MSIME_DEVICE_SMOKE_FAILED: instrumentation command exited %s\n' "$command_status"
+  fi
+}
 # 手写模型单独联网准备，失败不掩盖原生相机专项；实际共存推理在断网后执行。
 "$adb" -s "$serial" shell svc wifi enable
 "$adb" -s "$serial" shell svc data enable
-prepared=$("$adb" -s "$serial" shell am instrument "${instrument_options[@]}" -w -e ocr-handwriting-prepare true \
-  app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke)
+prepared=$(run_product_case -e ocr-handwriting-prepare true)
 printf '%s\n' "$prepared" | tee target/android/ocr-product-handwriting-model.log
 "$adb" -s "$serial" shell svc wifi disable
 "$adb" -s "$serial" shell svc data disable
-picker=$("$adb" -s "$serial" shell am instrument "${instrument_options[@]}" -w -e ocr-picker-import true \
-  app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke)
+picker=$(run_product_case -e ocr-picker-import true)
 printf '%s\n' "$picker" | tee target/android/ocr-product-picker-import.log
 picker_status=0
 [[ "$picker" == *MSIME_DEVICE_SMOKE_PASSED* && "$picker" != *MSIME_DEVICE_SMOKE_FAILED* ]] || picker_status=1
-result=$("$adb" -s "$serial" shell am instrument "${instrument_options[@]}" -w app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke)
+result=$(run_product_case)
 printf '%s\n' "$result" | tee target/android/ocr-product-smoke.log
 product_status=0
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* && "$result" != *MSIME_DEVICE_SMOKE_FAILED* ]] || product_status=1
@@ -87,20 +105,14 @@ product_status=0
 # 撤权专项独立运行，前一个用例失败也保留其结果，不让串行断言掩盖权限覆盖。
 "$adb" -s "$serial" shell pm grant app.msime.android android.permission.CAMERA
 "$adb" -s "$serial" shell pm revoke app.msime.android android.permission.CAMERA
-if (( api >= 31 )); then
-  "$adb" -s "$serial" shell am start -W -n app.msime.android/app.msime.android.home.HomeActivity >/dev/null
-fi
-denied=$("$adb" -s "$serial" shell am instrument "${instrument_options[@]}" -w -e ocr-permission-denied true \
-  app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke)
+# 等待异步撤权杀进程完成，再启动新的专项主进程。
+"$adb" -s "$serial" shell am force-stop app.msime.android
+denied=$(run_product_case -e ocr-permission-denied true)
 printf '%s\n' "$denied" | tee target/android/ocr-product-permission.log
 [[ "$denied" == *MSIME_DEVICE_SMOKE_PASSED* && "$denied" != *MSIME_DEVICE_SMOKE_FAILED* ]] || product_status=1
 coexistence_status=1
 if [[ "$prepared" == *MSIME_DEVICE_SMOKE_PASSED* && "$prepared" != *MSIME_DEVICE_SMOKE_FAILED* ]]; then
-  if (( api >= 31 )); then
-    "$adb" -s "$serial" shell am start -W -n app.msime.android/app.msime.android.home.HomeActivity >/dev/null
-  fi
-  coexistence=$("$adb" -s "$serial" shell am instrument "${instrument_options[@]}" -w -e ocr-handwriting-coexistence true \
-    app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke)
+  coexistence=$(run_product_case -e ocr-handwriting-coexistence true)
   printf '%s\n' "$coexistence" | tee target/android/ocr-product-handwriting-coexistence.log
   if [[ "$coexistence" == *MSIME_DEVICE_SMOKE_PASSED* && "$coexistence" != *MSIME_DEVICE_SMOKE_FAILED* ]]; then
     coexistence_status=0
@@ -109,6 +121,14 @@ else
   echo 'MSIME_DEVICE_SMOKE_FAILED: handwriting coexistence requires the prepared host model' \
     | tee target/android/ocr-product-handwriting-coexistence.log
 fi
+"$adb" -s "$serial" shell pm grant app.msime.android android.permission.CAMERA
+ime_handwriting_status=0
+bash platforms/android/tests/device/handwriting-smoke.sh "$serial" --ocr-coexistence \
+  2>&1 | tee target/android/ocr-product-ime-handwriting.log || ime_handwriting_status=$?
+for checkpoint in before result after failure; do
+  "$adb" -s "$serial" pull "/data/local/tmp/msime-ocr-ime-handwriting-$checkpoint.png" \
+    "target/android/ocr-product-ime-handwriting-$checkpoint.png" >/dev/null 2>&1 || true
+done
 "$adb" -s "$serial" shell svc wifi enable
 "$adb" -s "$serial" shell svc data enable
 for frame in captured preview result editor selection hidden resumed switched permission failure \
@@ -117,11 +137,11 @@ for frame in captured preview result editor selection hidden resumed switched pe
   "$adb" -s "$serial" pull "/sdcard/Android/data/app.msime.android/files/ocr-product-$frame.png" \
     "target/android/ocr-product-$frame.png" >/dev/null 2>&1 || true
 done
-printf 'core=%s baseline=%s coexistence=%s picker=%s\n' "$core_status" "$baseline_status" "$coexistence_status" "$picker_status" \
+printf 'core=%s baseline=%s coexistence=%s picker=%s ime_handwriting=%s\n' "$core_status" "$baseline_status" "$coexistence_status" "$picker_status" "$ime_handwriting_status" \
   > target/android/ocr-product-baseline-status.txt
 if [[ "$api" == 35 ]]; then
   bash platforms/android/tests/device/smoke.sh "$serial" || baseline_status=$?
 fi
-printf 'core=%s baseline=%s coexistence=%s picker=%s\n' "$core_status" "$baseline_status" "$coexistence_status" "$picker_status" \
+printf 'core=%s baseline=%s coexistence=%s picker=%s ime_handwriting=%s\n' "$core_status" "$baseline_status" "$coexistence_status" "$picker_status" "$ime_handwriting_status" \
   | tee target/android/ocr-product-baseline-status.txt
-[[ "$core_status" == 0 && "$baseline_status" == 0 && "$product_status" == 0 && "$coexistence_status" == 0 && "$picker_status" == 0 ]]
+[[ "$core_status" == 0 && "$baseline_status" == 0 && "$product_status" == 0 && "$coexistence_status" == 0 && "$picker_status" == 0 && "$ime_handwriting_status" == 0 ]]

@@ -22,11 +22,17 @@ ML Kit 的公开初始化仍通过宿主包的 `MlKitComponentDiscoveryService` 
 
 ## 产品接入边界
 
+实际输入法共存专项复用现有 `HandwritingDeviceSmoke` 和原始触摸桥，在已准备模型且断网的专用 AVD 中，通过手写控件识别完整合成「中」字、打开键盘内相机识别固定图片、取消结果后再识别「中」。前后核对 `app.msime.android:ime` 的 PID，防止重启进程后通过被误当作同进程共存；取消 OCR 后编辑器必须保持此前的手写提交。触摸桥抽为共用设备脚本，普通手写验收与 OCR 专项使用同一条真实输入路径，不在两个脚本各维护一份。该路径尚待两版设备验收，仍不代表真机和照片质量通过。
+
 文件选择器专项从原生导入页打开系统 `ACTION_OPEN_DOCUMENT`，通过独立测试 UID 的只读 `DocumentsProvider` 选择有效模块或同长度损坏模块。该提供方只读专项 APK 自带的固定资产，普通测试包不显示此根，不接触用户外部存储。分别检查初次取消、损坏导入、有效导入后实际 OCR、取消替换和坏模块替换后原模块仍可推理；不直接调用活动回调或用内部安装接口冒充系统 URI 授权。专项失败独立保留，不阻止相机、撤权和真实手写共存记录。此路径尚待两版设备运行，不能据源码或编译宣称验收。
 
 独立共存专项单独准备宿主已有的中文手写模型，准备阶段允许联网，随后关闭模拟器网络。专项保留同一个宿主手写识别器，在可选 OCR 模块导入、初始化、重开和篡改拒绝前后识别同一组合成「中」字笔画，要求包含完整目标字且两次候选一致。测试通过反射调用产品的公开手写适配接口，不向测试 APK 再捆绑一份 Google SDK，不以伪造模型回包替代推理。模型准备和共存各自记录状态，不能覆盖原生相机、撤权或基础冒烟的失败。这验证目标应用进程内两个 SDK 容器的实际推理共存，仍不能替代 `:ime` 手写界面与真机验收。
 
-第十轮设备运行中，API 28 的真实手写模型准备、相机 OCR 和撤权专项通过，共存专项在清理上次合成模块时发现 ART 自动生成的 `oat/x86_64`，尚未进入手写推理。夹具仅把该模块对应的 `odex`、`vdex`、`art` 加入固定路径白名单，逐级用 `lstat` 拒绝符号链接及其他条目；不放开任意目录删除。此修正仍待两版设备重跑。
+第十轮设备运行中，API 28 的真实手写模型准备、相机 OCR 和撤权专项通过，共存专项在清理上次合成模块时发现 ART 自动生成的 `oat/x86_64`，尚未进入手写推理。夹具仅把该模块对应的 `odex`、`vdex`、`art` 加入固定路径白名单，逐级用 `lstat` 拒绝符号链接及其他条目；不放开任意目录删除。该修正后的第十一轮 API 28 已重跑，结果见下段；API 35 尚未收齐。
+
+第十一轮 API 28 的四个共享 crate 设备套件、完整 `--core` 冒烟、模型准备、相机 OCR 和撤权均通过，共存仍在未知清理条目断言失败，不能称已推理。AOSP 的 [Android 9 `DexLoadReporter`](https://android.googlesource.com/platform/frameworks/base/+/android-9.0.0_r20/core/java/android/app/DexLoadReporter.java) 与 [Android 15 同一入口](https://android.googlesource.com/platform/frameworks/base/+/android-15.0.0_r1/core/java/android/app/DexLoadReporter.java)还定义了 `oat/<APK>.cur.prof`，Android 15 另定义 `oat/<APK>.prof`；[Android 9 `OatFileAssistant::Lock`](https://android.googlesource.com/platform/art/+/android-9.0.0_r20/runtime/oat_file_assistant.cc)定义 `<APK>.x86_64.flock`。夹具额外接受当前合成模块对应的这三个精确路径，仍要求普通文件；拒绝时只显示受限的合成模块派生文件名，其他名字隐藏。源码证明这些是平台合法产物，尚未由该轮设备目录清单证明具体未知条目是哪一个，后续以重跑结果为准。
+
+[第十三轮产品专项](https://github.com/metasequoiaime/msime/actions/runs/40101164998)中，API 28 的系统文件选择器完整导入、取消与损坏替换均通过；相机与主进程共存仍在清理未知 ART 条目时失败。API 35 的模型准备、原生相机 OCR 通过，文件选择器失败于损坏导入步骤，撤权后的 `--no-restart` 又触发系统 `ProcessRecord` 空指针，尚未执行后续专项。脚本现在在每次附着前启动并确认主进程，撤权后先显式停止旧进程，instrumentation 命令异常也写入失败标记并继续其他专项；选择器操作细分阶段，便于下一轮定位。两版四个共享 crate 设备套件通过，基础冒烟均停在十八键窄布局的三排字母键宽度断言；不能称完整门禁通过。这些新夹具修正仍待设备验证。第十一轮 API 28 的剩余原图已逐张检查：部分选择只插入 `2468`，恢复预览显示完整源图，撤权后无预览；`hidden` 与 `switched` 是 HOME 检查点，不是最终跨编辑器截图。
 
 产品分支接入键盘内相机和主进程导入页，但在真实设备验证及正式模块分发完成前保持提案状态。`resources/ocr-module-android.lock.json` 的 `artifact: null` 明确表示尚未提供配套模块：共享层不列出、不安装、不导入它，设置页不能选择任意 APK 绕过检查。此时没有下载地址，也不能宣称 #9207 已交付。
 
