@@ -9,11 +9,11 @@ namespace {
   throw std::runtime_error("Input mode HUD layout test failed at line " +
                            std::to_string(line));
 }
-#define require(value)                                                         \
-  do {                                                                         \
-    if (!(value))                                                              \
-      require_failed(__LINE__);                                                \
-  } while (false)
+void require_at(bool value, int line) {
+  if (!value)
+    require_failed(line);
+}
+#define require(value) require_at((value), __LINE__)
 } // namespace
 int main() {
   try {
