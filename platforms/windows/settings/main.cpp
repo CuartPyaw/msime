@@ -72,6 +72,7 @@
 #include "TranslationServiceSettings.h"
 #include "TypingStatisticsModel.h"
 #include "VoiceSettings.h"
+#include "../src/input/ToggleHotkeyChord.h"
 #include "msime_client.h"
 #include "msimeui/AnimatedImage.h"
 
@@ -21394,10 +21395,97 @@ private:
                                  doc.SetBoolean(L"voice_input." + std::wstring(key), on);
                              }, true);
                            }));
+    add_row(shortcuts, 0xEDA7, L"语音输入开始／结束",
+            L"点击后按组合键，Esc 取消，Backspace / Delete 解绑。按一次开始，再按一次结束。",
+            voice_toggle_recorder());
     auto rows = add_fold(
         shortcuts, L"更多选项", voice_hotkeys_more_open_ || focus_row_ == L"Ctrl+F9 切换语音",
         [this](bool expanded) { voice_hotkeys_more_open_ = expanded; });
     bool_row(rows, 0xEDA7, L"Ctrl+F9 切换语音", L"", L"voice_input.hotkey_ctrl_f9", true);
+  }
+
+  // 录键只产生规范主键名；语法、冲突和归一化通过 C ABI 使用共享偏好规则。
+  FrameworkElement voice_toggle_recorder() {
+    auto recording = std::make_shared<bool>(false);
+    auto message = make_text(L"", 12, palette_.text);
+    message.TextWrapping(TextWrapping::Wrap);
+    auto recorder = make_row_button(false);
+    const auto label = [this] {
+      const auto stored = document_.String(L"keybindings.toggle_voice_input", L"");
+      return stored.empty() ? std::wstring(L"未绑定") : stored;
+    };
+    recorder.Content(box_value(hstring(label())));
+    recorder.IsEnabled(loaded_);
+    A11y::SetName(recorder, L"语音输入开始／结束");
+    recorder.Click([recording, message](Inspectable const &sender, RoutedEventArgs const &) {
+      *recording = true;
+      message.Text(L"");
+      sender.as<Button>().Content(box_value(L"请按组合键…"));
+    });
+    recorder.LostFocus([recording, label](Inspectable const &sender, RoutedEventArgs const &) {
+      *recording = false;
+      sender.as<Button>().Content(box_value(hstring(label())));
+    });
+    recorder.PreviewKeyDown([this, recording, label, message](
+        Inspectable const &sender, Input::KeyRoutedEventArgs const &args) {
+      if (!*recording) return;
+      args.Handled(true);
+      const auto key = static_cast<unsigned>(args.Key());
+      if (key == VK_ESCAPE) {
+        *recording = false;
+        message.Text(L"");
+        sender.as<Button>().Content(box_value(hstring(label())));
+        return;
+      }
+      if (key == VK_CONTROL || key == VK_SHIFT || key == VK_MENU ||
+          key == VK_LWIN || key == VK_RWIN) return;
+      auto chord = msime::windows::toggle_key_name(key);
+      if (key == VK_BACK || key == VK_DELETE) chord.clear();
+      else if (chord.empty()) {
+        message.Text(L"此主键暂不支持，请换一个组合键");
+        return;
+      } else {
+        const auto pressed = [](int modifier) { return (GetKeyState(modifier) & 0x8000) != 0; };
+        std::string prefix;
+        if (pressed(VK_CONTROL)) prefix += "Ctrl+";
+        if (pressed(VK_MENU)) prefix += "Alt+";
+        if (pressed(VK_SHIFT)) prefix += "Shift+";
+        if (pressed(VK_LWIN) || pressed(VK_RWIN)) prefix += "Meta+";
+        chord = prefix + chord;
+      }
+      JsonObject request;
+      request.SetNamedValue(L"field", JsonValue::CreateStringValue(L"toggle_voice_input"));
+      request.SetNamedValue(L"chord", JsonValue::CreateStringValue(text(chord)));
+      const auto keys = document_.Value(L"keybindings");
+      request.SetNamedValue(L"keybindings", keys && keys.ValueType() == JsonValueType::Object
+          ? keys : JsonObject());
+      request.SetNamedValue(L"voice_ctrl_f9", JsonValue::CreateBooleanValue(
+          document_.Boolean(L"voice_input.hotkey_ctrl_f9", true)));
+      const auto bytes = utf8(request.Stringify());
+      const auto response = take_response(msime_client_check_toggle_hotkey(
+          reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+      try {
+        if (!response.ok) throw std::runtime_error("hotkey check unavailable");
+        const auto checked = JsonObject::Parse(text(response.text)).GetNamedObject(L"value");
+        if (!checked.GetNamedBoolean(L"ok", false)) {
+          message.Text(checked.GetNamedString(L"kind", L"") == L"conflict"
+              ? L"与现有快捷键冲突，请换一个组合键" : L"无法识别的组合键");
+          return;
+        }
+        const auto normalized = std::wstring(checked.GetNamedString(L"chord"));
+        *recording = false;
+        change([&](PreferencesDocument &doc) {
+          doc.SetString(L"keybindings.toggle_voice_input", normalized);
+        }, true);
+      } catch (...) {
+        message.Text(L"无法检查快捷键，请稍后重试");
+      }
+    });
+    StackPanel field;
+    field.Spacing(4);
+    field.Children().Append(recorder);
+    field.Children().Append(message);
+    return field;
   }
 
   void redraw_voice() {

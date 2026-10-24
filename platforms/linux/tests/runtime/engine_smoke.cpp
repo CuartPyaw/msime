@@ -1407,6 +1407,7 @@ int main(int argc, char **argv) {
       english_voice["preferences"]["ime_mode_scope"] = "app";
       english_voice["preferences"]["default_ime_mode"] = "english";
       english_voice["preferences"]["keybindings"]["switch_language_shift"] = true;
+      english_voice["preferences"]["keybindings"]["toggle_voice_input"] = "Ctrl+Alt+F8";
       msime_ibus_configure(english_voice.dump());
       engine = create_engine();
       seen = Observation{};
@@ -1430,6 +1431,28 @@ int main(int argc, char **argv) {
       voice_provider.release_final = true;
       require(wait_until([&] { return voice_provider.finished.load() == voice_finals + 1; }),
               "Cancelled English-mode provider did not finish");
+      // 自定义切换在英文态走真实 IBus 入口和合成语音服务，重复按下不停止，完整松键后再按才结束。
+      voice_starts = voice_provider.started.load();
+      auto custom_stops = voice_provider.stop_requests.load();
+      require(!key(IBUS_F8, IBUS_CONTROL_MASK | IBUS_MOD1_MASK | IBUS_SHIFT_MASK),
+              "custom voice shortcut accepted extra Shift");
+      require(key(IBUS_F8, IBUS_CONTROL_MASK | IBUS_MOD1_MASK),
+              "custom voice shortcut was not consumed");
+      require(wait_until([&] { return voice_provider.started.load() == voice_starts + 1; }),
+              "custom voice shortcut did not start the provider");
+      require(key(IBUS_F8, IBUS_CONTROL_MASK | IBUS_MOD1_MASK) &&
+                  voice_provider.stop_requests.load() == custom_stops,
+              "custom voice shortcut repeat stopped the recording");
+      require(key(IBUS_F8, IBUS_RELEASE_MASK), "custom voice release was not consumed");
+      require(key(IBUS_F8, IBUS_CONTROL_MASK | IBUS_MOD1_MASK) &&
+                  key(IBUS_F8, IBUS_RELEASE_MASK), "custom voice shortcut did not stop recording");
+      require(wait_until([&] { return voice_provider.stop_requests.load() == custom_stops + 1; }),
+              "custom voice stop did not reach the provider");
+      voice_provider.release_final = true;
+      require(wait_until([&] { return seen.committed == "synthetic voice"; }),
+              "custom voice result was not committed");
+      require(!seen.input_enabled, "custom voice shortcut changed the input mode");
+      seen.committed.clear();
       // Ctrl+F9 starts, stops and commits a recording without ever leaving English mode, so the result lands with no Engine session or view to render.
       voice_starts = voice_provider.started.load();
       voice_cancels = voice_provider.cancelled.load();
