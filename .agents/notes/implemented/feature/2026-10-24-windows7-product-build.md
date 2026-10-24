@@ -69,6 +69,6 @@ Win7 SP1 的 DirectWrite 实测不能直接合成当前字体中的部分 ZWJ、
 
 ## Consequences
 
-重启 VM100 前，原记事本文档已由 Win7 内部逐字备份、校验并在重启后重新打开；没有丢失用户文档。为补齐音频证据，在 Proxmox 为 VM100 加入 `ich9-intel-hda`（SPICE）设备并正常关机启动。Win7 设备管理器报告两个音频设备和三个 HDA 端点均 `ConfigManagerErrorCode=0`，`AudioSrv` 与 `AudioEndpointBuilder` 均运行。最终核心 API 的 x64 与 x86 进程各实际录得约一秒、16 kHz、单声道采样（每次 15767 帧），所以兼容层的真实录音路径已覆盖；这仍是虚拟声卡，不能等同于物理麦克风、扬声器或独立 32 位 Win7 系统验收。Server 提示音的独立探针在 Win7 的旧 PowerShell 启动器上不能可靠回传 stdout，因此不把它写成通过，产品音频播放仍需后续可观测的宿主入口复验。
+重启 VM100 前，原记事本文档已由 Win7 内部逐字备份、校验并在重启后重新打开；没有丢失用户文档。为补齐音频证据，在 Proxmox 为 VM100 加入 `ich9-intel-hda`（SPICE）设备并正常关机启动。Win7 设备管理器报告两个音频设备和三个 HDA 端点均 `ConfigManagerErrorCode=0`，`AudioSrv` 与 `AudioEndpointBuilder` 均运行。最终核心 API 的 x64 与 x86 进程各实际录得约一秒、16 kHz、单声道采样（每次 15767 帧）；同源 Server 音频探针在两个架构分别实际录音 18880 帧、播放渲染 31200 帧并播放开始／结束两次提示音，均退出 0。这里仍是虚拟声卡，不能等同于物理麦克风、扬声器或独立 32 位 Win7 系统验收。
 
 32 位 Win7 系统仍需独立系统环境，WOW64 进程通过不能替代它。签名信任和 Win7 的 SHA-2 补丁基线必须按真实安装结果记录，不能将未签名手工启动等同于正式分发验收。
