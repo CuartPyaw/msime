@@ -14,7 +14,7 @@ Status: implemented
 
 候选宽度夹具避免遮蔽外层 `inline_card`；HUD 时长和工具栏缩放的常量断言使用 `static_assert`，不让 MSVC 的常量条件警告中断 `/WX`。TSF 标点策略测试显式以 UTF-8 读取中文字符，避免开发机代码页把多个 Unicode case 折成同一个值。上述修正保留检查内容，不调整警告级别或失败基线。
 
-可移植 Windows 测试运行器在原生 Windows clang 下采用与 CMake 一致的 `NOMINMAX`、Unicode 别名与 msimeui 头文件目录。缺少其他翻译单元或入口仍交回完整 CMake 构建：MSVC 的 `LNK2001/2019/1561` 与原有 Unix `undefined reference` 等价，按错误码读取 stdout 与 stderr，避免本地化文本导致误报；其他编译和链接错误继续失败。需要真实产品目录与清单的 Win7 冷装载探针明确由系统验收驱动，不无参调用。路径编码夹具使用 `u8path` 构造 UTF-8 合成路径，避免 Windows 的 ANSI 路径构造器先损坏测试输入。实际 Windows clang 运行 130 项通过，2 项保留原宿主差异排除，129 项由完整 Windows 构建负责；没有添加失败基线。
+可移植 Windows 测试运行器在原生 Windows clang 下采用与 CMake 一致的 `NOMINMAX`、Unicode 别名与 msimeui 头文件目录。缺少其他翻译单元或入口仍交回完整 CMake 构建：MSVC 的 `LNK2001/2019/1561` 与原有 Unix `undefined reference` 等价，按错误码读取 stdout 与 stderr，避免本地化文本导致误报；其他编译和链接错误继续失败。需要真实产品目录与清单的 Win7 冷装载探针明确由系统验收驱动，不无参调用。路径编码夹具在 C++17 使用 `u8path`、在 C++20 使用 `char8_t` 路径构造器生成 UTF-8 合成路径，避免 Windows 的 ANSI 路径构造器先损坏测试输入。实际 Windows clang 运行 130 项通过，2 项保留原宿主差异排除，129 项由完整 Windows 构建负责；没有添加失败基线。
 
 `candidate_layout_reload` 的离线释义夹具用原子 `create_directory` 取得独立目录，名字含单调时钟值，碰撞时换名重试；只清理自己成功创建的目录。多个 worktree 的本机门禁可以同时运行，不能在测试开头删除固定名字的共享目录。
 

@@ -65,7 +65,7 @@ class ColdProbe {
     }
     CloseHandle(process.hProcess);
     if (!complete || result != 0)
-      throw std::runtime_error("cold load failed: " + image.filename().string());
+      throw std::runtime_error("cold load failed: " + image.filename().u8string());
   }
 
  private:
@@ -82,7 +82,7 @@ int wmain(int argc, wchar_t** argv) {
       if (std::filesystem::equivalent(executable_path().parent_path(), image.parent_path()))
         throw std::runtime_error("cold-load probe must run outside the image directory");
       if (!LoadLibraryExW(image.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH))
-        throw std::runtime_error("cannot cold load " + image.filename().string() + ": " + std::to_string(GetLastError()));
+        throw std::runtime_error("cannot cold load " + image.filename().u8string() + ": " + std::to_string(GetLastError()));
       return 0;
     }
     if (argc < 4) throw std::runtime_error("expected manifest, image directory and plugin DLL names");
@@ -112,7 +112,7 @@ int wmain(int argc, wchar_t** argv) {
       if (fields[4] == "1") continue;
       if (fields[4] != "0") throw std::runtime_error("invalid delay marker");
       const auto& name = fields[1];
-      if (std::filesystem::path(name).filename().string() != name || name.find(':') != name.npos)
+      if (std::filesystem::path(name).filename().u8string() != name || name.find(':') != name.npos)
         throw std::runtime_error("invalid import module name");
       if (!modules.count(name)) {
         auto path = root / name;
@@ -138,7 +138,7 @@ int wmain(int argc, wchar_t** argv) {
     for (const auto& file : std::filesystem::directory_iterator(root)) {
       if (file.path().extension() != L".dll") continue;
       if (!LoadLibraryExW(file.path().c_str(),nullptr,LOAD_WITH_ALTERED_SEARCH_PATH))
-        throw std::runtime_error("cannot load package image: " + file.path().filename().string() + ": " + std::to_string(GetLastError()));
+        throw std::runtime_error("cannot load package image: " + file.path().filename().u8string() + ": " + std::to_string(GetLastError()));
       ++images;
     }
     std::cout << "Win7 actual module exports and ordinals passed: " << count << " imports, " << modules.size() << " modules, " << images << " package DLLs, " << cold_images << " cold loads\n";
