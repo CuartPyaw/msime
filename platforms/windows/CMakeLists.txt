@@ -1484,6 +1484,7 @@ set_tests_properties(windows-candidate-canvas PROPERTIES TIMEOUT 10)
 # 设置卡片与社区导出的真实离屏像素，使用系统 Direct2D／WIC。
 add_executable(windows-candidate-canvas-preview tests/ui/candidate_canvas_preview.cpp)
 target_include_directories(windows-candidate-canvas-preview PRIVATE src)
+target_compile_definitions(windows-candidate-canvas-preview PRIVATE NOMINMAX)
 target_link_libraries(windows-candidate-canvas-preview PRIVATE d2d1 dwrite windowscodecs ole32 uuid)
 if(MSVC)
   target_compile_options(windows-candidate-canvas-preview PRIVATE /W4 /WX /utf-8)
