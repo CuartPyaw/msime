@@ -139,7 +139,7 @@ STDAPI CTextStore::QueryInsert(LONG acpInsertStart, LONG acpInsertEnd, ULONG cch
         acpInsertEnd > static_cast<LONG>(_pEditor->GetTextLength()) ||
         cch > CTextContainer::kMaxTextUnits -
                    (_pEditor->GetTextLength() - static_cast<ULONG>(acpInsertEnd - acpInsertStart)) ||
-        cch > static_cast<ULONG>(std::numeric_limits<LONG>::max() - acpInsertStart))
+        cch > static_cast<ULONG>((std::numeric_limits<LONG>::max)() - acpInsertStart))
         return E_INVALIDARG;
 
     *pacpResultStart = acpInsertStart;
@@ -263,7 +263,7 @@ STDAPI CTextStore::SetText(DWORD, LONG acpStart, LONG acpEnd, __in_ecount(cch) c
 
     const ULONG removed = static_cast<ULONG>(acpEnd - acpStart);
     if (cch > CTextContainer::kMaxTextUnits - (_pEditor->GetTextLength() - removed) ||
-        cch > static_cast<ULONG>(std::numeric_limits<LONG>::max() - acpStart))
+        cch > static_cast<ULONG>((std::numeric_limits<LONG>::max)() - acpStart))
         return E_INVALIDARG;
 
     // Check the composition status
@@ -528,7 +528,7 @@ STDAPI CTextStore::InsertTextAtSelection(DWORD dwFlags, __in_ecount(cch) const W
     const ULONG removed = static_cast<ULONG>(acpEnd - acpStart);
 
     if ((cch && !pchText) || cch > CTextContainer::kMaxTextUnits - (_pEditor->GetTextLength() - removed) ||
-        cch > static_cast<ULONG>(std::numeric_limits<LONG>::max() - acpStart))
+        cch > static_cast<ULONG>((std::numeric_limits<LONG>::max)() - acpStart))
         return E_INVALIDARG;
 
     if (dwFlags & TS_IAS_QUERYONLY)

@@ -266,6 +266,8 @@ def include_flags() -> list[str]:
     flags += [f"-I{path}" for path in EXTRA_INCLUDES if pathlib.Path(path).exists()]
     # shared/contracts/msime_edition.h 要求构建选定一个版本；Windows 的 CMake 缺省编 full，这里照做。
     flags += ["-DMSIME_EDITION_FULL", "-DNOMINMAX"]
+    if sys.platform == "win32":
+        flags += ["-DUNICODE", "-D_UNICODE"]
     return flags
 
 
@@ -358,9 +360,6 @@ def build(
         "No such file or directory",
         "Undefined symbols",
         "undefined reference",
-        "undefined symbol:",  # LLD 与 GNU ld 对同一种缺失链接依赖使用不同诊断。
-        # MSVC 的同类诊断：这个原生源文件仍需由 Windows CMake 目标链接系统库。
-        "unresolved external symbol",
     )
     # MSVC 链接器也会把诊断写到 stdout；错误码不受系统显示语言影响。
     diagnostic = compiled.stdout + compiled.stderr
@@ -371,6 +370,13 @@ def build(
             return None, f"cannot find {missing.group(1)}, which this repository has at {found}: the include path here is missing its directory"
     if any(marker in diagnostic for marker in ordinary) or re.search(
         r"\berror LNK(?:2001|2019|1120):", diagnostic
+    ):
+        return None, ""
+    # LLVM 在 Windows 上的同类链接错误也表示缺少独立翻译单元的依赖。
+    if sys.platform == "win32" and any(
+        line.startswith(("lld-link: error: undefined symbol:",
+                         "lld-link: error: subsystem must be defined"))
+        for line in diagnostic.splitlines()
     ):
         return None, ""
     if relative in HOST_DIFFERENCES:
