@@ -7222,10 +7222,10 @@ struct KeyboardView {
         accent: this.skin.toggleForeground,
         ringColor: this.skin.background,
         checkPath: KeyboardIconPaths.CHECK,
-        // 语言随词库一起提供，所以该磁贴打开「词库」（`dc.html` 的添加项打开的是词库页），而不是设置首页。
+        // 语言在「输入」页的「语言与方案」中管理，词库页只管理词条。
         onTap: (): void => {
           this.show(SURFACE_NONE);
-          KeyboardSession.shared.openSettings('dictionary');
+          KeyboardSession.shared.openSettings('input');
         }
       })
     } else if (entry.kind === PICKER_SCHEME) {
