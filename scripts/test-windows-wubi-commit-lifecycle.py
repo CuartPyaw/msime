@@ -23,7 +23,6 @@ unit = r'''
 #include "platforms/windows/tsf/WubiCommitOwner.h"
 #include <atomic>
 #include <deque>
-#include <atomic>
 #include <map>
 #include <mutex>
 #include <string>
@@ -55,9 +54,6 @@ namespace Global { std::atomic<bool> TsfDiagnosticLogEnabled{false}; }
 std::wstring BoolFlag(bool value) { return value ? L"1" : L"0"; }
 void QueueTsfDiagnosticLog(const std::wstring &) {}
 template<class... T> void DebugTsfIssue47(T...) {}
-namespace Global { std::atomic_bool TsfDiagnosticLogEnabled{false}; }
-void QueueTsfDiagnosticLog(const std::wstring &) {}
-inline std::wstring BoolFlag(bool value) { return value ? L"1" : L"0"; }
 struct CMetasequoiaIME;
 class CCommitCandidateAndContinueEditSession;
 struct ITfContext {
@@ -93,7 +89,6 @@ struct CMetasequoiaIME {
         struct { int Category=0,Function=0; } keyState; };
     std::atomic<bool> _localSessionResetPending{false};
     msime::tsf::WubiCommitOwner _wubiCommitOwner;
-    std::atomic_bool _localSessionResetPending{false};
     std::deque<DeferredKeyDown> _deferredKeyDowns, _deferredAppliedPrefix;
     DeferredKeyDown _deferredKeyInFlight;
     bool _hasDeferredKeyInFlight=false;
