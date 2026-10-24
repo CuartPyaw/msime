@@ -6,7 +6,10 @@ use std::sync::Arc;
 use super::mid_sentence::{
     satisfies_syllable_helpcodes, syllable_helpcode_matches, syllable_helpcodes_signature,
 };
-use super::query::{remove_manual_delimiters, trim_trailing_letters_preserve_delimiters};
+use super::query::{
+    raw_length_for_effective_prefix, remove_manual_delimiters,
+    trim_trailing_letters_preserve_delimiters,
+};
 use super::typo_edges::{collect_shuangpin_typo_edges, SHUANGPIN_TYPO_TYPES};
 use super::utils::{convert_seg_shuangpin_to_seg_complete_pinyin, pinyin_segmentation};
 use super::ShuangpinProfile;
@@ -30,6 +33,7 @@ use crate::ordering::apply_order;
 use crate::paths::RuntimePaths;
 use crate::pinyin::jianpin::QuerySource;
 use crate::pinyin::segment::split_segments;
+use crate::pinyin::syllables::{has_only_complete_pinyin_segments, is_intact};
 use crate::quanpin::dictionary::{
     CACHE_CAPACITY, INITIAL_CANDIDATE_LIMIT, TYPO_SPAN_CACHE_CAPACITY,
 };
@@ -339,6 +343,13 @@ impl ShuangpinDictionary {
             }
         }
 
+        let segments = split_segments(&convert_seg_shuangpin_to_seg_complete_pinyin(
+            segmentation,
+            self.profile,
+        ));
+        let incomplete_tail = segments.split_last().is_some_and(|(last, leading)| {
+            !is_intact(last) && has_only_complete_pinyin_segments(leading)
+        });
         let mut candidates = self.generate(pure, segmentation, rows_key);
         // Every shorter prefix group follows, longest first; phrase creation picks from them (SD:215-231). The reference appended each group whole, so a word several groups answer (a manual delimiter leaves empty pieces, and ni'''nn'i holds the ni group three times) was listed once per group; a word already listed keeps its first, longest-prefix seat instead.
         let mut prefix_rows = Vec::with_capacity(prefix_group_count(segmentation));
@@ -346,14 +357,17 @@ impl ShuangpinDictionary {
         while let Some(cut) = prefix.rfind('\'') {
             prefix = &prefix[..cut];
             let prefix_pure = remove_manual_delimiters(prefix);
-            prefix_rows.push(self.generate(&prefix_pure, prefix, ""));
+            // 未完成尾音节不能解整句，但完整前缀仍可组词；沿用它自己的缓存和按键范围。
+            let rows = if incomplete_tail && prefix_rows.is_empty() {
+                let end = raw_length_for_effective_prefix(rows_key, prefix_pure.len());
+                self.generate_series(&prefix_pure, prefix, &rows_key[..end])
+            } else {
+                self.generate(&prefix_pure, prefix, "")
+            };
+            prefix_rows.push(rows);
         }
         append_prefix_rows(&mut candidates, prefix_rows);
 
-        let segments = split_segments(&convert_seg_shuangpin_to_seg_complete_pinyin(
-            segmentation,
-            self.profile,
-        ));
         self.merge_sentences(&mut candidates, &segments, segmentation, pure, rows_key);
 
         let key = key.take().unwrap_or_else(|| series_key.to_owned());

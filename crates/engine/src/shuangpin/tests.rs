@@ -1194,3 +1194,70 @@ fn unmatched_trailing_helpcode_keeps_longer_prefix_first() {
     let candidates = engine.query(&request("fgkluvu", true), Some(&keymap(&[("水", "ln")])));
     assert_eq!(words(&candidates)[0], "疯狂水");
 }
+
+#[test]
+fn incomplete_tail_keeps_generated_prefix_and_its_input_span() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+         INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',1000);\
+         CREATE TABLE tbl_2_k(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+         INSERT INTO tbl_2_k VALUES('ke''ji','kj','科技',900);\
+         CREATE TABLE tbl_3_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+         INSERT INTO tbl_3_n VALUES('ni''hao''ke','nhk','你好可',800);\
+         CREATE TABLE tbl_1_q(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+         INSERT INTO tbl_1_q VALUES('qing','q','清',700);",
+    );
+    let codes = keymap(&[
+        ("你", "ab"),
+        ("好", "ab"),
+        ("科", "ab"),
+        ("技", "ab"),
+        ("清", "ab"),
+    ]);
+    for helpcode in [false, true] {
+        let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+        for _ in 0..2 {
+            for (typed, expected, consumed) in [
+                ("nihckeji", "你好科技", "nihckeji"),
+                ("nihckejiq", "你好科技", "nihckeji"),
+                ("nihckejiqkl", "你好科技清", "nihckejiqk"),
+                ("ni'hc'ke'ji'q", "你好科技", "nihckeji"),
+                ("ni'hc'ke'ji'qk'l", "你好科技清", "nihckejiqk"),
+            ] {
+                let mut typed_request = request(typed, helpcode);
+                typed_request.shuangpin_helpcode_modes.direct_helpcode = false;
+                let rows = engine.query(&typed_request, Some(&codes));
+                assert_eq!(words(&rows)[0], expected, "{typed}, helpcode={helpcode}");
+                assert_eq!(rows[0].source, CandidateSource::Generated);
+                assert_eq!(rows[0].pinyin, consumed, "{typed}, helpcode={helpcode}");
+                assert_eq!(rows.iter().filter(|row| row.word == expected).count(), 1);
+            }
+        }
+    }
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let mut disabled = request("nihckejiq", false);
+    disabled.sentence_association.word_lattice = false;
+    let rows = engine.query(&disabled, None);
+    assert_eq!(words(&rows)[0], "你好可");
+    assert!(!rows
+        .iter()
+        .any(|row| row.source == CandidateSource::Generated));
+
+    let rows = engine.query(&request("n'hc'ke'ji'q", false), None);
+    assert!(!rows
+        .iter()
+        .any(|row| row.source == CandidateSource::Generated));
+
+    Connection::open(fixture.paths.dictionary(assets::MAIN_DICTIONARY))
+        .unwrap()
+        .execute_batch(
+            "CREATE TABLE tbl_5_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+             INSERT INTO tbl_5_n VALUES('ni''hao''ke''ji''qing','nhkjq','你好科技清',600);",
+        )
+        .unwrap();
+    let mut engine = fixture.engine(ShuangpinProfileKind::Xiaohe);
+    let rows = engine.query(&request("nihckejiq", false), None);
+    assert_eq!(words(&rows)[0], "你好科技清");
+    assert_eq!(rows[0].source, CandidateSource::Database);
+    assert_eq!(words(&rows)[1], "你好科技");
+}
