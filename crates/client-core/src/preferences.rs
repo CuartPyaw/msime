@@ -1129,6 +1129,9 @@ pub struct Preferences {
     /// Linux 聚焦输入框时显示当前中英文状态，与切换提示独立。新装与缺字段的旧文档默认关闭；其他宿主保留但不使用。
     #[serde(default)]
     pub input_mode_focus_hud: bool,
+    /// Linux 允许屏幕角落的附加模式提示；关闭后保留光标旁提示和其他位置的产品标志。缺省开启以兼容旧配置。
+    #[serde(default = "enabled_by_default")]
+    pub input_mode_corner_hud: bool,
     /// 在 macOS 菜单栏放一个状态项，常驻显示当前输入模式（中/双/五/日……，英文时为「英」），不需要把「英」加成系统输入源。默认关闭；只有 macOS 宿主画它（见 `HostCapabilities::input_mode_status_item`），其他宿主保留这个偏好但不画。
     #[serde(default)]
     pub input_mode_status_item: bool,
@@ -3112,6 +3115,7 @@ impl Default for Preferences {
             candidate_follow_cursor: true,
             input_mode_hud: true,
             input_mode_focus_hud: false,
+            input_mode_corner_hud: true,
             input_mode_status_item: false,
             show_app_logo: false,
             expand_candidates: false,
