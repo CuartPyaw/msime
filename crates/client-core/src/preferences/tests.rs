@@ -2949,9 +2949,9 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
         store.load().unwrap().preferences.mixed_input,
         MixedInputPreferences {
             enabled: true,
-            first_page_count: 1,
             english: false,
             minimum_prefix: 3,
+            first_page_count: 1,
             emoji: true,
             kaomoji: true,
             japanese: false,
@@ -2965,7 +2965,6 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
         let preferences = Preferences {
             mixed_input: MixedInputPreferences {
                 enabled: true,
-                first_page_count: 1,
                 english: mask & 1 != 0,
                 emoji: mask & 2 != 0,
                 kaomoji: mask & 4 != 0,
@@ -2974,6 +2973,7 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
                 quick_phrase: true,
                 quick_phrase_frequency: true,
                 minimum_prefix: mask % 8 + 1,
+                first_page_count: 1,
             },
             ..Preferences::default()
         };

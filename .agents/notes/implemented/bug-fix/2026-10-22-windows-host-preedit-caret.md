@@ -8,7 +8,7 @@ Status: implemented
 
 ## Decision
 
-已有按键快照的视图转换由 `KeyCompositionStateFromView` 持有，绘制时从同一次 `host->view()` 的结果取得文字、原文与光标。没有宿主会话时保留旧缓冲；有效宿主视图读取失败则返回失败，不绘制另一份旧组字。分词符映射、已选词前缀、隐藏预编辑、锁定光标方案和整句改字的优先级保持现有规则。
+[回车提交观测](2026-10-24-windows-enter-commit-observation.md)单独持有发送给 Server 的原文载荷，本篇继续负责预编辑绘制。已有按键快照的视图转换由 `KeyCompositionStateFromView` 持有，绘制时从同一次 `host->view()` 的结果取得文字、原文与光标。没有宿主会话时保留旧缓冲；有效宿主视图读取失败则返回失败，不绘制另一份旧组字。分词符映射、已选词前缀、隐藏预编辑、锁定光标方案和整句改字的优先级保持现有规则。
 
 ## Historical audit
 

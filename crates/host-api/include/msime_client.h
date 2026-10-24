@@ -743,8 +743,12 @@ char *msime_client_apply_translations(uint64_t session, uint64_t generation,
  * target_language absent or "en" reads msime-english.db and the user's glosses. fr/ja/es/ru/de/ko read only offline-glosses/zh-<lang>.db beside resources, or, when that is absent and state_root (absolute; pass the translation query's state_root) is given, the same file in the downloaded <state_root>/resource-packs/offline-glosses pack; they ignore user_data. When neither is installed the result is {generation,translations:[]}, not an error. Any other value is an invalid request. Only Chinese candidates get a non-English gloss. */
 char *msime_client_candidate_gloss_request(const uint8_t *request, size_t request_length,
                                            const uint8_t *resources, size_t resources_length);
-/* Pronounce copied English texts without a session, for the line a host draws beside a gloss.
- * JSON request: {generation,items:[{text,language}]}; language must be "en". text is an English candidate or one line of an English gloss; only its first term is pronounced, without a leading to/a/an/the, and a term with any unknown word gets nothing. The response is {generation,pronunciations:[{text,language,pronunciation}]} with "/…/" IPA, omitting texts that have none. The table is pronunciations/en-phonetic.db beside resources; when it is not installed the result is {generation,pronunciations:[]}, not an error. May run on a worker thread. */
+/* 不持有会话地查询英文候选或英文释义的读音，可在宿主工作线程调用。
+ * JSON 请求：{generation,items:[{text,language}],supplementary_resources?}；language 必须为 "en"。
+ * text 为英文候选或一行英文释义；只读首个词组，忽略开头的 to/a/an/the，任一词未知则不返回该组。
+ * 响应为 {generation,pronunciations:[{text,language,pronunciation}]}，读音为 "/…/" IPA，没有音标的项省略。
+ * 优先读 resources 旁的 pronunciations/en-phonetic.db；缺失时可从 supplementary_resources 下读取同名相对路径。
+ * 补充目录为可选的绝对路径，最多 4096 字节；缺省保持旧行为。两处均未安装时返回空 pronunciations，不报错。 */
 char *msime_client_pronunciation_request(const uint8_t *request, size_t request_length,
                                          const uint8_t *resources, size_t resources_length);
 /* Break copied Chinese candidates into words with their English, without a session, for a line a host draws under the gloss lines (never a committable gloss column).

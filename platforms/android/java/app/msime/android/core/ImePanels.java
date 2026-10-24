@@ -2272,6 +2272,7 @@ final class ImePanels {
         private float startOffset;
         private boolean openAtDown;
         private boolean dragging;
+        private boolean cancelledPress;
         private android.view.VelocityTracker velocity;
 
         ClipboardSwipeCell(Button card, View trash, String text, float reveal) {
@@ -2291,6 +2292,7 @@ final class ImePanels {
                     // 不在这里停掉正在进行的收回动画：没有拖起来的轻点要让它照常放完，否则卡片会停在半路。
                     openAtDown = card.getTranslationX() < 0;
                     dragging = false;
+                    cancelledPress = false;
                     recycleVelocity();
                     velocity = android.view.VelocityTracker.obtain();
                     track(event);
@@ -2299,10 +2301,24 @@ final class ImePanels {
                 case android.view.MotionEvent.ACTION_MOVE -> {
                     track(event);
                     float dx = event.getRawX() - downX;
+                    float dy = event.getRawY() - downY;
                     if (!dragging) {
-                        if (!ClipboardSwipePolicy.claims(dx, event.getRawY() - downY, touchSlop,
-                                openAtDown)) return false;
+                        if (!ClipboardSwipePolicy.claims(dx, dy, touchSlop, openAtDown)) {
+                            // 外层列表没有足够内容可滚时不会接手纵向拖动；仍要撤销卡片按压，
+                            // 否则手指始终留在卡片边界内，松手会被 Button 当作点按并插入正文。
+                            if (!cancelledPress
+                                    && Math.max(Math.abs(dx), Math.abs(dy)) > touchSlop) {
+                                cancelledPress = true;
+                                android.view.MotionEvent cancel =
+                                    android.view.MotionEvent.obtain(event);
+                                cancel.setAction(android.view.MotionEvent.ACTION_CANCEL);
+                                card.onTouchEvent(cancel);
+                                cancel.recycle();
+                            }
+                            return false;
+                        }
                         dragging = true;
+                        cancelledPress = true;
                         // 接手时卡片可能还在收回的动画里：停在当前位置，再从这里跟手，不跳。
                         stopSettling();
                         startOffset = card.getTranslationX() - dx;
@@ -2338,6 +2354,7 @@ final class ImePanels {
                         settle(open);
                     }
                     dragging = false;
+                    cancelledPress = false;
                     recycleVelocity();
                     return handled;
                 }

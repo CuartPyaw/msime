@@ -169,6 +169,90 @@ fn ordinary_candidate_positions_skip_missing_journal_work() {
 }
 
 #[test]
+fn personal_context_keeps_only_the_matching_learned_leader() {
+    // 日志必须准确对应当前首选；其它读音、来源、权重或删除记录不能锁住它。
+    for (dictionary, key, value, operation, weight, enabled, expected) in [
+        ("pinyin", "ni", "甲", "upsert", 100, true, "甲"),
+        ("pinyin", "ni", "甲", "upsert", 100, false, "丙"),
+        ("pinyin", "li", "甲", "upsert", 100, true, "丙"),
+        ("pinyin", "ni", "乙", "upsert", 100, true, "丙"),
+        ("pinyin", "ni", "甲", "upsert", 99, true, "丙"),
+        ("pinyin", "ni", "甲", "delete", 100, true, "丙"),
+        ("english", "ni", "甲", "upsert", 100, true, "丙"),
+    ] {
+        let fixture = Fixture::new(CONTEXT_FIXTURE);
+        let journal = crate::user_dictionary::journal::open_journal(&fixture.journal()).unwrap();
+        journal
+            .execute(
+                "INSERT INTO personal_bigram(previous,word,count) VALUES('子','丙',32)",
+                [],
+            )
+            .unwrap();
+        journal.execute(
+            "INSERT INTO user_dictionary_operations(dictionary,key,value,operation,weight) VALUES(?1,?2,?3,?4,?5)",
+            rusqlite::params![dictionary, key, value, operation, weight],
+        ).unwrap();
+        drop(journal);
+        let mut session = fixture.session_with(|options| {
+            options.scheme = SchemeType::Quanpin;
+            if enabled {
+                options.frequency.mode = FrequencyAdjustmentMode::Promote;
+            }
+        });
+        type_text(&mut session, "hao");
+        select_word(&mut session, "子");
+        type_text(&mut session, "ni");
+        assert_eq!(
+            words(&session)[0],
+            expected,
+            "{dictionary}/{key}/{value}/{operation}/{weight}, enabled={enabled}"
+        );
+        if !enabled {
+            let result = session.pin(index_of(&session, "甲"));
+            assert!(result.handled && result.diagnostic.is_none(), "{result:?}");
+            assert_eq!(words(&session)[0], "甲", "关闭调频仍须尊重手动置顶");
+        }
+        if expected == "甲" {
+            assert_eq!(
+                words(&session),
+                ["甲", "丙", "乙"],
+                "保留首选后其它候选仍按上下文排序"
+            );
+            // 前缀管线也走同一重排入口；只有拼音字典行可以复用拼音权重日志。
+            type_text(&mut session, "hao");
+            session.set_caret(Some(2));
+            assert!(session.input.prefix_active);
+            assert_eq!(session.input.prefix_query_input, "ni");
+            let original = session.input.prefix_candidates.clone();
+            for (source, scheme, leader) in [
+                (CandidateSource::UserDatabase, SchemeType::Quanpin, "甲"),
+                (CandidateSource::Database, SchemeType::Wubi, "丙"),
+                (CandidateSource::Generated, SchemeType::Quanpin, "甲"),
+            ] {
+                session.input.prefix_active = true;
+                session.input.prefix_candidates = original.clone();
+                session.input.prefix_candidates[0].source = source;
+                session.input.prefix_candidates[0].scheme = scheme;
+                session.input.update_mixed_candidates();
+                assert!(session.input.prefix_active);
+                let injected = session
+                    .input
+                    .mixed_candidates
+                    .iter()
+                    .find(|row| row.word == "甲")
+                    .unwrap();
+                assert_eq!(injected.source, source);
+                assert_eq!(injected.scheme, scheme);
+                assert_eq!(
+                    session.input.mixed_candidates[0].word, leader,
+                    "{source:?}/{scheme:?}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
 fn personal_rerank_refresh_reuses_shown_rows_and_preserves_learning_order() {
     let fixture = Fixture::new(CONTEXT_FIXTURE);
     let mut session = fixture.session();
@@ -397,6 +481,123 @@ INSERT INTO tbl_1_n VALUES('ni','n','你',8000);",
 fn select_word(session: &mut Session, word: &str) -> crate::types::KeyResult {
     let index = index_of(session, word);
     session.select(index)
+}
+
+#[test]
+fn xiaohe_initial_frequency_learning_survives_a_different_previous_word() {
+    for extra_reading in ["", "INSERT INTO tbl_1_l VALUES('liao','l','乙',80);"] {
+        for mode in [
+            FrequencyAdjustmentMode::Disabled,
+            FrequencyAdjustmentMode::Promote,
+        ] {
+            let fixture = Fixture::new(&format!(
+                "CREATE TABLE tbl_1_l(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_l VALUES('lai','l','甲',100),('le','l','乙',90);\
+{extra_reading}\
+CREATE TABLE tbl_2_l(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+CREATE TABLE tbl_1_w(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_w VALUES('wan','w','丙',100);",
+            ));
+            let configure = |options: &mut SessionOptions| {
+                options.scheme = SchemeType::Shuangpin;
+                options.shuangpin_profile = ShuangpinProfileKind::Xiaohe;
+                options.helpcode = false;
+                options.frequency = FrequencyAdjustmentOptions {
+                    mode,
+                    trigger_count: 1,
+                    linear_step: 1,
+                };
+            };
+            let mut session = fixture.session_with(configure);
+            type_text(&mut session, "l");
+            assert_eq!(words(&session)[0], "甲");
+            for _ in 0..5 {
+                if session.snapshot().editing_text.is_empty() {
+                    type_text(&mut session, "l");
+                }
+                let index = index_of(&session, "乙");
+                assert_eq!(session.snapshot().candidates[index].canonical_pinyin, "le");
+                let result = session.select(index);
+                assert_eq!(result.commit.as_deref(), Some("乙"));
+                assert_eq!(result.diagnostic, None);
+            }
+            type_text(&mut session, "l");
+            assert_eq!(words(&session)[0], "乙", "连续选择时上下文也能提升候选");
+            session.command(Command::Cancel);
+            type_text(&mut session, "wj");
+            assert_eq!(
+                select_word(&mut session, "丙").commit.as_deref(),
+                Some("丙")
+            );
+            let expected = if mode == FrequencyAdjustmentMode::Disabled {
+                "甲"
+            } else {
+                "乙"
+            };
+            type_text(&mut session, "l");
+            assert_eq!(
+                words(&session)[0],
+                expected,
+                "改变上文后的排序，mode={mode:?}"
+            );
+            drop(session);
+            let mut reopened = fixture.session_with(configure);
+            type_text(&mut reopened, "l");
+            assert_eq!(
+                words(&reopened)[0],
+                expected,
+                "新会话的持久排序，mode={mode:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn xiaohe_initial_promote_reaches_first_from_beyond_the_first_five_rows() {
+    let fixture = Fixture::new(
+        "CREATE TABLE tbl_1_l(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_l VALUES('lai','l','甲',100),('lai','l','丁',95),\
+('lai','l','戊',94),('lai','l','己',93),('lai','l','庚',92),\
+('lai','l','辛',91),('le','l','乙',90);\
+CREATE TABLE tbl_2_l(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+CREATE TABLE tbl_1_w(key TEXT,jp TEXT,value TEXT,weight INTEGER);\
+INSERT INTO tbl_1_w VALUES('wan','w','丙',100);",
+    );
+    let configure = |options: &mut SessionOptions| {
+        options.scheme = SchemeType::Shuangpin;
+        options.shuangpin_profile = ShuangpinProfileKind::Xiaohe;
+        options.helpcode = false;
+        options.frequency = FrequencyAdjustmentOptions {
+            mode: FrequencyAdjustmentMode::Promote,
+            trigger_count: 1,
+            linear_step: 1,
+        };
+    };
+    let mut session = fixture.session_with(configure);
+    type_text(&mut session, "l");
+    assert_eq!(index_of(&session, "乙"), 6);
+    for _ in 0..5 {
+        if session.snapshot().editing_text.is_empty() {
+            type_text(&mut session, "l");
+        }
+        let result = select_word(&mut session, "乙");
+        assert_eq!(result.commit.as_deref(), Some("乙"));
+        assert_eq!(result.diagnostic, None);
+    }
+    type_text(&mut session, "l");
+    assert_eq!(words(&session)[0], "乙");
+    session.command(Command::Cancel);
+    type_text(&mut session, "wj");
+    assert_eq!(
+        select_word(&mut session, "丙").commit.as_deref(),
+        Some("丙")
+    );
+    type_text(&mut session, "l");
+    assert_eq!(words(&session)[0], "乙", "换上文后仍使用已调高的全局词频");
+    drop(session);
+    let mut reopened = fixture.session_with(configure);
+    type_text(&mut reopened, "l");
+    assert_eq!(words(&reopened)[0], "乙", "重建会话后保持已持久化的顺序");
 }
 
 #[test]

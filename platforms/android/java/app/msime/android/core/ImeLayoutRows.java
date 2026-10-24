@@ -893,11 +893,15 @@ final class ImeLayoutRows {
             if (choice.equals(hint)) commitLetterHint(input);
             else commitNineKeyHoldOption(choice);
         });
-        if (options != null) {
-            letterOptionsAnchor = anchor;
-            letterOptions = options;
-            collectLetterOptionButtons(options);
-        }
+        trackLetterOptions(anchor, options);
+    }
+
+    /** 中文与英文弹窗共用原按键的拖选、松手提交和取消状态。 */
+    private void trackLetterOptions(Button anchor, LinearLayout options) {
+        if (options == null) return;
+        letterOptionsAnchor = anchor;
+        letterOptions = options;
+        collectLetterOptionButtons(options);
     }
 
     /** 弹窗以多行容器排版，拖选只跟踪其中实际可提交的按钮。 */
@@ -969,12 +973,13 @@ final class ImeLayoutRows {
 
     /** 英文长按提供字符变体，O 另保留进入拼音键盘的动作。 */
     void showEnglishLetterOptions(Button anchor, String input) {
-        showChoiceOptions(anchor, EnglishLetterHoldPolicy.choices(input), choice -> {
+        LinearLayout options = showChoiceOptions(anchor, EnglishLetterHoldPolicy.choices(input), choice -> {
             if (EnglishLetterHoldPolicy.PINYIN_KEYBOARD.equals(choice)) {
                 dismissNineKeyHoldOptions();
                 s.toggleInputLanguage();
             } else commitNineKeyHoldOption(choice);
         });
+        trackLetterOptions(anchor, options);
     }
 
     /** 显示不依赖具体键位的短文本选项，并复用九键长按弹窗的生命周期。 */
@@ -1444,7 +1449,8 @@ final class ImeLayoutRows {
 
     void commitNineKeyLiteral(String text) {
         if (s.connection == null) return;
-        if (s.dedicatedEnglish && text.length() == 1) {
+        // 英文纠错入口只接收 ASCII；非 ASCII 角标与其他符号一样按字面提交。
+        if (s.dedicatedEnglish && text.length() == 1 && text.charAt(0) < 128) {
             s.commitEnglishLiteral(text.charAt(0));
             return;
         }
