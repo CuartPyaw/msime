@@ -1,15 +1,27 @@
 #!/usr/bin/env python3
 """核对按住录音目录的生成物与 Windows 真实消费者。"""
 
-from pathlib import Path
+import fcntl
 import re
 import shutil
 import subprocess
 import tempfile
+from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
 WINDOWS_SOURCE = ROOT / "platforms/windows/settings/VoiceSettings.h"
+
+
+def run_cargo_check(cargo: str) -> None:
+    lock_path = Path(tempfile.gettempdir()) / "msime-contract-cargo.lock"
+    with lock_path.open("a+") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        subprocess.run(
+            [cargo, "run", "--quiet", "--locked", "-p", "msime-client-providers", "--example",
+             "export_voice_hold_key_catalog", "--", "--check"],
+            cwd=ROOT, check=True, timeout=120,
+        )
 
 
 def check_windows_consumer(source: str) -> None:
@@ -63,11 +75,7 @@ def main() -> None:
     if cargo is None:
         print("skipped: 没有 Cargo，跳过按住录音目录生成物漂移检查")
     else:
-        subprocess.run(
-            [cargo, "run", "--quiet", "--locked", "-p", "msime-client-providers", "--example",
-             "export_voice_hold_key_catalog", "--", "--check"],
-            cwd=ROOT, check=True, timeout=120,
-        )
+        run_cargo_check(cargo)
     check_windows_consumer(WINDOWS_SOURCE.read_text(encoding="utf-8"))
     print("按住录音共享目录及 Windows 消费者通过")
 
