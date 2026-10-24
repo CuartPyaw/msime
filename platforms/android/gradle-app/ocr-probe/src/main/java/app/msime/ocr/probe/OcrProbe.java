@@ -8,10 +8,8 @@ import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
-import android.graphics.Canvas;
-import android.graphics.Color;
-import android.graphics.Paint;
 import android.os.Bundle;
+import app.msime.ocr.fixture.SyntheticOcrFixture;
 import com.google.mlkit.common.MlKit;
 import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognition;
 import com.google.mlkit.vision.digitalink.recognition.DigitalInkRecognitionModel;
@@ -42,21 +40,28 @@ public final class OcrProbe extends Instrumentation {
             finish(-1, result);
         } catch (Throwable error) {
             // 只记录异常类型，不输出识别文本或任意模块的异常消息。
-            result.putString("stream", "MSIME_OCR_PROBE_FAILED: " + stage + " / " + failureType(error) + "\n");
+            result.putString("stream", "MSIME_OCR_PROBE_FAILED: " + stage + " / " + failureDetails(error) + "\n");
             finish(1, result);
         }
     }
 
-    private static String failureType(Throwable error) {
+    private static String failureDetails(Throwable error) {
         while (error.getCause() != null && error.getCause() != error) error = error.getCause();
-        return error.getClass().getName();
+        StringBuilder details = new StringBuilder(error.getClass().getName());
+        StackTraceElement[] frames = error.getStackTrace();
+        for (int index = 0; index < Math.min(5, frames.length); index++) {
+            details.append("\n  at ").append(frames[index]);
+        }
+        return details.toString();
     }
 
     private void runProbe() throws Exception {
         Context context = getTargetContext();
+        stage = "network-permission";
         if (context.checkSelfPermission("android.permission.INTERNET") == PackageManager.PERMISSION_GRANTED)
             throw new AssertionError("probe_network_permission");
-        MlKit.initialize(context);
+        // 宿主的自动初始化 Provider 已运行，重复 initialize 会拒绝已有容器。
+        stage = "handwriting-before-ocr";
         DigitalInkRecognizer handwriting = handwritingClient();
         stage = "module-files";
         File directory = new File(context.getFilesDir(), "ocr-probe");
@@ -111,28 +116,42 @@ public final class OcrProbe extends Instrumentation {
             throw new AssertionError("probe_interface_version");
         stage = "public-initialization";
         moduleClass.getMethod("initialize", Context.class).invoke(module, moduleContext);
-        Bitmap bitmap = Bitmap.createBitmap(1400, 360, Bitmap.Config.ARGB_8888);
-        Canvas canvas = new Canvas(bitmap);
-        canvas.drawColor(Color.WHITE);
-        Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        paint.setColor(Color.BLACK);
-        paint.setTextSize(88);
-        canvas.drawText("SYNTHETIC OCR 2468", 40, 125, paint);
-        canvas.drawText("中文测试", 40, 270, paint);
+        String[][] cases = new String[SyntheticOcrFixture.CASE_COUNT][];
+        int completeCases = 0;
         try {
-            stage = "offline-recognition";
-            String[] lines = (String[]) moduleClass.getMethod("recognize", Bitmap.class).invoke(module, bitmap);
-            String joined = String.join("", lines).replaceAll("\\s", "");
-            if (!joined.contains("2468") || !joined.contains("中文测试"))
-                throw new AssertionError("probe_synthetic_recognition");
+            for (int index = 0; index < cases.length; index++) {
+                if (index > 0) {
+                    stage = "module-reopen-" + index;
+                    moduleClass.getMethod("close").invoke(module);
+                    module = moduleClass.getConstructor().newInstance();
+                    moduleClass.getMethod("initialize", Context.class).invoke(module, moduleContext);
+                }
+                stage = "offline-recognition-case-" + index;
+                Bitmap bitmap = SyntheticOcrFixture.render(index);
+                try {
+                    SyntheticOcrFixture.saveImage(context, bitmap, index);
+                    cases[index] = (String[]) moduleClass.getMethod("recognize", Bitmap.class).invoke(module, bitmap);
+                    boolean matches = SyntheticOcrFixture.matches(cases[index]);
+                    if (matches) completeCases++;
+                    // 所有字号均保留匹配结果，不能只展示最好的那个字号。
+                    String exact = String.join("", cases[index]).replaceAll("\\s", "");
+                    android.util.Log.i("MSIME_OCR_PROBE", "synthetic_case=" + index + ",complete=" + matches
+                        + ",exact-simplified=" + (exact.contains("SYNTHETICOCR2468") && exact.contains("中文测试")));
+                } finally {
+                    bitmap.recycle();
+                }
+            }
+            SyntheticOcrFixture.saveResult(context, cases);
         } finally {
-            bitmap.recycle();
             moduleClass.getMethod("close").invoke(module);
             handwriting.close();
         }
         // OCR 销毁后仍能创建原宿主的手写客户端，不能重置或替换它的组件容器。
         stage = "handwriting-after-ocr";
         handwritingClient().close();
+        // 模型误识别不能让手写共存检查被跳过；完整识别仍是独立的硬条件。
+        stage = "offline-recognition(complete-cases=" + completeCases + ",handwriting-after=true)";
+        if (completeCases == 0) throw new AssertionError("probe_synthetic_recognition");
     }
 
     private static void copy(InputStream input, OutputStream output) throws Exception {
