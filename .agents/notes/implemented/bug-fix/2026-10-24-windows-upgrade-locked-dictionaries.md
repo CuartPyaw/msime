@@ -16,7 +16,7 @@ Server 的其余文件继续递归安装，并排除由上述条目处理的 `re
 
 ## Verification
 
-合成安装器直接提取产品的 `ResourceNeedsReplacement` 函数，实际编译、运行 Inno：以只读共享方式持有相同文件时升级通过，内容不同与缺失文件正确安装；不同内容被锁定时安装失败且原内容保持，不能静默跳过真实更新。Windows 构建机已通过；Win7 运行与完整产品升级的结果写入[完整产品构建](../feature/2026-10-24-windows7-product-build.md)。
+合成安装器直接提取产品的 `ResourceNeedsReplacement` 函数，实际编译、运行 Inno：以只读共享方式持有相同文件时升级通过，内容不同与缺失文件正确安装；不同内容被锁定时安装失败且原内容保持，不能静默跳过真实更新。Windows 构建机与 Win7 实际运行均通过。跨平台 ISPP 子集解释器同时支持资源条目的子程序、循环、文件枚举与摘要计算，用两个真实合成文件及空目录展开各版本的现代、Win7 和轻量包，逐项核对生成条目与摘要；不能略过不认识的指令使检查假绿。完整产品升级的结果写入[完整产品构建](../feature/2026-10-24-windows7-product-build.md)。
 
 ## Alternatives considered
 
