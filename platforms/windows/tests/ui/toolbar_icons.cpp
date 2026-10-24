@@ -47,7 +47,7 @@ int main() {
     require(std::wcscmp(toolbar_icon(kToolbarInputScheme, std::nullopt).fallback, L"方") == 0);
     // Text is drawn in the Chinese UI font at macOS's 0.95 of the font size; only the Tibetan badge names a face of its own.
     require(std::wcscmp(toolbar_text_font, L"Microsoft YaHei UI") == 0);
-    require(toolbar_glyph_scale == 0.95f);
+    static_assert(toolbar_glyph_scale == 0.95f);
     for (int button = kToolbarLanguage; button <= kToolbarInputScheme; ++button)
       for (const std::optional<bool> state :
            {std::optional<bool>{}, std::optional<bool>{true}, std::optional<bool>{false}})

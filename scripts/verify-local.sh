@@ -422,7 +422,12 @@ else
   # 当基准，那样「改已封存笔记、重新封存、同批提交」照样通过，等于没查。拿不到分叉点时
   # （无远端、离线）不导出，脚本自动降级为只对磁盘内容做封印自校验。
   agent_base="$(git merge-base origin/develop HEAD 2>/dev/null || true)"
-  export AGENT_NOTE_ROOT="$root/.agents/notes"
+  # Windows Node 不转换环境变量里的 MSYS 路径，否则会把笔记树当成不存在而空扫。
+  if [ "$windows_host" -eq 1 ]; then
+    export AGENT_NOTE_ROOT="$(cygpath -w "$root/.agents/notes")"
+  else
+    export AGENT_NOTE_ROOT="$root/.agents/notes"
+  fi
   if [ -n "$agent_base" ]; then
     export AGENT_NOTE_ARCHIVE_BASE_REF="$agent_base"
   fi
