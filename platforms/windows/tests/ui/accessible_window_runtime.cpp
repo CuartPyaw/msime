@@ -64,7 +64,7 @@ int main() {
             while (!disconnected.load()) { require(GetTickCount64() < deadline); Sleep(1); }
             // 保留客户端的旧元素引用，断开后必须实际返回不可用，不能继续读旧树。
             BSTR value = nullptr; const auto result = child->get_CurrentName(&value); SysFreeString(value);
-            require(result == UIA_E_ELEMENTNOTAVAILABLE);
+            require(result == static_cast<HRESULT>(UIA_E_ELEMENTNOTAVAILABLE));
           }
           CoUninitialize();
         } catch (const std::exception& error) { failure = error.what(); }

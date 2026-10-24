@@ -1,7 +1,9 @@
 #include <windows.h>
 #include <msctf.h>
 #include <imm.h>
+#if __has_include(<immdev.h>)
 #include <immdev.h>
+#endif
 #include <wrl/client.h>
 #include "../../../../shared/contracts/ipc_negotiation.h"
 #include <cstdio>
@@ -10,6 +12,17 @@
 #include <string>
 
 namespace {
+#ifndef IMC_SETOPENSTATUS
+// MinGW 不提供 immdev.h；沿用 Windows SDK 固定的 WM_IME_CONTROL 命令值。
+constexpr WPARAM IMC_SETOPENSTATUS = 0x0006;
+#endif
+#ifndef TF_CLIENTID_NULL
+constexpr TfClientId TF_CLIENTID_NULL = 0;
+#endif
+#ifndef TF_IPPMF_FORSESSION
+// 与 Windows SDK 的会话级激活标记保持一致，不退回进程范围。
+constexpr DWORD TF_IPPMF_FORSESSION = 0x20000000;
+#endif
 using Microsoft::WRL::ComPtr;
 void require(bool value, const char* reason) {
   if (!value) throw std::runtime_error(reason);

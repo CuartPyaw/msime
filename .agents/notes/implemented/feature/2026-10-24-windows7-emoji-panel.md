@@ -18,6 +18,8 @@ Win7 的 DirectWrite 即使显式启用 `ccmp`，仍把 ZWJ 家庭、肤色和�
 
 集成主线的多桌面候选调度后，各桌面的 UI 线程共用私有字体。遵循 [HarfBuzz 对象生命周期约定](https://harfbuzz.github.io/object-model-lifecycle.html)，字体在设定整形函数和比例后标记不可变；每次排版独立创建缓冲区。回归同时在四条线程反复绘制家庭、肤色和键帽，并核对字形与 UTF-16 命中范围，覆盖跨桌面的共享对象边界。
 
+Win7 设置／面板最小清单与完整原生产品的 `compat/vcpkg.json` 统一固定到 `04a9d8e5212d01ee1dd9478eadd9caade4f8b0d4`，使用同一 HarfBuzz 14.4.0 Core。旧最小清单的 `ef7dbf94b9198bc58f45951adcf1f041fcbc5ea0` 对应 HarfBuzz 10.2.0，其包配置无条件查找 FreeType，即使关闭全部默认特性也会在干净 CI 配置失败；完整产品原已使用修正条件依赖的基线。统一 Win7 清单可以让最小 CI 和已验收产品使用同一依赖契约，不引入 FreeType 或更换现代 Windows 依赖。
+
 ### 既有笔记审计
 
 - [原生手写](../../implemented/feature/2026-10-23-windows7-handwriting.md)：部分重叠，沿用独立面板与关闭收尾边界。
@@ -27,6 +29,7 @@ Win7 的 DirectWrite 即使显式启用 `ccmp`，仍把 ZWJ 家庭、肤色和�
 ## Alternatives considered
 
 - **仅指定私有字体并启用 OpenType `ccmp`。** 不增加整形依赖，但在 Win7 实测仍输出分离的家庭、肤色和键帽字形，不能覆盖组合表情。
+- **给旧最小清单额外添加 FreeType。** 可满足旧包配置无条件查找，但 HarfBuzz Core 未使用该后端，新增依赖不能消除最小 CI 与完整产品基线不一致。统一到完整产品已验收的固定基线，不另外维护覆盖端口。
 - **预生成表情到字形的映射表。** 可减少运行时依赖，但会把字体规则和表情目录冻结成第二份数据，自定义插件与新增组合容易漏掉；运行时复用字体本身的 OpenType 规则。
 
 - **调用 Win+.。** 可以直接使用现代 Windows 的系统表情面板，但 Win7 没有该入口，而且不能展示已有插件符号集，因此提供本产品的原生目录承载。
