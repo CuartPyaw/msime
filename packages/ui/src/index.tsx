@@ -551,6 +551,7 @@ export {
   LinuxSetupPage,
   nextSetupProgress,
   type LinuxSetupClient,
+  type LinuxDictionaryDownloads,
   type LinuxSetupLine,
   type LinuxSetupRegistration,
   type LinuxSetupStage,
