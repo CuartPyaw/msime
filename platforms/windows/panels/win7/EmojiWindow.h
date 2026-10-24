@@ -9,6 +9,7 @@ enum EmojiPanelControl {
   emoji_panel_tab = 600, emoji_panel_group, emoji_panel_search, emoji_panel_entries, emoji_panel_detail,
   emoji_panel_previous, emoji_panel_next, emoji_panel_page, emoji_panel_insert, emoji_panel_copy,
   emoji_panel_refresh, emoji_panel_clipboard, emoji_panel_status,
+  emoji_panel_preview,
 };
 class EmojiWindow final {
 public:

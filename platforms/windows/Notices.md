@@ -1,5 +1,7 @@
 # Third-party notice collection
 
+Win7 安装包另在 `server/fonts/` 随字体分发 Google Noto Emoji 的完整 OFL-1.1 许可证与固定来源记录，见 [`assets/fonts/README.md`](assets/fonts/README.md)。字体不安装到系统，仅供候选窗口与表情面板的进程私有排版使用。
+
 `Collect-Notices.ps1` produces `target/windows-notices/THIRD_PARTY_NOTICES.txt` from notices committed in this repository, supplied dependency-prefix copyright files, and optional supplemental documents. Packaging selects that generated file by default when present; explicit `NoticesDirectory` remains authoritative.
 
 ```powershell

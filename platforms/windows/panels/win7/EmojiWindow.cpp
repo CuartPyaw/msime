@@ -1,5 +1,6 @@
 #include "EmojiWindow.h"
 #include "EmojiRecent.h"
+#include "../../common/Windows7EmojiFont.h"
 #include "../../src/input/NativeTextInput.h"
 #include "../../compat/WindowsDpi.h"
 #include "../../tsf/IPC/PassthroughStatistics.h"
@@ -101,8 +102,10 @@ struct EmojiWindow::State {
     for (const auto id : {emoji_panel_copy,emoji_panel_insert}) EnableWindow(get(id),!busy && selected());
     EnableWindow(get(emoji_panel_previous),!busy && offset > 0);
     EnableWindow(get(emoji_panel_next),!busy && offset + page_size < filtered.size());
-    const auto* item = selected(); const auto detail = item ? shared::control_text::wide(item->text + "\r\n" + item->annotation) : std::wstring{};
+    const auto* item = selected(); const auto detail = item ? shared::control_text::wide(item->annotation) : std::wstring{};
     SetWindowTextW(get(emoji_panel_detail),detail.c_str());
+    SetWindowTextW(get(emoji_panel_preview), item ? shared::control_text::wide(item->text).c_str() : L"");
+    InvalidateRect(get(emoji_panel_preview),nullptr,TRUE);
   }
   void render_items() {
     SendMessageW(get(emoji_panel_entries),LB_RESETCONTENT,0,0);
@@ -172,7 +175,8 @@ struct EmojiWindow::State {
     const int list_height = std::max(px(90),static_cast<int>(bounds.bottom) - px(360));
     MoveWindow(get(emoji_panel_entries),px(12),px(96),width,list_height,TRUE);
     const int top = px(108) + list_height;
-    MoveWindow(get(emoji_panel_detail),px(12),top,width,px(74),TRUE);
+    MoveWindow(get(emoji_panel_preview),px(12),top,px(80),px(74),TRUE);
+    MoveWindow(get(emoji_panel_detail),px(104),top,std::max(1,width - px(92)),px(74),TRUE);
     MoveWindow(get(emoji_panel_previous),px(12),top + px(86),px(80),px(30),TRUE);
     MoveWindow(get(emoji_panel_next),px(104),top + px(86),px(80),px(30),TRUE);
     MoveWindow(get(emoji_panel_page),px(196),top + px(86),std::max(1,width - px(184)),px(30),TRUE);
@@ -185,6 +189,32 @@ struct EmojiWindow::State {
     if (message == WM_NCCREATE) { state = static_cast<State*>(reinterpret_cast<CREATESTRUCTW*>(lparam)->lpCreateParams); SetWindowLongPtrW(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(state)); state->host = window; }
     if (!state) return DefWindowProcW(window,message,wparam,lparam);
     switch (message) {
+    case WM_MEASUREITEM: {
+      auto* item = reinterpret_cast<MEASUREITEMSTRUCT*>(lparam);
+      if (item && item->CtlID == emoji_panel_entries) { item->itemHeight = state->px(36); return TRUE; }
+      break;
+    }
+    case WM_DRAWITEM: {
+      const auto* item = reinterpret_cast<DRAWITEMSTRUCT*>(lparam);
+      if (!item) break;
+      if (item->CtlID == emoji_panel_entries && item->itemID != static_cast<UINT>(-1)) {
+        const auto list = state->get(emoji_panel_entries);
+        const auto length = SendMessageW(list,LB_GETTEXTLEN,item->itemID,0);
+        if (length < 0 || length > 4096) return TRUE;
+        std::wstring text(static_cast<size_t>(length) + 1,L'\0');
+        SendMessageW(list,LB_GETTEXT,item->itemID,reinterpret_cast<LPARAM>(text.data())); text.resize(static_cast<size_t>(length));
+        const bool highlighted = (item->itemState & ODS_SELECTED) != 0;
+        compat::DrawWindows7EmojiToDC(item->hDC,item->rcItem,text,static_cast<float>(state->px(17)),GetSysColor(highlighted ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT),GetSysColor(highlighted ? COLOR_HIGHLIGHT : COLOR_WINDOW));
+        if (item->itemState & ODS_FOCUS) DrawFocusRect(item->hDC,&item->rcItem);
+        return TRUE;
+      }
+      if (item->CtlID == emoji_panel_preview) {
+        const auto* chosen = state->selected();
+        compat::DrawWindows7EmojiToDC(item->hDC,item->rcItem,chosen ? shared::control_text::wide(chosen->text) : L"",static_cast<float>(state->px(32)),GetSysColor(COLOR_WINDOWTEXT),GetSysColor(COLOR_WINDOW));
+        return TRUE;
+      }
+      break;
+    }
     case WM_SIZE: state->layout(); return 0;
     case WM_COMMAND: state->command(LOWORD(wparam),HIWORD(wparam)); return 0;
     case completed_message: state->complete(); return 0;
@@ -210,14 +240,15 @@ bool EmojiWindow::create(HINSTANCE instance) {
   if (!state.host) return false;
   state.font = CreateFontW(-state.px(14),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,DEFAULT_QUALITY,DEFAULT_PITCH,L"Segoe UI");
   for (const auto& field : std::vector<std::pair<int,const wchar_t*>>{{emoji_panel_tab,L"目录类型"},{emoji_panel_group,L"分类"},{emoji_panel_search,L""},{emoji_panel_entries,L"目录条目"},{emoji_panel_detail,L""},
-      {emoji_panel_previous,L"上一页"},{emoji_panel_next,L"下一页"},{emoji_panel_page,L""},{emoji_panel_insert,L"输入原编辑器"},{emoji_panel_copy,L"复制"},{emoji_panel_refresh,L"刷新目录"},{emoji_panel_clipboard,L"剪贴板历史"},{emoji_panel_status,L"正在读取目录…"}}) {
+      {emoji_panel_previous,L"上一页"},{emoji_panel_next,L"下一页"},{emoji_panel_page,L""},{emoji_panel_insert,L"输入原编辑器"},{emoji_panel_copy,L"复制"},{emoji_panel_refresh,L"刷新目录"},{emoji_panel_clipboard,L"剪贴板历史"},{emoji_panel_status,L"正在读取目录…"},{emoji_panel_preview,L""}}) {
     const auto kind = field.first == emoji_panel_tab || field.first == emoji_panel_group ? WC_COMBOBOXW : field.first == emoji_panel_search || field.first == emoji_panel_detail ? L"EDIT" :
-      field.first == emoji_panel_entries ? L"LISTBOX" : field.first == emoji_panel_page || field.first == emoji_panel_status ? L"STATIC" : L"BUTTON";
+      field.first == emoji_panel_entries ? L"LISTBOX" : field.first == emoji_panel_page || field.first == emoji_panel_status || field.first == emoji_panel_preview ? L"STATIC" : L"BUTTON";
     DWORD style = WS_CHILD | WS_VISIBLE;
     if (std::wstring_view(kind) == WC_COMBOBOXW) style |= WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL;
     else if (field.first == emoji_panel_search) style |= WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL;
     else if (field.first == emoji_panel_detail) style |= WS_TABSTOP | WS_BORDER | ES_MULTILINE | ES_READONLY | WS_VSCROLL;
-    else if (field.first == emoji_panel_entries) style |= WS_TABSTOP | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT;
+    else if (field.first == emoji_panel_entries) style |= WS_TABSTOP | WS_BORDER | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT | LBS_OWNERDRAWFIXED | LBS_HASSTRINGS;
+    else if (field.first == emoji_panel_preview) style |= SS_OWNERDRAW;
     else if (std::wstring_view(kind) == L"BUTTON") style |= WS_TABSTOP | BS_PUSHBUTTON;
     const auto control = CreateWindowExW(0,kind,field.second,style,0,0,1,1,state.host,reinterpret_cast<HMENU>(static_cast<INT_PTR>(field.first)),instance,nullptr);
     if (!control) return false; state.controls[field.first] = control; SendMessageW(control,WM_SETFONT,reinterpret_cast<WPARAM>(state.font),FALSE);

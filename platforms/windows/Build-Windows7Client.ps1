@@ -77,6 +77,13 @@ try {
             if ((Get-FileHash -LiteralPath $pair[1]).Hash -ine $manifest.($pair[0])) { throw "Win7 voice runtime/source digest mismatch: $($pair[0])" }
         }
         New-Item -ItemType Directory -Path $bin -Force | Out-Null
+        # 字体与许可证固定随程序分发，只供进程私有集合读取，不安装到系统。
+        $fontSource = Join-Path $PSScriptRoot 'assets/fonts'
+        $fontLock = Get-Content -LiteralPath (Join-Path $fontSource 'SOURCE.json') -Raw | ConvertFrom-Json
+        foreach ($file in $fontLock.files.PSObject.Properties) {
+            if ((Get-FileHash -LiteralPath (Join-Path $fontSource $file.Name) -Algorithm SHA256).Hash -ine $file.Value) { throw 'Bundled emoji font digest mismatch' }
+        }
+        Copy-Item -LiteralPath $fontSource -Destination $bin -Recurse -Force
         $hostLibrary = Join-Path $core 'msime_host_api.dll.lib'
         if ($Edition -ne 'full') {
             $definition = Join-Path $output "$hostName.def"
@@ -114,6 +121,7 @@ try {
             'msime-client-settings-win7.exe','msime-client-panels-win7.exe','msime-mcp.exe','sherpa-onnx-c-api.dll','onnxruntime_providers_shared.dll')
         $dependencies = @((Join-Path $prefix 'bin') | Where-Object { Test-Path -LiteralPath $_ -PathType Container }) + @($runtimes)
         & (Join-Path $PSScriptRoot 'Copy-Windows7RuntimeClosure.ps1') -ProgramDirectory $bin -EntryPoints $entries -DependencyDirectories $dependencies -Destination $destination -Architecture $arch
+        Copy-Item -LiteralPath $fontSource -Destination $destination -Recurse -Force
         [IO.File]::WriteAllText((Join-Path $destination 'edition.json'),("{`"edition`":`"$Edition`"}"),[Text.UTF8Encoding]::new($false))
         [ordered]@{ version = $version; edition = $Edition; architecture = $arch; minimum_windows = '6.1.7601'; settings = 'win32'; panels = 'win32' } |
             ConvertTo-Json | Set-Content -LiteralPath (Join-Path $destination 'windows7-product.json') -Encoding UTF8

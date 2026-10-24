@@ -1,5 +1,6 @@
 #include "../../compat/WindowsVersion.h"
 #include "CandidateWindow.h"
+#include "../../common/Windows7EmojiFont.h"
 #include "../../compat/WindowsDpi.h"
 #include "CandidateCanvasDrawing.h"
 #include "CandidateDecorationDrawing.h"
@@ -125,7 +126,7 @@ double measured_width(msimeui::DeviceResources &device, const std::wstring &text
   Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
   DWRITE_TEXT_METRICS metrics{};
   if (factory && format &&
-      SUCCEEDED(factory->CreateTextLayout(text.c_str(),
+      SUCCEEDED(compat::CreateTextLayoutWithWindows7Emoji(factory, text.c_str(),
                                           static_cast<UINT32>(text.size()),
                                           format, 8192.0f, size * 4.0f,
                                           layout.GetAddressOf())) &&
@@ -146,7 +147,7 @@ double measured_line_height(msimeui::DeviceResources &device, const std::wstring
   Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
   DWRITE_TEXT_METRICS metrics{};
   if (size > 0.0f && factory && format &&
-      SUCCEEDED(factory->CreateTextLayout(text.c_str(),
+      SUCCEEDED(compat::CreateTextLayoutWithWindows7Emoji(factory, text.c_str(),
                                           static_cast<UINT32>(text.size()),
                                           format, 8192.0f, size * 4.0f,
                                           layout.GetAddressOf())) &&
@@ -176,7 +177,7 @@ double wrapped_height(msimeui::DeviceResources &device, const std::wstring &text
   Microsoft::WRL::ComPtr<IDWriteTextLayout> layout;
   DWRITE_TEXT_METRICS metrics{};
   if (factory && format &&
-      SUCCEEDED(factory->CreateTextLayout(text.c_str(),
+      SUCCEEDED(compat::CreateTextLayoutWithWindows7Emoji(factory, text.c_str(),
                                           static_cast<UINT32>(text.size()),
                                           format, static_cast<float>(width),
                                           65536.0f, layout.GetAddressOf())) &&
@@ -1778,7 +1779,7 @@ void CandidateWindow::paint() {
                                                font_fallback_.Get()),
                                 metrics);
   if (pager) {
-    target->DrawText(label.c_str(), static_cast<UINT32>(label.size()),
+    compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target, label.c_str(), static_cast<UINT32>(label.size()),
                       format(metrics.pager_font, DWRITE_TEXT_ALIGNMENT_TRAILING),
                       box(pager->indicator), brush(palette_.number));
     // The previous arrow is dimmed on the first page, where it does nothing. The next one never is: the Engine fetches candidates lazily, so the page count grows as the user pages and the last page counted is not known to be the last.
@@ -1786,10 +1787,10 @@ void CandidateWindow::paint() {
     if (value->page == 0)
       previous_color.a *= 0.4f;
     const wchar_t previous_glyph[] = L"\u2039", next_glyph[] = L"\u203A";
-    target->DrawText(previous_glyph, 1,
+    compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target, previous_glyph, 1,
                       format(metrics.pager_font, DWRITE_TEXT_ALIGNMENT_CENTER),
                       box(pager->previous), brush(previous_color));
-    target->DrawText(next_glyph, 1,
+    compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target, next_glyph, 1,
                       format(metrics.pager_font, DWRITE_TEXT_ALIGNMENT_CENTER),
                       box(pager->next), brush(palette_.number));
   }
@@ -1816,7 +1817,7 @@ void CandidateWindow::paint() {
                       : 0.0;
     if (static_cast<double>(preedit_rect.left) + reading_width + metrics.pager_gap + combo_width <=
         static_cast<double>(preedit_rect.right))
-      target->DrawText(combo.c_str(), static_cast<UINT32>(combo.size()),
+      compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target, combo.c_str(), static_cast<UINT32>(combo.size()),
                         format(metrics.pager_font, DWRITE_TEXT_ALIGNMENT_TRAILING, false,
                                false, DWRITE_FONT_WEIGHT_SEMI_BOLD),
                         preedit_rect, brush(flash > 0.0f && effect_.tier_up ? effect_accent_ : palette_.number),
@@ -1844,7 +1845,7 @@ void CandidateWindow::paint() {
                        value->preedit_caret <= value->preedit.size();
     // Same clamp, same reason as the candidate rows below: a long enough reading would otherwise be drawn past the card, or under the pager.
     if (rect.right > rect.left && !caret) {
-      target->DrawText(text.c_str(), static_cast<UINT32>(text.size()), preedit_format, rect,
+      compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target, text.c_str(), static_cast<UINT32>(text.size()), preedit_format, rect,
                        preedit_brush, D2D1_DRAW_TEXT_OPTIONS_CLIP);
     } else if (rect.right > rect.left) {
       // The insertion point. Without it, moving left or right inside a long pinyin string gave no indication of where the next key would land. 和 macOS 一样，光标在拼音中间时两边的字让开，不压字；拼音长过这一段时整行左移，插入点总在看得见的地方（candidate_preedit_caret）。
@@ -1857,11 +1858,11 @@ void CandidateWindow::paint() {
       const float scroll = static_cast<float>(place.scroll);
       target->PushAxisAlignedClip(rect, D2D1_ANTIALIAS_MODE_ALIASED);
       if (!before.empty())
-        target->DrawText(before.c_str(), static_cast<UINT32>(before.size()), preedit_format,
+        compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target, before.c_str(), static_cast<UINT32>(before.size()), preedit_format,
                          D2D1_RECT_F{rect.left - scroll, rect.top, rect.right, rect.bottom},
                          preedit_brush);
       if (!after.empty())
-        target->DrawText(after.c_str(), static_cast<UINT32>(after.size()), preedit_format,
+        compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target, after.c_str(), static_cast<UINT32>(after.size()), preedit_format,
                          D2D1_RECT_F{rect.left + static_cast<float>(place.after), rect.top,
                                      (std::max)(rect.right, rect.left + static_cast<float>(place.after)),
                                      rect.bottom},
@@ -2011,7 +2012,7 @@ void CandidateWindow::paint() {
     // 序号从行左缘 number_left 处左对齐（缺省 8 DIP，皮肤写了 number_inset 时是它），到候选文字之前为止，和第一行文字竖直居中，和 macOS 一样。number_scale 让序号字号小到画不出（0）时就不画。
     const auto number_label = std::to_wstring(i + 1);
     if (metrics.number_font >= 1.0)
-      target->DrawText(
+      compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target,
           number_label.c_str(), static_cast<UINT32>(number_label.size()),
           format(metrics.number_font, DWRITE_TEXT_ALIGNMENT_LEADING),
           D2D1_RECT_F{rect.left + static_cast<float>(metrics.number_left), rect.top,
@@ -2019,7 +2020,7 @@ void CandidateWindow::paint() {
           brush(number_color));
     const auto text = wide(candidate_primary_text(value->candidates[i]));
     // Text wider than its column was laid out wrapped (wrapped_height() at this same width), and the row already grew by that height, so it wraps here inside the row that hit testing uses. Text that fits keeps the single-line format, so rounding cannot wrap what was laid out as one line. Still clipped to the row as a guard: without it anything the layout did not account for would paint past the card edge onto the transparent shadow margin.
-    target->DrawText(
+    compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target,
         text.c_str(), static_cast<UINT32>(text.size()),
         format(font_size_, DWRITE_TEXT_ALIGNMENT_LEADING, item.text_wrapped, true),
         D2D1_RECT_F{rect.left + gutter, rect.top, rect.right,
@@ -2039,7 +2040,7 @@ void CandidateWindow::paint() {
       const auto run_text = wide(run);
       const float left = rect.left + gutter + static_cast<float>(box.x);
       const float top = rect.top + static_cast<float>(box.y);
-      target->DrawText(run_text.c_str(), static_cast<UINT32>(run_text.size()),
+      compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target, run_text.c_str(), static_cast<UINT32>(run_text.size()),
                         format(size, DWRITE_TEXT_ALIGNMENT_LEADING, box.below),
                         D2D1_RECT_F{left, top, rect.right,
                                     top + static_cast<float>(box.height)},
@@ -2073,7 +2074,7 @@ void CandidateWindow::paint() {
       };
       const float left = rect.left + gutter + static_cast<float>(item.translation.x);
       bool ready =
-          SUCCEEDED(factory->CreateTextLayout(
+          SUCCEEDED(compat::CreateTextLayoutWithWindows7Emoji(factory,
               run_text.c_str(), static_cast<UINT32>(run_text.size()),
               format(metrics.translation_font, DWRITE_TEXT_ALIGNMENT_LEADING,
                      item.translation.below),
@@ -2123,7 +2124,7 @@ void CandidateWindow::paint() {
         target->FillRoundedRectangle(D2D1_ROUNDED_RECT{rect, row_radius, row_radius},
                                      brush(palette_.hover));
       const auto text = wide((*grid.items)[grid.start + slot].text);
-      target->DrawText(text.c_str(), static_cast<UINT32>(text.size()),
+      compat::DrawTextWithWindows7Emoji(device_.GetDWriteFactory(), target, text.c_str(), static_cast<UINT32>(text.size()),
                        format(font_size_, DWRITE_TEXT_ALIGNMENT_LEADING),
                        D2D1_RECT_F{rect.left + gutter, rect.top, rect.right, rect.bottom},
                        brush(cell_text), D2D1_DRAW_TEXT_OPTIONS_CLIP);
