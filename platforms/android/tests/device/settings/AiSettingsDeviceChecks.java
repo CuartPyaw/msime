@@ -122,6 +122,8 @@ public abstract class AiSettingsDeviceChecks extends DeviceSmoke {
                 awaitNotBusy();
                 checkNoFetchedModels();
                 awaitAi("model", "synthetic-custom-model");
+                check("synthetic-current".equals(ai().getJSONObject("models").getString("custom")),
+                    "切换后原服务的模型留在自己的槽位");
             }
 
             stage = "credential edits discard a delayed model catalog";
