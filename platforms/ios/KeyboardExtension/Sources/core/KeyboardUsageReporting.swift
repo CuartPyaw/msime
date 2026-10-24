@@ -14,6 +14,15 @@ enum KeyboardUsageReporting {
   private static var exceptionHandlerInstalled = false
   /// 正在进行的会话 id。在 `queue` 上写；未捕获异常处理函数可能在任何线程读它，所以放在锁里。
   private static let currentSession = OSAllocatedUnfairLock<String?>(initialState: nil)
+  /// C 回调不能捕获上下文，因此异常处理函数通过类型本身的静态方法访问会话锁。
+  private static func handleUncaughtException(_ exception: NSException) {
+    // 按自己的会话 id 写记录：标记可能已经属于另一个键盘进程刚开始的会话。
+    guard let session = currentSession.withLock({ $0 }) else { return }
+    UsageReporting.recordCrash(session: session,
+                               message: "Uncaught \(exception.name.rawValue): \(exception.reason ?? "")",
+                               stack: exception.callStackSymbols.joined(separator: "\n"))
+  }
+
   /// A keyboard is shown many times a day; its events wait in the App Group queue between sends.
   private static let flushInterval: TimeInterval = 15 * 60
 
@@ -22,13 +31,7 @@ enum KeyboardUsageReporting {
     msimeIOSCrashHandlersInstall()
     if !exceptionHandlerInstalled {
       exceptionHandlerInstalled = true
-      NSSetUncaughtExceptionHandler { exception in
-        // 按自己的会话 id 写记录：标记可能已经属于另一个键盘进程刚开始的会话。
-        guard let session = currentSession.withLock({ $0 }) else { return }
-        UsageReporting.recordCrash(session: session,
-                                   message: "Uncaught \(exception.name.rawValue): \(exception.reason ?? "")",
-                                   stack: exception.callStackSymbols.joined(separator: "\n"))
-      }
+      NSSetUncaughtExceptionHandler(handleUncaughtException)
     }
     queue.async {
       let session = UsageReporting.begin()
