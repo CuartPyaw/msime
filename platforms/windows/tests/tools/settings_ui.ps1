@@ -620,27 +620,39 @@ function Assert-VoiceToggleRecorder($window, [IntPtr]$handle) {
         } while ([DateTime]::UtcNow -lt $deadline)
         throw "语音绑定保存值不符：期望 $expected，实际 $(Read-VoiceBinding)"
     }
-    function Record-VoiceKeys([string]$keys) {
+    function Wait-VoiceRecorder([string]$expected = '') {
         $deadline = [DateTime]::UtcNow.AddSeconds(10)
         do {
-            $nameCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, '语音输入开始／结束')
-            $typeCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
-            $condition = New-Object System.Windows.Automation.AndCondition($nameCondition, $typeCondition)
-            $button = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
-            if ($button -and $button.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $button.Current.IsEnabled) { break }
+            $button = Find-ById $window 'voice-toggle-recorder'
+            # UIA 可以操作滚动区域外的控件；先滚到页面底部，截图与显示值检查都必须覆盖可见的录键按钮。
+            $content = Find-ById $window 'settings-content'
+            if ($content) {
+                [object]$scroll = $null
+                if ($content.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scroll) -and $scroll.Current.VerticallyScrollable) {
+                    $scroll.SetScrollPercent(-1, 100)
+                }
+            }
+            if ($button -and -not $button.Current.IsOffscreen -and $button.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $button.Current.IsEnabled -and
+                (-not $expected -or $button.Current.Name -eq "语音输入开始／结束：$expected")) { return $button }
             Start-Sleep -Milliseconds 100
         } while ([DateTime]::UtcNow -lt $deadline)
-        if (-not $button) { throw '语音录键按钮缺失' }
+        throw "语音录键控件缺失或显示值不符：$expected"
+    }
+    function Record-VoiceKeys([string]$keys) {
+        $button = Wait-VoiceRecorder
         [SettingsWindowProbe]::SetForegroundWindow($handle) | Out-Null
         $button.SetFocus()
         if ([SettingsWindowProbe]::GetForegroundWindow() -ne $handle) { throw '合成设置窗口未获得前台焦点' }
         $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Wait-VoiceRecorder '请按组合键…' | Out-Null
         [System.Windows.Forms.SendKeys]::SendWait($keys)
     }
     Open-Page $window 'voice'
     Select-PageTab $window 'voice-tab-input' '服务配置'
     Record-VoiceKeys '^%{F8}'
     Wait-VoiceBinding 'Ctrl+Alt+F8'
+    Wait-VoiceRecorder 'Ctrl+Alt+F8' | Out-Null
+    Start-Sleep -Milliseconds 150
     Save-Window $window 'voice-hotkey-bound.png'
     Record-VoiceKeys '{ESC}'
     Wait-VoiceBinding 'Ctrl+Alt+F8'
@@ -657,9 +669,11 @@ function Assert-VoiceToggleRecorder($window, [IntPtr]$handle) {
     Open-Page $window 'about'
     Open-Page $window 'voice'
     Select-PageTab $window 'voice-tab-input' '服务配置'
-    if (-not (Find-ByName $window 'Ctrl+Alt+F8')) { throw '重新进入语音页未显示已保存绑定' }
+    Wait-VoiceRecorder 'Ctrl+Alt+F8' | Out-Null
     Record-VoiceKeys '{BACKSPACE}'
     Wait-VoiceBinding ''
+    Wait-VoiceRecorder '未绑定' | Out-Null
+    Start-Sleep -Milliseconds 150
     Save-Window $window 'voice-hotkey-cleared.png'
     Write-Host '语音原生录键、取消、固定键冲突、切页恢复与解绑通过'
 }

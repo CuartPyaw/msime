@@ -21414,19 +21414,23 @@ private:
       const auto stored = document_.String(L"keybindings.toggle_voice_input", L"");
       return stored.empty() ? std::wstring(L"未绑定") : stored;
     };
-    recorder.Content(box_value(hstring(label())));
+    const auto show = [](Button const &button, std::wstring const &value) {
+      button.Content(box_value(hstring(value)));
+      A11y::SetName(button, hstring(L"语音输入开始／结束：" + value));
+    };
+    show(recorder, label());
     recorder.IsEnabled(loaded_);
-    A11y::SetName(recorder, L"语音输入开始／结束");
-    recorder.Click([recording, message](Inspectable const &sender, RoutedEventArgs const &) {
+    A11y::SetAutomationId(recorder, L"voice-toggle-recorder");
+    recorder.Click([recording, message, show](Inspectable const &sender, RoutedEventArgs const &) {
       *recording = true;
       message.Text(L"");
-      sender.as<Button>().Content(box_value(L"请按组合键…"));
+      show(sender.as<Button>(), L"请按组合键…");
     });
-    recorder.LostFocus([recording, label](Inspectable const &sender, RoutedEventArgs const &) {
+    recorder.LostFocus([recording, label, show](Inspectable const &sender, RoutedEventArgs const &) {
       *recording = false;
-      sender.as<Button>().Content(box_value(hstring(label())));
+      show(sender.as<Button>(), label());
     });
-    recorder.PreviewKeyDown([this, recording, label, message](
+    recorder.PreviewKeyDown([this, recording, label, message, show](
         Inspectable const &sender, Input::KeyRoutedEventArgs const &args) {
       if (!*recording) return;
       args.Handled(true);
@@ -21434,7 +21438,7 @@ private:
       if (key == VK_ESCAPE) {
         *recording = false;
         message.Text(L"");
-        sender.as<Button>().Content(box_value(hstring(label())));
+        show(sender.as<Button>(), label());
         return;
       }
       if (key == VK_CONTROL || key == VK_SHIFT || key == VK_MENU ||
