@@ -313,7 +313,9 @@ int main(int argc, char** argv) {
           460, 40, 300, 180, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
       assert(other);
       activate(other);
-      SendMessageW(cross_candidate(host), BM_CLICK, 0, 0);
+      // Win7 的 BM_CLICK 会先激活按钮窗口；直接投递通知才能验证第三个窗口仍在前台时的拒绝。
+      const HWND candidate = cross_candidate(host);
+      SendMessageW(host, WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(candidate), BN_CLICKED), reinterpret_cast<LPARAM>(candidate));
       assert(caption(editor).empty());
       assert(GetForegroundWindow() == other);
       assert(cross_candidate(host));
@@ -321,7 +323,10 @@ int main(int argc, char** argv) {
       activate(editor_host, editor);
       DestroyWindow(other);
     }
-    SendMessageW(cross_candidate(host), BM_CLICK, 0, 0);
+    const HWND accepted_candidate = cross_candidate(host);
+    // 真实鼠标点击经过 WM_MOUSEACTIVATE；BM_CLICK 在 Win7 会绕过该约定并激活面板。
+    if (desktop) SendMessageW(host, WM_COMMAND, MAKEWPARAM(GetDlgCtrlID(accepted_candidate), BN_CLICKED), reinterpret_cast<LPARAM>(accepted_candidate));
+    else SendMessageW(accepted_candidate, BM_CLICK, 0, 0);
     if (desktop) {
       pump_until([&] { return caption(editor) == L"十"; });
       assert(GetForegroundWindow() == editor_host);
