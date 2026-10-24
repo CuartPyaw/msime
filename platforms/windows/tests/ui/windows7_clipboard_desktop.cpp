@@ -19,8 +19,48 @@ void pump(const std::function<bool()>& condition) {
 }
 LRESULT CALLBACK editor_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
   if (message == WM_SETFOCUS) { if (const auto editor = GetDlgItem(window, 1)) SetFocus(editor); return 0; }
+  if (message == WM_DESTROY) { PostQuitMessage(0); return 0; }
   return DefWindowProcW(window, message, wparam, lparam);
 }
+struct EditorHandles { HWND host, editor, other; };
+int run_editor(const wchar_t* name) {
+  const auto mapping = OpenFileMappingW(FILE_MAP_WRITE, FALSE, name);
+  const auto signal = OpenEventW(EVENT_MODIFY_STATE, FALSE, (std::wstring(name) + L".ready").c_str());
+  assert(mapping && signal);
+  const auto shared = static_cast<EditorHandles*>(MapViewOfFile(mapping, FILE_MAP_WRITE, 0, 0, sizeof(EditorHandles))); assert(shared);
+  const auto instance = GetModuleHandleW(nullptr);
+  WNDCLASSEXW type{sizeof(type)}; type.hInstance = instance; type.lpfnWndProc = editor_proc; type.lpszClassName = L"MSIME.Windows7Clipboard.TestEditor";
+  assert(RegisterClassExW(&type));
+  shared->host = CreateWindowExW(0, type.lpszClassName, L"合成文字验收编辑器", WS_OVERLAPPEDWINDOW, 40, 40, 420, 200, nullptr, nullptr, instance, nullptr);
+  shared->editor = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE, 10, 10, 380, 140, shared->host, reinterpret_cast<HMENU>(1), instance, nullptr);
+  shared->other = CreateWindowExW(0, type.lpszClassName, L"合成的其他窗口", WS_OVERLAPPEDWINDOW, 480, 40, 320, 180, shared->host, nullptr, instance, nullptr);
+  assert(shared->host && shared->editor && shared->other && SetEvent(signal));
+  MSG message{}; while (GetMessageW(&message, nullptr, 0, 0) > 0) { TranslateMessage(&message); DispatchMessageW(&message); }
+  if (IsWindow(shared->host)) DestroyWindow(shared->host);
+  UnmapViewOfFile(shared); CloseHandle(signal); CloseHandle(mapping); return 0;
+}
+struct EditorProcess {
+  HANDLE mapping = nullptr, signal = nullptr;
+  EditorHandles* shared = nullptr;
+  PROCESS_INFORMATION process{};
+  EditorProcess() {
+    const auto name = L"Local\\MSIME.Win7.Clipboard.Test." + std::to_wstring(GetCurrentProcessId());
+    mapping = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, sizeof(EditorHandles), name.c_str());
+    signal = CreateEventW(nullptr, TRUE, FALSE, (name + L".ready").c_str()); assert(mapping && signal);
+    shared = static_cast<EditorHandles*>(MapViewOfFile(mapping, FILE_MAP_READ, 0, 0, sizeof(EditorHandles))); assert(shared);
+    wchar_t executable[32768]{}; assert(GetModuleFileNameW(nullptr, executable, 32768));
+    auto command = L"\"" + std::wstring(executable) + L"\" --editor " + name;
+    STARTUPINFOW startup{}; startup.cb = sizeof(startup);
+    assert(CreateProcessW(executable, command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &process));
+    assert(WaitForSingleObject(signal, 10000) == WAIT_OBJECT_0);
+  }
+  ~EditorProcess() {
+    PostMessageW(shared->host, WM_CLOSE, 0, 0);
+    assert(WaitForSingleObject(process.hProcess, 10000) == WAIT_OBJECT_0);
+    CloseHandle(process.hThread); CloseHandle(process.hProcess);
+    UnmapViewOfFile(shared); CloseHandle(signal); CloseHandle(mapping);
+  }
+};
 void activate(HWND window) {
   const auto foreground = GetWindowThreadProcessId(GetForegroundWindow(), nullptr), current = GetCurrentThreadId();
   // 只为测试自己的窗口取得前台权限；产品代码不连接其他进程的输入队列。
@@ -53,6 +93,7 @@ struct TemporaryState {
 };
 }
 int main(int count, char** arguments) {
+  if (count == 3 && std::string_view(arguments[1]) == "--editor") return run_editor(control_text::wide(arguments[2]).c_str());
   if (count != 2 || std::string_view(arguments[1]) != "--desktop") { std::puts("请在交互桌面使用 --desktop；此程序会向它自己创建的编辑器输入合成文字。"); return 2; }
   USEROBJECTFLAGS flags{}; DWORD bytes = 0;
   const auto desktop = OpenInputDesktop(0, FALSE, DESKTOP_READOBJECTS);
@@ -64,13 +105,16 @@ int main(int count, char** arguments) {
   const std::string sample = "合成🙂", id(64, 'a');
   assert(theme_data::value(theme_data::call(msime_client_capture_clipboard_history, {{"directory", temporary.path.u8string()}, {"text", sample}})));
   assert(theme_data::value(theme_data::call(msime_client_typing_statistics, {{"directory", temporary.path.u8string()}, {"action", {{"operation", "set_enabled"}, {"enabled", true}}}})));
+  // 编辑器必须属于独立进程；同一输入队列中 BM_CLICK 的 SetFocus 会改变根窗口，不能代表向外部应用输入。
+  EditorProcess editors;
   const auto instance = GetModuleHandleW(nullptr);
-  WNDCLASSEXW type{sizeof(type)}; type.hInstance = instance; type.lpfnWndProc = editor_proc; type.lpszClassName = L"MSIME.Windows7Clipboard.TestEditor";
-  assert(RegisterClassExW(&type));
-  const auto editor_host = CreateWindowExW(0, type.lpszClassName, L"合成文字验收编辑器", WS_OVERLAPPEDWINDOW, 40, 40, 420, 200, nullptr, nullptr, instance, nullptr);
-  const auto editor = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_MULTILINE, 10, 10, 380, 140, editor_host, reinterpret_cast<HMENU>(1), instance, nullptr);
-  const auto other = CreateWindowExW(0, type.lpszClassName, L"合成的其他窗口", WS_OVERLAPPEDWINDOW, 480, 40, 320, 180, nullptr, nullptr, instance, nullptr);
-  assert(editor_host && editor && other); activate(editor_host);
+  const auto editor_host = editors.shared->host, editor = editors.shared->editor, other = editors.shared->other;
+  activate(editor_host);
+  const auto editor_text = [&] {
+    // 跨进程编辑控件不能用 GetWindowText；系统消息负责封送这个有界合成缓冲区。
+    wchar_t text[4096]{}; const auto length = SendMessageW(editor, WM_GETTEXT, 4096, reinterpret_cast<LPARAM>(text));
+    assert(length >= 0 && length < 4096); return std::wstring(text, static_cast<size_t>(length));
+  };
   const auto total = [&] { const auto result = theme_data::value(theme_data::call(msime_client_typing_statistics, {{"directory", temporary.path.u8string()}, {"action", {{"operation", "load"}}}})); assert(result); return result->at("total").get<unsigned>(); };
   const auto chosen = control_text::wide(sample);
   {
@@ -80,13 +124,15 @@ int main(int count, char** arguments) {
     const auto list = GetDlgItem(host, clipboard_panel_entries);
     SendMessageW(list, LB_SETCURSEL, 0, 0); SendMessageW(host, WM_COMMAND, MAKEWPARAM(clipboard_panel_entries, LBN_SELCHANGE), reinterpret_cast<LPARAM>(list));
     activate(other); SendMessageW(GetDlgItem(host, clipboard_panel_insert), BM_CLICK, 0, 0); wait();
-    assert(control_text::read(editor).value().empty() && GetForegroundWindow() == other && total() == 0);
+    assert(editor_text().empty());
+    assert(GetForegroundWindow() == other);
+    assert(total() == 0);
     activate(editor_host); SendMessageW(GetDlgItem(host, clipboard_panel_insert), BM_CLICK, 0, 0); wait();
-    pump([&] { return control_text::read(editor).value() == sample; });
+    pump([&] { return editor_text() == chosen; });
     assert(GetForegroundWindow() == editor_host && total() > 0);
     DestroyWindow(host);
   }
-  const auto local_total = total(); assert(SetWindowTextW(editor, L"")); activate(editor_host);
+  const auto local_total = total(); assert(SendMessageW(editor, WM_SETTEXT, 0, reinterpret_cast<LPARAM>(L""))); activate(editor_host);
   {
     CloudClipboardWindow::Services services;
     services.account = [&](const std::string& request) {
@@ -103,12 +149,11 @@ int main(int count, char** arguments) {
     const auto select = [&] { const auto list = GetDlgItem(body, cloud_clipboard_items); SendMessageW(list, LB_SETCURSEL, 0, 0); SendMessageW(body, WM_COMMAND, MAKEWPARAM(cloud_clipboard_items, LBN_SELCHANGE), reinterpret_cast<LPARAM>(list)); };
     activate(host); select(); activate(other);
     SendMessageW(GetDlgItem(host, cloud_clipboard_panel_insert), BM_CLICK, 0, 0); wait();
-    assert(control_text::read(editor).value().empty() && GetForegroundWindow() == other && total() == local_total);
+    assert(editor_text().empty() && GetForegroundWindow() == other && total() == local_total);
     activate(host); select(); SendMessageW(GetDlgItem(host, cloud_clipboard_panel_insert), BM_CLICK, 0, 0); wait();
-    pump([&] { return control_text::read(editor).value() == sample; });
+    pump([&] { return editor_text() == chosen; });
     assert(GetForegroundWindow() == editor_host && total() == local_total * 2);
     DestroyWindow(host);
   }
-  DestroyWindow(other); DestroyWindow(editor_host);
   std::puts("独立剪贴板面板真实上屏与焦点验收通过：仅写自己的合成编辑器，第三个窗口在前台时拒绝，成功输入各统计一次。");
 }
