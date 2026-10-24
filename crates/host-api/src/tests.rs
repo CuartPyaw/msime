@@ -3137,7 +3137,10 @@ fn fourteen_key_grid_crosses_the_host_boundary() {
     let handle = test_host(dir.path());
     read(msime_client_focus(handle, true));
     assert_eq!(read(msime_client_view(handle))["value"]["key_grid"], "none");
-    assert_eq!(read(msime_client_set_key_grid(handle, 4))["ok"], false);
+    assert_eq!(
+        read(msime_client_set_key_grid(handle, u8::MAX))["ok"],
+        false
+    );
     assert_eq!(read(msime_client_view(handle))["value"]["key_grid"], "none");
     let enabled = read(msime_client_set_key_grid(handle, 2));
     assert_eq!(enabled["value"]["key_grid"], "fourteen_key");

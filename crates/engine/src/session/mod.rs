@@ -160,9 +160,11 @@ impl Session {
         self.input.set_zhuyin_nine_key(nine_key);
     }
 
-    /// 14 键的一键：`letter` 是这一组里的任一字母，由 `KeyGrid::code_of` 归成组码交给九宫格会话，宿主约定送首字母。不复用硬件键盘的 `character`。全拼和双拼分别使用自己的 14 键表；本地模式、专用英文或已有 26 键组字时不处理，状态不变。
+    /// 字母归组键盘的一键：`letter` 是这一组里的任一字母，由 `KeyGrid::code_of` 归成组码交给九宫格会话，宿主约定送首字母。不复用硬件键盘的 `character`。全拼使用当前的十四键或十八键表，双拼使用自己的十四键表；本地模式、专用英文或已有 26 键组字时不处理，状态不变。
     pub fn grid_key(&mut self, letter: u8) -> KeyResult {
-        let Some(grid @ (KeyGrid::FourteenKey | KeyGrid::FourteenKeyShuangpin(_))) = self.key_grid
+        let Some(
+            grid @ (KeyGrid::FourteenKey | KeyGrid::EighteenKey | KeyGrid::FourteenKeyShuangpin(_)),
+        ) = self.key_grid
         else {
             return KeyResult::unhandled();
         };
@@ -170,7 +172,9 @@ impl Session {
             return KeyResult::unhandled();
         };
         let supported = match grid {
-            KeyGrid::FourteenKey => self.input.scheme() == SchemeType::Quanpin,
+            KeyGrid::FourteenKey | KeyGrid::EighteenKey => {
+                self.input.scheme() == SchemeType::Quanpin
+            }
             KeyGrid::FourteenKeyShuangpin(_) => self.input.scheme() == SchemeType::Shuangpin,
             _ => false,
         };
@@ -185,12 +189,14 @@ impl Session {
         self.after_nine_key(result)
     }
 
-    /// 九宫格组码已经到上限时，这一键能不能先选掉首选、再接着打（`NineKeySession::limit_pick_ready`）。`grid_key` 为真时 `value` 是 `grid_key` 收到的 14 键字母，否则是 `character` 收到的九键或九键双拼数字；两条路由各自只认自己的网格。
+    /// 九宫格组码已经到上限时，这一键能不能先选掉首选、再接着打（`NineKeySession::limit_pick_ready`）。`grid_key` 为真时 `value` 是 `grid_key` 收到的归组字母，否则是 `character` 收到的九键或九键双拼数字；两条路由各自只认自己的网格。
     pub fn grid_limit_pick_ready(&self, value: u8, grid_key: bool) -> bool {
         let code = match self.key_grid {
-            Some(grid @ (KeyGrid::FourteenKey | KeyGrid::FourteenKeyShuangpin(_))) if grid_key => {
-                grid.code_of(value)
-            }
+            Some(
+                grid @ (KeyGrid::FourteenKey
+                | KeyGrid::EighteenKey
+                | KeyGrid::FourteenKeyShuangpin(_)),
+            ) if grid_key => grid.code_of(value),
             Some(KeyGrid::NineKey | KeyGrid::NineKeyShuangpin(_)) if !grid_key => Some(value),
             _ => None,
         };
