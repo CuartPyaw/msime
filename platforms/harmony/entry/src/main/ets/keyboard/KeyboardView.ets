@@ -3756,7 +3756,7 @@ struct KeyboardView {
         ForEach(this.candidates, (candidate: CandidateEntry, index: number) => {
           this.candidateCell(candidate, index)
         }, (candidate: CandidateEntry, index: number) =>
-          `${index}:${candidate.text}:${candidate.highlighted}`)
+          `${index}:${JSON.stringify(candidate)}`)
       }
       .width('100%')
       // One row per candidate here and exactly one there. The two used to share a ternary applied to
@@ -3782,7 +3782,7 @@ struct KeyboardView {
           ForEach(this.candidates, (candidate: CandidateEntry, index: number) => {
             this.candidateCell(candidate, index)
           }, (candidate: CandidateEntry, index: number) =>
-            `${index}:${candidate.text}:${candidate.highlighted}`)
+            `${index}:${JSON.stringify(candidate)}`)
         }
         .height(this.candidateRowHeight())
       }
@@ -4198,7 +4198,7 @@ struct KeyboardView {
               ForEach(this.candidates, (candidate: CandidateEntry, index: number) => {
                 this.candidateChip(candidate, index)
               }, (candidate: CandidateEntry, index: number) =>
-                `${index}:${candidate.text}:${candidate.highlighted}`)
+                `${index}:${JSON.stringify(candidate)}`)
             }
             .height(CHIP_HEIGHT_VP)
           }
