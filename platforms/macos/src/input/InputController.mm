@@ -1415,6 +1415,11 @@ static constexpr uint64_t MSIMESessionRecoveryNoticeInterval = 60 * NSEC_PER_SEC
 - (void)showCandidatePanel;
 @end
 
+// 只在主线程记录最后实际提交账号等待页的控制器，不延长输入框的生命周期。
+static __weak MSIMEInputController *MSIMEAccountGlossQueueOwner;
+// 当前持有焦点客户端的控制器。每个控制器都观察同一份外观设置，改动由最先注册的那个保存，而它往往是早已失去焦点的控制器；所以保存之后，要把文档载入会话的是这一个。
+static __weak MSIMEInputController *MSIMEFocusedController;
+
 // The full-colour brand mark the floating toolbar and the mode HUD lead with, loaded once. Nil when the bundle has no icon, and the top row then carries no mark.
 static NSImage *MSIMECandidateLogoImage() {
     static NSImage *logo;
@@ -2923,7 +2928,10 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
 }
 
 - (void)cancelQueuedAccountGlosses {
-    // weak_import, like the fetch: a process without the backend dylib binds this to null.
+    // 迟到的控制器不能删除别人的等待页；当前焦点退出时仍须清理尚未交接的旧页。
+    if (MSIMEAccountGlossQueueOwner != self && MSIMEFocusedController != self) return;
+    MSIMEAccountGlossQueueOwner = nil;
+    // 未加载后端 dylib 时，weak_import 入口为空。
     if (MSIMECancelAccountCandidateGlosses != nullptr) MSIMECancelAccountCandidateGlosses();
 }
 
@@ -3046,10 +3054,13 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
 
 - (void)fetchAccountGlosses:(NSArray<NSString *> *)words primary:(NSString *)primary secondary:(NSString *)secondary
                  generation:(uint64_t)generation {
+    // IMK 的旧输入框可能尚未收到失焦回调，迟到的计时器不能替换当前输入框的等待页。
+    if (MSIMEFocusedController != self) return;
     // weak_import: the Swift backend supplies this, and a process without the dylib binds it to null. Calling through that is a jump to address zero, which is what the settings window's three call sites have always guarded against and these two did not.
     if (MSIMEFetchAccountCandidateGlosses == nullptr) return;
     NSData *payload = [NSJSONSerialization dataWithJSONObject:words options:0 error:nil];
     if (!payload) return;
+    MSIMEAccountGlossQueueOwner = self;
     MSIMEFetchAccountCandidateGlosses([[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding].UTF8String,
                                       primary.UTF8String, secondary.UTF8String, generation);
 }
@@ -3965,8 +3976,6 @@ static const NSTimeInterval kSettledRerankPoll = 1.0 / 60.0;
 static MSIMEPreferenceSaveState MSIMESharedPreferenceSaveState;
 // The controller behind the queued save, which runs it when the one in flight finishes, whether or not the controller that started that one is still alive.
 static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
-// 当前持有焦点客户端的控制器。每个控制器都观察同一份外观设置，改动由最先注册的那个保存，而它往往是早已失去焦点的控制器；所以保存之后，要把文档载入会话的是这一个。
-static __weak MSIMEInputController *MSIMEFocusedController;
 // 方案只能经由共享偏好文档到达 Engine，而外观改动触发的保存在主线程之外进行，所以从 한 切到 中 之后紧接着敲的键仍按韩文组字，未完成的音节又会把新方案一直挡到它结束。因此切换时在这里、在下一个按键之前于主线程写入文档，并把写入的内容原样交给持有焦点的会话。切换方案前已经结束了组字，会话处于空闲状态，会立即应用新方案。外观改动另外触发的那次保存会再写一遍相同的偏好，会话视为没有变化。Fcitx5 切换方案时同样等待保存完成；这里保存失败时，切换交由那次后台保存完成。
 - (void)applyPreferencesToSessionNow {
     if (!_session || !_activeClient || !_preferencesDirectory || !_appearance) return;
