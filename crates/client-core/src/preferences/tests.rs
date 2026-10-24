@@ -5,6 +5,54 @@
 use super::*;
 
 #[test]
+fn touch_shuangpin_layout_defaults_persists_and_rejects_unsupported_layouts() {
+    let defaults = Preferences::default();
+    let legacy = serde_json::to_value(&defaults).unwrap();
+    assert!(legacy.get("touch_shuangpin_layout").is_none());
+    assert_eq!(
+        serde_json::from_value::<Preferences>(legacy.clone())
+            .unwrap()
+            .touch_shuangpin_layout,
+        TouchShuangpinLayout::TwentySixKey
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let configured = Preferences {
+        touch_shuangpin_layout: TouchShuangpinLayout::FourteenKey,
+        shuangpin_profile: ShuangpinProfile::Microsoft,
+        touch_keyboard_layout: TouchKeyboardLayout::NineKey,
+        ..defaults
+    };
+    store.save(0, configured.clone()).unwrap();
+    assert_eq!(store.load().unwrap().preferences, configured);
+    let mut invalid = legacy;
+    invalid["touch_shuangpin_layout"] = "nine_key".into();
+    assert!(serde_json::from_value::<Preferences>(invalid).is_err());
+    let mut malformed = legacy;
+    malformed["touch_japanese_toggle_input"] = "false".into();
+    assert!(serde_json::from_value::<Preferences>(malformed).is_err());
+}
+
+#[test]
+fn japanese_toggle_input_persists_disabled() {
+    let mut value = serde_json::to_value(Preferences::default()).unwrap();
+    value["touch_japanese_toggle_input"] = false.into();
+    let disabled: Preferences = serde_json::from_value(value).unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(directory.path());
+    let saved = store.save(0, disabled).unwrap();
+    assert_eq!(
+        serde_json::to_value(&saved.preferences).unwrap()["touch_japanese_toggle_input"],
+        false
+    );
+    assert_eq!(
+        serde_json::to_value(store.load().unwrap().preferences).unwrap()
+            ["touch_japanese_toggle_input"],
+        false
+    );
+}
+
+#[test]
 fn candidate_translation_font_size_is_optional_bounded_and_round_trips() {
     let mut json = serde_json::to_value(Preferences::default()).unwrap();
     assert!(json.get("candidate_translation_font_size").is_none());
@@ -32,6 +80,65 @@ fn candidate_translation_font_size_is_optional_bounded_and_round_trips() {
         .unwrap()
         .get("candidate_translation_font_size")
         .is_none());
+}
+
+#[test]
+fn android_text_trackpad_defaults_and_legacy_documents_agree() {
+    let defaults = serde_json::to_value(Preferences::default()).unwrap();
+    assert_eq!(
+        defaults["android_text_trackpad"],
+        serde_json::json!({
+            "enabled": false, "hold_to_open": false, "horizontal_dp": 12,
+            "vertical_dp": 28, "tap_selection": true, "haptics": true,
+            "trail": true, "magnifier": true
+        })
+    );
+    let mut legacy = defaults.clone();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("android_text_trackpad");
+    let restored: Preferences = serde_json::from_value(legacy).unwrap();
+    assert_eq!(serde_json::to_value(restored).unwrap(), defaults);
+}
+
+#[test]
+fn android_text_trackpad_validates_ranges_and_persists_all_options() {
+    let mut document = serde_json::to_value(Preferences::default()).unwrap();
+    document["android_text_trackpad"] = serde_json::json!({
+        "enabled": true, "hold_to_open": true, "horizontal_dp": 4,
+        "vertical_dp": 96, "tap_selection": false, "haptics": false,
+        "trail": false, "magnifier": false
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(directory.path());
+    let preferences: Preferences = serde_json::from_value(document.clone()).unwrap();
+    let saved = store.save(0, preferences).unwrap();
+    assert_eq!(
+        serde_json::to_value(store.load().unwrap().preferences).unwrap(),
+        document
+    );
+    for (key, invalid) in [
+        ("horizontal_dp", 3),
+        ("horizontal_dp", 49),
+        ("vertical_dp", 7),
+        ("vertical_dp", 97),
+    ] {
+        let mut invalid_document = document.clone();
+        invalid_document["android_text_trackpad"][key] = invalid.into();
+        let invalid_preferences: Preferences = serde_json::from_value(invalid_document).unwrap();
+        assert!(invalid_preferences.validate().is_err(), "{key}: {invalid}");
+    }
+    for invalid in [
+        serde_json::json!("true"),
+        serde_json::json!(0),
+        serde_json::Value::Null,
+    ] {
+        document["android_text_trackpad"]["enabled"] = invalid;
+        assert!(serde_json::from_value::<Preferences>(document.clone()).is_err());
+    }
+    store.restore_defaults(saved.revision).unwrap();
+    assert_eq!(store.load().unwrap().preferences, Preferences::default());
 }
 
 #[test]
@@ -2841,8 +2948,6 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
     assert_eq!(
         store.load().unwrap().preferences.mixed_input,
         MixedInputPreferences {
-            enabled: true,
-            first_page_count: 1,
             english: false,
             minimum_prefix: 3,
             emoji: true,
@@ -2857,8 +2962,6 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
     for mask in 0..32 {
         let preferences = Preferences {
             mixed_input: MixedInputPreferences {
-                enabled: true,
-                first_page_count: 1,
                 english: mask & 1 != 0,
                 emoji: mask & 2 != 0,
                 kaomoji: mask & 4 != 0,

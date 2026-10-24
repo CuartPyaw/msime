@@ -350,6 +350,19 @@ pub extern "C" fn msime_client_default_preferences() -> *mut c_char {
     })
 }
 
+/// 触控板设置控件的默认值和范围，宿主只负责展示；结果用 `msime_client_string_free` 释放。
+#[no_mangle]
+pub extern "C" fn msime_client_text_trackpad_options() -> *mut c_char {
+    use msime_client_core::preferences::TextTrackpadPreferences as Trackpad;
+    response(|| {
+        Ok(json!({
+            "defaults": Trackpad::default(),
+            "horizontal_dp": {"minimum": Trackpad::HORIZONTAL_MIN_DP, "maximum": Trackpad::HORIZONTAL_MAX_DP},
+            "vertical_dp": {"minimum": Trackpad::VERTICAL_MIN_DP, "maximum": Trackpad::VERTICAL_MAX_DP},
+        }))
+    })
+}
+
 /// The transcription provider and the optional rewrite, resolved from a preferences directory.
 ///
 /// The Android keyboard has its own voice entry and never goes through the desktop shell, so the
@@ -2035,6 +2048,21 @@ struct MobileClipboardRequest {
 #[serde(tag = "operation", rename_all = "snake_case", deny_unknown_fields)]
 enum MobileClipboardAction {
     Load,
+    Categories,
+    AddCategory {
+        name: String,
+    },
+    RenameCategory {
+        id: String,
+        name: String,
+    },
+    RemoveCategory {
+        id: String,
+    },
+    SetCategory {
+        text: String,
+        id: Option<String>,
+    },
     ExportText,
     Capture {
         text: String,
@@ -2085,6 +2113,48 @@ pub unsafe extern "C" fn msime_client_mobile_clipboard_history(
             clipboard_history_limit(root),
         );
         match request.action {
+            MobileClipboardAction::Categories => {
+                let categories = history
+                    .categories()
+                    .map_err(|_| "mobile clipboard categories unavailable")?;
+                Ok(
+                    json!({"categories": categories, "maxCategories": msime_client_core::clipboard::MAX_CATEGORIES,
+                    "maxNameCharacters": msime_client_core::clipboard::MAX_CATEGORY_NAME_CHARACTERS}),
+                )
+            }
+            MobileClipboardAction::AddCategory { name } => {
+                history.add_category(&name).map_err(|error| {
+                    if error.kind() == std::io::ErrorKind::InvalidInput {
+                        "invalid clipboard category name or category limit reached"
+                    } else {
+                        "mobile clipboard categories unavailable"
+                    }
+                })?;
+                Ok(json!({"updated": true}))
+            }
+            MobileClipboardAction::RenameCategory { id, name } => {
+                let updated = history
+                    .rename_category(&id, &name)
+                    .map_err(|_| "mobile clipboard category rename failed")?;
+                Ok(json!({"updated": updated}))
+            }
+            MobileClipboardAction::RemoveCategory { id } => {
+                let updated = history
+                    .remove_category(&id)
+                    .map_err(|_| "mobile clipboard category removal failed")?;
+                Ok(json!({"updated": updated}))
+            }
+            MobileClipboardAction::SetCategory { text, id } => {
+                if text.is_empty()
+                    || text.len() > msime_client_core::clipboard::MAX_MOBILE_TEXT_BYTES
+                {
+                    return Err("invalid mobile clipboard entry".into());
+                }
+                let updated = history
+                    .set_category(&text, id.as_deref())
+                    .map_err(|_| "mobile clipboard category update failed")?;
+                Ok(json!({"updated": updated}))
+            }
             MobileClipboardAction::ExportText => {
                 history
                     .load()
@@ -2097,7 +2167,10 @@ pub unsafe extern "C" fn msime_client_mobile_clipboard_history(
                 history
                     .load()
                     .map_err(|_| "mobile clipboard history unavailable")?;
-                Ok(json!({"entries": history.entries(), "limit": history.limit()}))
+                Ok(
+                    json!({"entries": history.entries(), "limit": history.limit(),
+                    "categories": history.categories().map_err(|_| "mobile clipboard categories unavailable")?}),
+                )
             }
             MobileClipboardAction::Capture { text } => {
                 if !msime_client_core::clipboard::mobile_text_is_valid(&text) {

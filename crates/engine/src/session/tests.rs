@@ -303,7 +303,7 @@ fn words(session: &Session) -> Vec<String> {
         .snapshot()
         .candidates
         .into_iter()
-        .map(|item| item.word)
+        .map(|item| item.word.into_string())
         .collect()
 }
 
@@ -618,7 +618,7 @@ fn caret_commands_redecode_and_selection_returns_to_the_end() {
     let whole: Vec<String> = snapshot
         .candidates
         .into_iter()
-        .map(|item| item.word)
+        .map(|item| item.word.into_string())
         .collect();
     assert_eq!(whole.first().map(String::as_str), Some("你"));
     session.command(Command::MoveEnd);
@@ -733,7 +733,8 @@ fn caret_prefix_expands_its_own_initial_list() {
     let (grew, allocations) =
         crate::ime::personal_rerank::allocations::count(|| session.expand_initial_candidates());
     assert!(grew);
-    assert_eq!(allocations, 315, "光标前缀展开申请次数：{allocations}");
+    // 候选行字段是 `SharedString`：克隆行只加引用计数，新建行的每个非空字段多一个 `Arc`。
+    assert_eq!(allocations, 207, "光标前缀展开申请次数：{allocations}");
     let widened = words(&session);
     assert_eq!(widened.len(), 30);
     assert!(widened.contains(&"丝".to_owned()), "{widened:?}");
@@ -1789,7 +1790,7 @@ fn real_resources_mix_japanese_conversions() {
         let words: Vec<String> = snapshot
             .candidates
             .into_iter()
-            .map(|item| item.word)
+            .map(|item| item.word.into_string())
             .collect();
         session.command(Command::Cancel);
         (words, japanese)
@@ -2087,6 +2088,133 @@ fn end_trigger_modes(
         trigger_backtick: backtick,
         trigger_uppercase: uppercase,
         ..crate::types::ShuangpinHelpcodeModes::default()
+    }
+}
+
+#[test]
+fn shuangpin_manual_tab_filters_only_after_tab() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.shuangpin_profile = ShuangpinProfileKind::Xiaohe;
+        options.shuangpin_helpcode_modes.manual_tab = true;
+        options.helpcode_table = Some(Arc::new(crate::helpcode::HelpcodeKeymap::from_codes(
+            [
+                ("你".to_owned(), "na".to_owned()),
+                ("拟".to_owned(), "xq".to_owned()),
+            ]
+            .into_iter()
+            .collect(),
+        )));
+    });
+    assert!(!session.character(b'\t', false).handled);
+    type_text(&mut session, "nihc");
+    assert_eq!(words(&session)[0], "你好");
+    assert!(session.character(b'\t', false).handled);
+    assert_eq!(session.snapshot().editing_text, "nihc|");
+    type_text(&mut session, "x");
+    assert_eq!(words(&session)[0], "拟好");
+    assert_eq!(session.command(Command::Backspace).commit, None);
+    assert!(session.input.engine.request().end_helpcodes.is_empty());
+    session.command(Command::Backspace);
+    assert_eq!(session.snapshot().editing_text, "nihc");
+    type_text(&mut session, "x");
+    assert!(session.input.engine.request().end_helpcodes.is_empty());
+    assert!(!session.input.has_active_helpcode());
+    session.command(Command::Cancel);
+    session
+        .input
+        .engine
+        .set_shuangpin_helpcode_modes(crate::types::ShuangpinHelpcodeModes::default());
+    type_text(&mut session, "nihcx");
+    assert!(session.input.has_active_helpcode());
+}
+
+#[test]
+fn shuangpin_manual_tab_preserves_microsoft_pairs() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    for (typed, segmentation) in [
+        ("veyige", "zhe'yi'ge"),
+        ("uurufa", "shu'ru'fa"),
+        ("vijxuuru", "zhi'jie'shu'ru"),
+    ] {
+        let mut session = fixture.session_with(|options| {
+            options.scheme = SchemeType::Shuangpin;
+            options.shuangpin_profile = ShuangpinProfileKind::Microsoft;
+            options.shuangpin_helpcode_modes.manual_tab = true;
+        });
+        type_text(&mut session, typed);
+        assert_eq!(
+            session.snapshot().normalized_segmentation,
+            segmentation,
+            "{typed}"
+        );
+        assert!(!session.input.has_active_helpcode(), "{typed}");
+        assert!(session.character(b'\t', false).handled, "{typed}");
+    }
+}
+
+#[test]
+fn shuangpin_manual_tab_owns_only_complete_normal_composition() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    for (scheme, enabled, manual, typed, accepts) in [
+        (SchemeType::Shuangpin, true, true, "", false),
+        (SchemeType::Shuangpin, true, true, "n", false),
+        (SchemeType::Shuangpin, true, true, "nihc", true),
+        (SchemeType::Shuangpin, false, true, "nihc", false),
+        (SchemeType::Shuangpin, true, false, "nihc", false),
+        (SchemeType::Quanpin, true, true, "nihao", false),
+    ] {
+        let mut session = fixture.session_with(|options| {
+            options.scheme = scheme;
+            options.helpcode = enabled;
+            options.shuangpin_helpcode_modes.manual_tab = manual;
+        });
+        type_text(&mut session, typed);
+        assert_eq!(session.snapshot().spelling_symbols.contains('\t'), accepts);
+        assert_eq!(session.character(b'\t', false).handled, accepts);
+    }
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.helpcode_trigger_key = Some(b'=');
+        options.shuangpin_helpcode_modes.manual_tab = true;
+    });
+    type_text(&mut session, "nihc");
+    assert!(!session.snapshot().spelling_symbols.contains('='));
+    assert!(!session.character(b'=', false).handled);
+    session.command(Command::MoveLeft);
+    assert!(!session.snapshot().spelling_symbols.contains('\t'));
+    session.command(Command::MoveEnd);
+    assert!(session.character(b'\t', false).handled);
+    assert!(!session.snapshot().spelling_symbols.contains('\t'));
+    type_text(&mut session, "na");
+    let result = session.finish(0);
+    let commit = result.commit.unwrap();
+    assert!(!commit.contains(['\t', '|']));
+    session.set_dedicated_english(true);
+    type_text(&mut session, "nihc");
+    assert!(!session.snapshot().spelling_symbols.contains('\t'));
+    session.character(b'\t', false);
+    assert_eq!(session.snapshot().editing_text, "nihc");
+}
+
+#[test]
+fn shuangpin_manual_tab_raw_commits_omit_internal_codes() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    for finish in [false, true] {
+        let mut session = fixture.session_with(|options| {
+            options.scheme = SchemeType::Shuangpin;
+            options.shuangpin_helpcode_modes.manual_tab = true;
+        });
+        type_text(&mut session, "nihc");
+        assert!(session.character(b'\t', false).handled);
+        type_text(&mut session, "na");
+        let result = if finish {
+            session.finish(usize::MAX)
+        } else {
+            session.command(Command::CommitRaw)
+        };
+        assert_eq!(result.commit.as_deref(), Some("nihc"));
     }
 }
 
@@ -2677,7 +2805,7 @@ fn a_mixed_list_holds_both_producers_wubi_first() {
     let schemes: Vec<(String, SchemeType)> = snapshot
         .candidates
         .iter()
-        .map(|item| (item.word.clone(), item.scheme))
+        .map(|item| (item.word.to_string(), item.scheme))
         .collect();
     assert_eq!(schemes.first(), Some(&("工".to_owned(), SchemeType::Wubi)));
     assert!(schemes.contains(&("哥哥".to_owned(), SchemeType::Quanpin)));
@@ -2726,7 +2854,8 @@ fn ignored_scheme_key_does_not_clone_preedit_for_change_detection() {
     });
 
     assert!(!result.handled);
-    assert_eq!(allocations, 22);
+    // 候选行字段是 `SharedString`：克隆行只加引用计数，新建行的每个非空字段多一个 `Arc`。
+    assert_eq!(allocations, 19);
 }
 
 #[test]
@@ -2740,7 +2869,15 @@ fn typing_at_the_end_does_not_build_the_preedit_twice_for_caret_detection() {
     });
 
     assert!(result.handled);
-    assert_eq!(allocations, 125);
+    let matched_rows = session
+        .snapshot()
+        .candidates
+        .iter()
+        .filter(|row| row.pinyin == "ni'h")
+        .count();
+    assert_eq!(matched_rows, 5);
+    // SharedString 克隆只增加引用计数，候选行重建的分配预算低于旧实现。
+    assert_eq!(allocations, 98);
 }
 
 #[test]
@@ -2753,7 +2890,8 @@ fn backspacing_at_the_end_does_not_build_the_preedit_twice_for_caret_detection()
         crate::ime::personal_rerank::allocations::count(|| session.command(Command::Backspace));
 
     assert!(result.handled);
-    assert_eq!(allocations, 14);
+    // 候选行字段是 `SharedString`：克隆行只加引用计数，新建行的每个非空字段多一个 `Arc`。
+    assert_eq!(allocations, 11);
 }
 
 #[test]
@@ -2766,7 +2904,8 @@ fn url_entry_readiness_at_the_end_does_not_build_the_preedit_twice() {
         crate::ime::personal_rerank::allocations::count(|| session.character(b'.', false));
 
     assert!(result.handled);
-    assert_eq!(allocations, 4);
+    // 候选行字段是 `SharedString`：克隆行只加引用计数，新建行的每个非空字段多一个 `Arc`。
+    assert_eq!(allocations, 6);
 }
 
 #[test]
@@ -2813,7 +2952,8 @@ fn setting_the_caret_does_not_build_editing_text_to_clamp_it() {
     });
 
     assert_eq!(session.snapshot().caret_position, 2);
-    assert_eq!(allocations, 21);
+    // 候选行字段是 `SharedString`：克隆行只加引用计数，新建行的每个非空字段多一个 `Arc`。
+    assert_eq!(allocations, 18);
 }
 
 #[test]
@@ -2826,8 +2966,9 @@ fn moving_the_caret_does_not_build_the_preedit_twice() {
         crate::ime::personal_rerank::allocations::count(|| session.command(Command::MoveLeft));
 
     assert!(result.handled);
+    // 候选行字段是 `SharedString`：克隆行只加引用计数，新建行的每个非空字段多一个 `Arc`。
     assert_eq!(
-        allocations, 21,
+        allocations, 18,
         "光标移动复用编辑文本长度后的分配次数：{allocations}"
     );
 }
@@ -2843,7 +2984,8 @@ fn typing_at_a_caret_reuses_the_editing_text_length() {
         crate::ime::personal_rerank::allocations::count(|| session.character(b'x', false));
 
     assert!(result.handled);
-    assert_eq!(allocations, 191, "光标处输入的分配次数：{allocations}");
+    // 候选行字段是 `SharedString`：克隆行只加引用计数，新建行的每个非空字段多一个 `Arc`。
+    assert_eq!(allocations, 164, "光标处输入的分配次数：{allocations}");
 }
 
 #[test]
@@ -2919,7 +3061,8 @@ fn selecting_a_shuangpin_candidate_does_not_clone_the_full_request() {
         crate::ime::personal_rerank::allocations::count(|| session.select(index));
 
     assert_eq!(result.commit.as_deref(), Some("你好"));
-    assert_eq!(allocations, 17, "双拼候选选择分配次数：{allocations}");
+    // 候选行字段是 `SharedString`：克隆行只加引用计数，新建行的每个非空字段多一个 `Arc`。
+    assert_eq!(allocations, 14, "双拼候选选择分配次数：{allocations}");
 }
 
 #[test]
@@ -3204,7 +3347,7 @@ fn selecting_a_quanpin_row_in_mixed_wubi_advances_like_quanpin() {
         snapshot
             .candidates
             .iter()
-            .map(|item| item.word.clone())
+            .map(|item| item.word.to_string())
             .zip(snapshot.candidate_answers_key)
             .collect()
     };
@@ -3406,7 +3549,7 @@ fn a_quanpin_sentence_beside_a_wubi_row_is_learned_and_the_wubi_row_is_not() {
                 && item.word.chars().count() == 2
         })
         .unwrap_or_else(|| panic!("no generated sentence in {:?}", words(&session)));
-    let sentence = snapshot.candidates[index].word.clone();
+    let sentence = snapshot.candidates[index].word.to_string();
     assert_eq!(
         session.select(index).commit.as_deref(),
         Some(sentence.as_str())
@@ -3437,7 +3580,7 @@ fn generated_sentence_learning_borrows_candidate_fields() {
                 && item.word.chars().count() == 2
         })
         .unwrap();
-    let sentence = session.snapshot().candidates[index].word.clone();
+    let sentence = session.snapshot().candidates[index].word.to_string();
     let (result, allocations) =
         crate::ime::personal_rerank::allocations::count(|| session.select(index));
     assert_eq!(result.commit.as_deref(), Some(sentence.as_str()));
@@ -3526,7 +3669,7 @@ INSERT INTO tbl_1_g VALUES{};",
     let listed: Vec<(String, SchemeType)> = snapshot
         .candidates
         .iter()
-        .map(|item| (item.word.clone(), item.scheme))
+        .map(|item| (item.word.to_string(), item.scheme))
         .collect();
     assert_eq!(listed[0], ("王".to_owned(), SchemeType::Wubi));
     // Slot 2 of the pinyin group, which starts after the one wubi row.
@@ -3649,7 +3792,7 @@ fn schemes(session: &Session) -> Vec<(String, SchemeType)> {
         .snapshot()
         .candidates
         .into_iter()
-        .map(|item| (item.word, item.scheme))
+        .map(|item| (item.word.into_string(), item.scheme))
         .collect()
 }
 
@@ -4374,7 +4517,7 @@ INSERT INTO tbl_1_n VALUES('ni','n','你',100),('ni','n','拟',90),('ni','n','�
     let query = session.online_query().expect("a quanpin query");
     let at = |session: &Session, slot: usize| {
         let item = session.snapshot().candidates[slot].clone();
-        (item.word, item.source)
+        (item.word.into_string(), item.source)
     };
 
     assert!(session.apply_online_candidate(&query, "泥", CandidateSource::CloudSuggestion));
@@ -4488,7 +4631,7 @@ fn repeated_dedicated_english_preserves_chinese_grid_composition() {
         assert_eq!(session.snapshot(), before, "{grid:?}");
         assert_eq!(
             session.select(0).commit,
-            Some(before.candidates[0].word.clone())
+            Some(before.candidates[0].word.to_string())
         );
     }
 }
@@ -4509,7 +4652,7 @@ fn repeated_dedicated_english_preserves_english_t9_composition() {
     assert_eq!(session.snapshot(), before);
     assert_eq!(
         session.select(0).commit,
-        Some(before.candidates[0].word.clone())
+        Some(before.candidates[0].word.to_string())
     );
 
     type_text(&mut session, "435");
@@ -4520,6 +4663,48 @@ fn repeated_dedicated_english_preserves_english_t9_composition() {
     session.set_dedicated_english(true);
     assert!(!session.grid_composing());
     assert!(session.snapshot().preedit.is_empty());
+}
+
+#[test]
+fn fourteen_key_shuangpin_separates_touch_groups_from_hardware_letters() {
+    let fixture = Fixture::new(QUANPIN_FIXTURE);
+    let mut session = fixture.session_with(|options| {
+        options.scheme = SchemeType::Shuangpin;
+        options.shuangpin_profile = ShuangpinProfileKind::Xiaohe;
+    });
+    let table = crate::nine_key_shuangpin::resolve_fourteen_key_shuangpin(
+        ShuangpinProfileKind::Xiaohe,
+        None,
+    )
+    .unwrap();
+    session.set_key_grid(Some(KeyGrid::FourteenKeyShuangpin(table)));
+    type_text(&mut session, "nihc");
+    assert!(!session.grid_composing());
+    assert!(!session.grid_key(b'n').handled);
+    assert_eq!(
+        select_word(&mut session, "你好").commit.as_deref(),
+        Some("你好")
+    );
+    for key in *b"nihc" {
+        assert!(session.grid_key(key).handled);
+    }
+    assert!(session.grid_composing());
+    assert_eq!(session.snapshot().editing_text, "bugc");
+    assert_eq!(session.snapshot().scheme, SchemeType::Shuangpin);
+    assert!(!session.character(b'q', false).handled);
+    assert!(words(&session).contains(&"你好".to_owned()));
+    assert_eq!(
+        select_word(&mut session, "你好").commit.as_deref(),
+        Some("你好")
+    );
+    session.set_dedicated_english(true);
+    assert!(!session.grid_key(b'n').handled);
+    session.set_dedicated_english(false);
+    assert!(session.grid_key(b'n').handled);
+    session.command(Command::Cancel);
+    let mut quanpin = fixture.session();
+    quanpin.set_key_grid(Some(KeyGrid::FourteenKeyShuangpin(table)));
+    assert!(!quanpin.grid_key(b'n').handled);
 }
 
 /// 14 键：组码只从 `grid_key` 进九宫格，组里任一字母都归成首字母；硬件键盘的字母照常走全拼，九宫格组字中不处理。
@@ -5042,9 +5227,9 @@ fn shuangpin_snapshot_does_not_build_unused_raw_preedit() {
         crate::ime::personal_rerank::allocations::count(|| session.snapshot());
 
     assert_eq!(snapshot.preedit, "ni'hao");
-    // 邮箱入口 `@` 及追加的字面符号各占一次分配。
+    // 邮箱入口 `@` 及追加的字面符号各占一次分配。快照克隆候选行时 `SharedString` 字段只加引用计数，新建行的每个非空字段多一个 `Arc`。
     assert_eq!(
-        allocations, 38,
+        allocations, 32,
         "shuangpin snapshot allocations: {allocations}"
     );
 }
@@ -5055,35 +5240,9 @@ fn japanese_engine_refresh_reuses_candidate_strings() {
     let mut session = fixture.session_with(|options| options.scheme = SchemeType::JapaneseRomaji);
     type_text(&mut session, "ka");
     let before = session.input.engine.candidates().to_vec();
-    let pointers = session
-        .input
-        .engine
-        .candidates()
-        .iter()
-        .map(|row| {
-            (
-                row.word.as_ptr(),
-                row.pinyin.as_ptr(),
-                row.canonical_pinyin.as_ptr(),
-            )
-        })
-        .collect::<Vec<_>>();
     session.input.engine.handle_key(SchemeKey::Requery);
+    // 会话的混排候选经 `clone_candidate_rows` 与引擎候选共用 `SharedString` 存储。重查时日文 provider 对这些共享字段 `clear()` 只是放手，随后的 `push_str` 新建字符串和 `Arc`，原缓冲区不会原地复用，指针必然变化（混排那份也不再另行复制）；这里只能确认重查后内容不变。
     assert_eq!(session.input.engine.candidates(), before);
-    assert_eq!(
-        session
-            .input
-            .engine
-            .candidates()
-            .iter()
-            .map(|row| (
-                row.word.as_ptr(),
-                row.pinyin.as_ptr(),
-                row.canonical_pinyin.as_ptr()
-            ))
-            .collect::<Vec<_>>(),
-        pointers
-    );
 }
 
 #[test]
@@ -5966,7 +6125,7 @@ fn chaizi_rows(session: &Session) -> Vec<(String, CandidateSource)> {
         .snapshot()
         .candidates
         .into_iter()
-        .map(|item| (item.word, item.source))
+        .map(|item| (item.word.into_string(), item.source))
         .collect()
 }
 
@@ -6454,7 +6613,9 @@ fn dedicated_english_refresh_reuses_candidate_row_storage() {
     assert!(session.input.dedicated_english_candidates.len() >= 2);
     let pointer = session.input.dedicated_english_candidates.as_ptr();
     let capacity = session.input.dedicated_english_candidates.capacity();
-    let words = session.input.dedicated_english_candidates.clone();
+    let words = crate::ime::personal_rerank::allocations::unshared_rows(
+        &session.input.dedicated_english_candidates,
+    );
 
     let (_, allocations) = crate::ime::personal_rerank::allocations::count(|| {
         session.input.update_dedicated_english_candidates();
@@ -6876,24 +7037,10 @@ fn korean_hanja_refresh_reuses_candidate_strings() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = korean_session(&fixture);
     open_hanja(&mut session, "gks");
-    let pointers = session
-        .input
-        .engine
-        .candidates()
-        .iter()
-        .map(|row| (row.word.as_ptr(), row.pinyin.as_ptr()))
-        .collect::<Vec<_>>();
+    let before = session.input.engine.candidates().to_vec();
     session.input.engine.handle_key(SchemeKey::Requery);
-    assert_eq!(
-        session
-            .input
-            .engine
-            .candidates()
-            .iter()
-            .map(|row| (row.word.as_ptr(), row.pinyin.as_ptr()))
-            .collect::<Vec<_>>(),
-        pointers
-    );
+    // 会话的混排候选经 `clone_candidate_rows` 与引擎候选共用 `SharedString` 存储。重查时韩文汉字对这些共享字段 `clear()` 只是放手，随后的 `push_str` 新建字符串和 `Arc`，原缓冲区不会原地复用，指针必然变化（混排那份也不再另行复制）；这里只能确认重查后内容不变。
+    assert_eq!(session.input.engine.candidates(), before);
 }
 
 #[test]
@@ -7712,7 +7859,7 @@ fn symbol_mode_rows(fixture: &Fixture, typed: &str) -> Vec<String> {
         .snapshot()
         .candidates
         .iter()
-        .map(|item| item.word.clone())
+        .map(|item| item.word.to_string())
         .collect()
 }
 
@@ -8139,9 +8286,9 @@ fn cached_plugin_rows_do_not_allocate_a_temporary_row_vector() {
             let (_, allocations) = crate::ime::personal_rerank::allocations::count(|| {
                 assert!(session.input.update_local_candidates().is_none());
             });
+            // 缓存行的 `SharedString` 字段克隆只加引用计数，只剩输出向量一次申请。
             assert_eq!(
-                allocations,
-                count * 2 + 1,
+                allocations, 1,
                 "{count} 行缓存插件候选重建产生了 {allocations} 次分配"
             );
             assert_eq!(session.input.local_candidates, cached);
@@ -9071,34 +9218,10 @@ fn stroke_candidate_refresh_reuses_row_storage() {
     let fixture = Fixture::new(QUANPIN_FIXTURE);
     let mut session = stroke_session(&fixture);
     type_text(&mut session, "hs");
-    let pointers = session
-        .input
-        .engine
-        .candidates()
-        .iter()
-        .map(|row| {
-            (
-                row.word.as_ptr(),
-                row.pinyin.as_ptr(),
-                row.canonical_pinyin.as_ptr(),
-            )
-        })
-        .collect::<Vec<_>>();
+    let before = session.input.engine.candidates().to_vec();
     session.input.engine.handle_key(SchemeKey::Requery);
-    assert_eq!(
-        session
-            .input
-            .engine
-            .candidates()
-            .iter()
-            .map(|row| (
-                row.word.as_ptr(),
-                row.pinyin.as_ptr(),
-                row.canonical_pinyin.as_ptr()
-            ))
-            .collect::<Vec<_>>(),
-        pointers
-    );
+    // 会话的混排候选经 `clone_candidate_rows` 与引擎候选共用 `SharedString` 存储。重查时笔画对 `pinyin` 的 `clear()` 只是放手、随后 `push_str` 新建存储，对 `canonical_pinyin`、`word` 的 `clone_from` 经 `DerefMut` 先复制共享的那份，原缓冲区都不会原地复用，指针必然变化（混排那份也不再另行复制）；这里只能确认重查后内容不变。
+    assert_eq!(session.input.engine.candidates(), before);
 }
 
 #[test]
@@ -9926,7 +10049,7 @@ fn a_wubi_only_session_still_mixes_quanpin_rows() {
             .snapshot()
             .candidates
             .into_iter()
-            .map(|item| (item.word, item.scheme))
+            .map(|item| (item.word.into_string(), item.scheme))
             .collect()
     };
     let narrowed_rows = schemes(&narrowed);
@@ -10757,7 +10880,7 @@ INSERT INTO tbl_1_h VALUES('hao','h','好',100),('hao','h','号',50);",
             .candidates
             .into_iter()
             .filter(|item| item.source == CandidateSource::Generated && item.sentence_association)
-            .map(|item| item.word)
+            .map(|item| item.word.into_string())
             .collect()
     };
     let cases = |session: &mut Session, expected: &[&str]| {
@@ -11377,7 +11500,7 @@ fn the_conversion_starts_from_the_highlighted_row() {
     let mut session = conversion_session(&fixture);
     // 另一条整句排在第二位（宿主高亮着它，比如 runtime 把它重排到了前面）。
     let mut second = session.input.mixed_candidates[0].clone();
-    second.word = "我去北京".to_owned();
+    second.word = "我去北京".into();
     second.sentence_words = vec!["我".into(), "去".into(), "北京".into()];
     session.input.mixed_candidates.insert(1, second);
     assert!(session.conversion_left_from(1).handled);
@@ -11415,7 +11538,7 @@ fn sources(session: &Session) -> Vec<(String, CandidateSource)> {
         .snapshot()
         .candidates
         .into_iter()
-        .map(|item| (item.word, item.source))
+        .map(|item| (item.word.into_string(), item.source))
         .collect()
 }
 
