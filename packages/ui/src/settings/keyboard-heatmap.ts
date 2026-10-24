@@ -160,6 +160,8 @@ export function keyLabel(code: string, platform?: string): string {
   if (match) return `18 键 ${match[1]}`;
   match = /^Fourteen([A-Z]{1,2})$/.exec(code);
   if (match) return `14 键 ${match[1]}`;
+  match = /^Eighteen([A-Z]{1,2})$/.exec(code);
+  if (match) return `18 键 ${match[1]}`;
   match = /^(Control|Alt|Meta)(Left|Right)$/.exec(code);
   if (match) {
     const side = match[2] === "Left" ? "左" : "右";

@@ -1,43 +1,51 @@
 #!/usr/bin/env python3
-"""校验 Android 18 键与共享解码的分组及跨端统计白名单，防止宿主键面与引擎漂移。"""
+"""校验 Android 十八键键面、引擎编码表和四端统计键位的契约。"""
 
 from pathlib import Path
 import re
+import string
 
 ROOT = Path(__file__).resolve().parent.parent
-ROWS = ["q we rt y u io p", "a sd fg h jk l", "z xc v bn m"]
-GROUPS = " ".join(ROWS).split()
 
 
 def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
 
-def check() -> None:
+def main() -> None:
     engine = read("crates/engine/src/nine_key.rs")
-    block = re.search(r"const EIGHTEEN_KEY_GROUPS: \[&str; 18\] = \[(.*?)\];", engine, re.S)
-    assert block, "引擎缺少 18 键分组"
-    groups = re.findall(r'"([a-z;]+)"', block[1])
-    assert groups == GROUPS, "引擎分组与附件不符"
-    assert sorted("".join(GROUPS)) == list("abcdefghijklmnopqrstuvwxyz"), "字母必须完整且不重复"
+    block = re.search(r"const EIGHTEEN_KEY_GROUPS:.*?= \[(.*?)\];", engine, re.S)
+    assert block, "引擎十八键分组声明缺失"
+    groups = re.findall(r'"([a-z]+)"', block[1])
+    assert len(groups) == 18 and sorted("".join(groups)) == list(string.ascii_lowercase), \
+        "十八键必须恰好覆盖二十六个字母"
+    codes = {letter: group[0] for group in groups for letter in group}
+    keypad = re.search(r'const EIGHTEEN_KEYPAD:.*?= b"([a-z]+)";', engine)
+    assert keypad and keypad[1] == "".join(codes[c] for c in string.ascii_lowercase), \
+        "引擎编码表与十八组字母不符"
+
     android = read("platforms/android/java/app/msime/android/keyboard/EighteenKeyLayout.java")
     block = re.search(r"ROWS = List\.of\((.*?)\);", android, re.S)
-    assert block, "Android 缺少 18 键分组"
+    assert block, "Android 十八键键表缺失"
     rows = [re.findall(r'key\("([a-z]+)"\)', line) for line in block[1].splitlines()]
-    assert [row for row in rows if row] == [row.split() for row in ROWS], "Android 分组与附件不符"
-    expected_ids = ["Eighteen" + group.upper() for group in GROUPS]
+    rows = [row for row in rows if row]
+    assert list(map(len, rows)) == [7, 6, 5], "Android 十八键行数或键数变化"
+    assert [group for row in rows for group in row] == groups, "Android 键面与引擎分组不符"
+
+    expected = ["Eighteen" + group.upper() for group in groups]
     for path in [
         "crates/client-services/src/typing_statistics.rs",
         "platforms/android/java/app/msime/android/statistics/KeyPressIds.java",
         "platforms/harmony/entry/src/main/ets/keyboard/KeyIdPolicy.ts",
     ]:
-        assert re.findall(r'"(Eighteen[A-Z]+)"', read(path)) == expected_ids, f"{path} 的统计标识不一致"
+        actual = re.findall(r'"(Eighteen[A-Z]+)"', read(path))
+        assert actual == expected, f"{path} 的十八键统计白名单不符"
     ios = read("platforms/ios/SharedUI/core/TypingStatistics.swift")
-    block = re.search(r'let eighteenKey: \[String\] = \[(.*?)\]\.map \{ "Eighteen', ios)
-    assert block, "iOS 缺少 18 键统计白名单"
-    assert re.findall(r'"([A-Z]+)"', block[1]) == [group.upper() for group in GROUPS], "iOS 统计标识不一致"
-    print("18 键双拼：7＋6＋5 分组、26 字母与四处统计白名单一致")
+    block = re.search(r"let eighteenKey: \[String\] = \[(.*?)\]\.map", ios, re.S)
+    assert block and ["Eighteen" + face for face in re.findall(r'"([A-Z]+)"', block[1])] \
+        == expected, "iOS 十八键统计白名单不符"
+    print("eighteen-key table and statistics contracts: passed")
 
 
 if __name__ == "__main__":
-    check()
+    main()

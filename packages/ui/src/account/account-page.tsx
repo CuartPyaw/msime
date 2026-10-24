@@ -17,7 +17,6 @@ import { useToast } from "../core/toast";
 import { useTemporaryFlag } from "../core/use-temporary-flag";
 import { privacyUrl } from "../settings/app-resources";
 import type { SettingsPageId } from "../settings/settings-page-registry";
-import { globalThemeTitle } from "../theme/global-theme";
 import * as doc from "../settings/document-style";
 import * as account from "./account-style";
 import { AccountAvatar } from "./account-avatar";
@@ -214,11 +213,11 @@ export function AccountPage({
   );
 }
 
-/** 只有鸿蒙手机的「我的」才画的内容：各行上的值和它们背后的去处。其他宿主忽略这些。 */
+/** 鸿蒙手机「我的」页所需的附加能力；其他触屏宿主也可复用其中的通用入口。 */
 type HarmonyMeProps = {
-  /** 已保存的偏好，用于「我的皮肤」行的值。 */
+  /** 已保存的偏好；保留宿主接线兼容性，鸿蒙手机「我的」页不再重复展示设置入口。 */
   preferences?: Preferences;
-  /** 打开一个设置页，用于「我的皮肤」和「我的词库」。 */
+  /** 打开共享设置页，例如「隐私」。 */
   onOpenPage?: (id: SettingsPageId) => void;
   /** 应用主题，用于「应用主题」行及其面板。 */
   appTheme?: AppThemeClient;
@@ -248,7 +247,7 @@ function AccountDetailsPage({
   onOpenFeedback,
   onOpenDesktopDownload,
   onReplayOnboarding,
-  preferences,
+  preferences: _preferences,
   onOpenPage,
   appTheme,
   onOpenUrl,
@@ -381,7 +380,7 @@ function AccountDetailsPage({
     setUser(value.user);
     setName(value.user.displayName);
   };
-  const { normalizedName, validName, rename } = useAccountRename({
+  const { normalizedName, validName, rename, editorState } = useAccountRename({
     client,
     name,
     mounted,
@@ -614,10 +613,6 @@ function AccountDetailsPage({
       void perform(() => loadProfile(generation));
       onLoginComplete?.();
     };
-    const skinValue = preferences ? globalThemeTitle(preferences.global_theme) : undefined;
-    const contentRows = Boolean(
-      onOpenPage || (user && (onOpenCloudDictionary || onOpenCloudClipboard)),
-    );
     const communityRows = Boolean(
       onOpenLocalDesigns || (user && (openPublishedSkins || onOpenCommunity)),
     );
@@ -656,47 +651,6 @@ function AccountDetailsPage({
           <FluentIcon name="chevron_right" size={20} className={account.meCardChevron} />
         </button>
         {appIcon && <AppIconSettingsCard client={appIcon} />}
-        {contentRows && (
-          <MeGroup title="我的内容">
-            {onOpenPage && (
-              <NavRow
-                variant="me"
-                icon={icon("color")}
-                title="我的皮肤"
-                value={skinValue}
-                disabled={busy}
-                onClick={() => onOpenPage("skin")}
-              />
-            )}
-            {onOpenPage && (
-              <NavRow
-                variant="me"
-                icon={icon("book")}
-                title="我的词库"
-                disabled={busy}
-                onClick={() => onOpenPage("dictionary")}
-              />
-            )}
-            {user && onOpenCloudDictionary && (
-              <NavRow
-                variant="me"
-                icon={icon("cloud")}
-                title="云词库"
-                disabled={busy}
-                onClick={onOpenCloudDictionary}
-              />
-            )}
-            {user && onOpenCloudClipboard && (
-              <NavRow
-                variant="me"
-                icon={icon("clipboard")}
-                title="云剪贴板"
-                disabled={busy}
-                onClick={onOpenCloudClipboard}
-              />
-            )}
-          </MeGroup>
-        )}
         {communityRows && (
           <MeGroup title="社区作品">
             {onOpenLocalDesigns && (
@@ -1039,7 +993,7 @@ function AccountDetailsPage({
               ) : (
                 <AccountAvatar user={user} load={client.avatar} size="small" />
               )}
-              <strong>{name.trim() || "你的昵称"}</strong>
+              <strong>{normalizedName || "你的昵称"}</strong>
               {user.avatarUploaded && client.removeAvatar && (
                 <ActionButton
                   action={removeAvatar}
@@ -1053,6 +1007,7 @@ function AccountDetailsPage({
               <p className={account.muted}>点头像可更换，支持 1 MiB 以内的 PNG 或 JPEG。</p>
             )}
             <AccountNicknameEditor
+              {...editorState}
               variant="desktop"
               value={name}
               disabled={busy}
@@ -1073,7 +1028,7 @@ function AccountDetailsPage({
                   setEditingProfile(false);
                 }}
                 className={account.primary}
-                disabled={busy || normalizedName === user.displayName}
+                disabled={busy || !validName || normalizedName === user.displayName}
                 label="保存修改"
               />
               <ActionButton

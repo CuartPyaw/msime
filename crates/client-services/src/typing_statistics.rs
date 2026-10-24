@@ -115,6 +115,8 @@ pub enum TypingSource {
     NineKey,
     /// 全拼 14 键。
     FourteenKey,
+    /// Android 全拼十八键。
+    EighteenKey,
     Shuangpin,
     Ziranma,
     Microsoft,
@@ -144,6 +146,7 @@ impl TypingSource {
             Self::Quanpin => "quanpin",
             Self::NineKey => "nineKey",
             Self::FourteenKey => "fourteenKey",
+            Self::EighteenKey => "eighteenKey",
             Self::Shuangpin => "shuangpin",
             Self::Ziranma => "ziranma",
             Self::Microsoft => "microsoft",
@@ -537,7 +540,7 @@ pub const KEY_IDS: &[&str] = &[
     "FourteenCV",
     "FourteenBN",
     "FourteenM",
-    // Android 双拼 18 键的各键，其他宿主保留共享统计中的这些键位。
+    // 十八键共用引擎分组，保留独立的键位统计。
     "EighteenQ",
     "EighteenWE",
     "EighteenRT",

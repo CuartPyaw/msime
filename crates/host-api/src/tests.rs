@@ -7,6 +7,33 @@ use crate::account::msime_client_account_name;
 use msime_client_core::host_surface::compiled_input_schemes;
 use sha2::{Digest, Sha256};
 
+#[test]
+fn eighteen_key_quanpin_layout_only_starts_on_android() {
+    let preferences = Preferences {
+        touch_keyboard_layout: TouchKeyboardLayout::EighteenKey,
+        ..Preferences::default()
+    };
+    for platform in [
+        HostPlatform::Android,
+        HostPlatform::Ios,
+        HostPlatform::Harmony,
+        HostPlatform::Linux,
+        HostPlatform::Macos,
+        HostPlatform::Windows,
+    ] {
+        assert_eq!(
+            layout_key_grid_for(platform, Some(SchemeType::Quanpin), &preferences),
+            (platform == HostPlatform::Android).then_some(KeyGrid::EighteenKey),
+            "{platform:?}"
+        );
+        assert_eq!(
+            layout_key_grid_for(platform, Some(SchemeType::Shuangpin), &preferences),
+            None,
+            "全拼布局不能覆盖双拼方案：{platform:?}"
+        );
+    }
+}
+
 // Keep relative-path fixtures on the checkout's volume while allowing /source to be read-only in the Linux container.
 fn relative_fixture_dir(prefix: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let current = std::env::current_dir().unwrap();

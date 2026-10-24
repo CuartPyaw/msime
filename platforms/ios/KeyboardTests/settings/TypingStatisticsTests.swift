@@ -357,7 +357,7 @@ final class TypingStatisticsTests: XCTestCase {
     XCTAssertEqual(lines[3], "2026-09-20,120,60,30,10,8,12,3.0,31")
   }
 
-  /// The ids are a copy of the shared store's whitelist, which rejects a whole batch for one id it does not know, so every one of them has to be accepted.
+  /// 键位与共享存储白名单一致；未知键位会拒绝整批，因此每个已知键位都必须可记录。
   func testKeyIDsAreTheSharedWhitelist() throws {
     XCTAssertEqual(TypingKeyID.all.count, 159)
     XCTAssertEqual(TypingKeyID.known.count, 159)
