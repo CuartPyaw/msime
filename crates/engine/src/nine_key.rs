@@ -79,6 +79,12 @@ const FOURTEEN_KEYPAD: &[u8; 26] = b"abcdedggujjlmbooqeatucqztz";
 const FOURTEEN_KEY_GROUPS: [&str; 14] = [
     "qw", "er", "ty", "ui", "op", "as", "df", "gh", "jk", "l", "zx", "cv", "bn", "m",
 ];
+/// 全拼十八键的字母归组，组码取键面首字母。
+const EIGHTEEN_KEYPAD: &[u8; 26] = b"abxswffhijjlmbipqrsruvwxyz";
+const EIGHTEEN_KEY_GROUPS: [&str; 18] = [
+    "q", "we", "rt", "y", "u", "io", "p", "a", "sd", "fg", "h", "jk", "l", "z", "xc", "v", "bn",
+    "m",
+];
 /// T9 expansion multiplies by three or four per digit, so only the leading digits become letter prefixes and the dictionary's own prefix search carries the rest (NK:189).
 const ENGLISH_PREFIX_BUDGET: usize = 64;
 const ENGLISH_LIMIT: usize = 5;
@@ -115,6 +121,8 @@ pub enum KeyGrid {
     NineKey,
     /// 全拼 14 键：组码是每组首字母的小写 `q e t u o a d g j l z c b m`。
     FourteenKey,
+    /// 全拼十八键：八组双字母键与十组单字母键。
+    EighteenKey,
     /// 九键双拼：组码是方案用到的数字，可以有 `1` 和 `0`。
     NineKeyShuangpin(&'static NineKeyShuangpin),
     /// 14 键双拼：当前 26 键方案投到相邻字母组，每个音节仍占两键，分号与 L 共键。
@@ -124,7 +132,9 @@ pub enum KeyGrid {
 impl PartialEq for KeyGrid {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::NineKey, Self::NineKey) | (Self::FourteenKey, Self::FourteenKey) => true,
+            (Self::NineKey, Self::NineKey)
+            | (Self::FourteenKey, Self::FourteenKey)
+            | (Self::EighteenKey, Self::EighteenKey) => true,
             (Self::NineKeyShuangpin(left), Self::NineKeyShuangpin(right))
             | (Self::FourteenKeyShuangpin(left), Self::FourteenKeyShuangpin(right)) => {
                 std::ptr::eq(*left, *right)
@@ -158,6 +168,7 @@ impl KeyGrid {
         match self {
             Self::NineKey => Some(KEYPAD),
             Self::FourteenKey => Some(FOURTEEN_KEYPAD),
+            Self::EighteenKey => Some(EIGHTEEN_KEYPAD),
             Self::NineKeyShuangpin(_) | Self::FourteenKeyShuangpin(_) => None,
         }
     }
@@ -185,6 +196,11 @@ impl KeyGrid {
             }
             Self::NineKey => "",
             Self::FourteenKey => FOURTEEN_KEY_GROUPS
+                .iter()
+                .find(|group| group.as_bytes().first() == Some(&code))
+                .copied()
+                .unwrap_or(""),
+            Self::EighteenKey => EIGHTEEN_KEY_GROUPS
                 .iter()
                 .find(|group| group.as_bytes().first() == Some(&code))
                 .copied()
@@ -262,11 +278,11 @@ impl KeyGrid {
         }
     }
 
-    /// 组码本身是不是可上屏的文字。九键的数字是：左列在没有锁定时给出「原样上屏这一键」，`CommitRaw` 上屏数字。14 键的组码只是这一组的首字母，原样上屏没有意义：左列没有这一项，`CommitRaw` 改为结束组字。九键双拼的数字和九键一样是数字本身。
+    /// 组码本身是不是可上屏的文字。九键的数字是：左列在没有锁定时给出「原样上屏这一键」，`CommitRaw` 上屏数字。十四键或十八键的组码只是这一组的首字母，原样上屏没有意义：左列没有这一项，`CommitRaw` 改为结束组字。九键双拼的数字和九键一样是数字本身。
     pub fn offers_raw_key(self) -> bool {
         match self {
             Self::NineKey | Self::NineKeyShuangpin(_) => true,
-            Self::FourteenKey | Self::FourteenKeyShuangpin(_) => false,
+            Self::FourteenKey | Self::EighteenKey | Self::FourteenKeyShuangpin(_) => false,
         }
     }
 
@@ -288,6 +304,10 @@ impl KeyGrid {
                 TABLE.get_or_init(|| SpellingTable::build(self, intact_pinyin_list()))
             }
             Self::FourteenKey => {
+                static TABLE: OnceLock<SpellingTable> = OnceLock::new();
+                TABLE.get_or_init(|| SpellingTable::build(self, intact_pinyin_list()))
+            }
+            Self::EighteenKey => {
                 static TABLE: OnceLock<SpellingTable> = OnceLock::new();
                 TABLE.get_or_init(|| SpellingTable::build(self, intact_pinyin_list()))
             }
@@ -1390,8 +1410,11 @@ impl NineKeySession {
             self.locked.is_empty() && initial.is_none() && initials_apply(remaining.len(), splits);
         let initials_lead = initials && !splits.is_empty();
         // 模糊页已拥有结果；九键双拼的覆盖核对会另建编码，保留原单次核对路径。
-        let filter_dominated =
-            self.fuzzy.rules == 0 && matches!(grid, KeyGrid::NineKey | KeyGrid::FourteenKey);
+        let filter_dominated = self.fuzzy.rules == 0
+            && matches!(
+                grid,
+                KeyGrid::NineKey | KeyGrid::FourteenKey | KeyGrid::EighteenKey
+            );
         for (index, path) in alternatives.iter().enumerate() {
             append_path_key(&mut key, &locked_key, path);
             if key.is_empty() || !query_key_is_new(&alternatives, index, &key, queried.as_ref()) {
@@ -2039,7 +2062,9 @@ impl NineKeySession {
         if front.fuzzy {
             return;
         }
-        if front.source == CandidateSource::EnglishDictionary && self.grid == KeyGrid::FourteenKey {
+        if front.source == CandidateSource::EnglishDictionary
+            && matches!(self.grid, KeyGrid::FourteenKey | KeyGrid::EighteenKey)
+        {
             // 英文行的 `pinyin` 是小写的查询键（完整组码查询保证全是字母）；九键不给英文读音，与按数字判断时相同。
             let typed = front.pinyin.len().min(self.digits.len());
             for byte in front.pinyin[..typed].bytes() {
@@ -7805,9 +7830,9 @@ CREATE TABLE tbl_2_y(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl
         assert_eq!(sorted, expected, "{spellings:?}");
     }
 
-    // ---- 14 键：同一套解码换一张码表，凡是与键盘有关的判断都按两种网格各跑一遍 ----
+    // ---- 全拼归组键盘：同一套解码替换码表，与键盘有关的判断按三种网格分别检查 ----
 
-    const GRIDS: [KeyGrid; 2] = [KeyGrid::NineKey, KeyGrid::FourteenKey];
+    const GRIDS: [KeyGrid; 3] = [KeyGrid::NineKey, KeyGrid::FourteenKey, KeyGrid::EighteenKey];
 
     /// 14 键的词库：nihao 和 buhao、xi'an 和 xian 在 14 键上是同一串组码。
     const FOURTEEN_FIXTURE: &str = "CREATE TABLE tbl_1_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_n VALUES('ni','n','你',100);CREATE TABLE tbl_1_b(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_b VALUES('bu','b','不',90);CREATE TABLE tbl_1_h(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_h VALUES('hao','h','好',100);CREATE TABLE tbl_2_n(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_2_n VALUES('ni''hao','nh','你好',1000);CREATE TABLE tbl_2_b(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_2_b VALUES('bu''hao','bh','不好',500);CREATE TABLE tbl_1_x(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_x VALUES('xi','x','西',100),('xian','x','先',300);CREATE TABLE tbl_1_a(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_a VALUES('an','a','安',100);CREATE TABLE tbl_2_x(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_2_x VALUES('xi''an','xa','西安',800);CREATE TABLE tbl_1_s(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl_1_s VALUES('shi','s','是',1000),('shu','s','书',500);";
@@ -7826,6 +7851,10 @@ CREATE TABLE tbl_2_y(key TEXT,jp TEXT,value TEXT,weight INTEGER);INSERT INTO tbl
             let codes: Vec<u8> = match grid {
                 KeyGrid::NineKey => (b'2'..=b'9').collect(),
                 KeyGrid::FourteenKey => FOURTEEN_KEY_GROUPS
+                    .iter()
+                    .map(|group| group.as_bytes()[0])
+                    .collect(),
+                KeyGrid::EighteenKey => EIGHTEEN_KEY_GROUPS
                     .iter()
                     .map(|group| group.as_bytes()[0])
                     .collect(),

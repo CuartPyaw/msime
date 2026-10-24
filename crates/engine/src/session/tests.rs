@@ -12539,3 +12539,62 @@ fn relative_date_keywords_reach_quanpin_and_nine_key_and_commit() {
         .iter()
         .any(|word| word.contains("2026") || word.contains('(')));
 }
+
+/// 十八键的两个字母都参与全拼解码；实体字母仍走确定拼写，组码本身不作为文字上屏。
+#[test]
+fn eighteen_key_uses_ambiguous_groups_and_preserves_exact_hardware_input() {
+    let sql = format!(
+        "{QUANPIN_FIXTURE}
+        CREATE TABLE tbl_1_b(key TEXT,jp TEXT,value TEXT,weight INTEGER);
+        INSERT INTO tbl_1_b VALUES('bo','b','波',150);
+        INSERT INTO tbl_2_b VALUES('bo''hao','bh','波好',150);"
+    );
+    let fixture = Fixture::new(&sql);
+    let mut session = fixture.session();
+    session.set_key_grid(Some(KeyGrid::EighteenKey));
+    type_text(&mut session, "nihao");
+    assert_eq!(session.snapshot().editing_text, "nihao");
+    assert!(!words(&session).contains(&"波好".into()));
+    assert!(!session.grid_key(b'n').handled);
+    session.command(Command::Cancel);
+
+    for letter in b"nihao" {
+        assert!(session.grid_key(*letter).handled);
+    }
+    assert_eq!(session.snapshot().editing_text, "bihai");
+    let ambiguous = words(&session);
+    assert!(ambiguous.contains(&"你好".into()), "{ambiguous:?}");
+    assert!(ambiguous.contains(&"波好".into()), "{ambiguous:?}");
+    assert!(!session.grid_key(b'1').handled);
+    assert!(!session.grid_key(b'A').handled);
+    assert_eq!(
+        select_word(&mut session, "波好").commit.as_deref(),
+        Some("波好")
+    );
+
+    for letter in b"ni" {
+        assert!(session.grid_key(*letter).handled);
+    }
+    let spelling = session
+        .snapshot()
+        .nine_key_spellings
+        .iter()
+        .position(|item| item == "ni")
+        .unwrap();
+    assert!(session.choose_nine_key_spelling(spelling).handled);
+    for letter in b"hao" {
+        assert!(session.grid_key(*letter).handled);
+    }
+    assert!(!words(&session).contains(&"波好".into()));
+    assert!(session.command(Command::Backspace).handled);
+    assert_eq!(session.snapshot().editing_text, "biha");
+    assert!(session.grid_key(b'o').handled);
+    let expected = session.snapshot().candidates[0].word.clone();
+    assert_eq!(
+        session.command(Command::CommitRaw).commit.as_deref(),
+        Some(expected.as_str())
+    );
+    assert!(session.snapshot().editing_text.is_empty());
+    session.set_dedicated_english(true);
+    assert!(!session.grid_key(b'n').handled);
+}
