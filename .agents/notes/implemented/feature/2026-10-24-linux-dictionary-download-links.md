@@ -21,7 +21,12 @@ Status: implemented
 
 真实安装布局的 CLI 回归在固定基点因不识别 `--list-downloads` 失败，改后通过；覆盖 full/五笔版本、已有状态、禁网与禁止启动子进程、镜像开关、缺少地址和锁文件、无目录写入及原 SHA-256 校验拒绝。首次配置页 20 项测试和 TypeScript 类型检查通过；新增用例覆盖按需读取与缓存、复制原地址/镜像/目录、失败重试和继续旧配置流程。
 
-安装器定位、注册、下载上限、HTTP 升级与六版本渲染回归通过；前端构建、定向 lint/格式和笔记校验通过。完整 `bash scripts/verify-local.sh --quick` 在 Windows 复用已有标准缓存执行，退出 1：18 个失败阶段均在前一轮的 19 项集合内，30 个可移植失败文件与前一轮相同；原生 Windows 全量工程未配置而跳过，不能把少一个失败当成修复。Linux 两项在该机因无 Docker 跳过。随后代码提交 `3e16e69103` 的 [Linux 设置应用 CI](https://github.com/metasequoiaime/msime/actions/runs/40062380152/job/120778519839) 完成真正 Linux 环境的全目标 clippy 和 337 项单测，新加入的清单成功读取与失败拒绝测试都通过。原生 Linux 首次配置界面验收仍缺；这些结果不能替代宿主窗口验收。
+安装器定位、注册、下载上限、HTTP 升级与六版本渲染回归通过；前端构建、定向 lint/格式和笔记校验通过。完整 `bash scripts/verify-local.sh --quick` 在 Windows 复用已有标准缓存执行，退出 1：18 个失败阶段均在前一轮的 19 项集合内，30 个可移植失败文件与前一轮相同；原生 Windows 全量工程未配置而跳过，不能把少一个失败当成修复。Linux 两项在该机因无 Docker 跳过。随后代码提交 `3e16e69103` 的 [Linux 设置应用 CI](https://github.com/metasequoiaime/msime/actions/runs/40062380152/job/120778519839) 完成真正 Linux 环境的全目标 clippy 和 337 项单测，新加入的清单成功读取与失败拒绝测试都通过。原生窗口的补充验收见下文，CLI 与单元测试不替代窗口证据。
+
+
+产品源码 `e3212b5ab4` 在隔离验证分支中构建真实前端、Rust 核心、Linux 原生 IBus 宿主及设置组件，经 CMake 安装后，从随装的 `msime-linux-settings` 入口在 Xvfb 中启动 500×640 首次配置窗口。[原生窗口专项](https://github.com/metasequoiaime/msime/actions/runs/40068690228)通过：12 个词库文件的名称、原地址、镜像、大小、摘要和保存目录均与同一安装器的清单一致，26 次系统剪贴板回读一致，展开、收起和重开可用，查看与复制后均未创建输入法状态目录或词库目录。两张窗口截图已人工查看。验证只增加调度和回归脚本，产品运行时代码与上述提交一致；脚本保留在 `platforms/linux/tests/tools/first-run-downloads-ui.py`。
+
+首轮验证中，脚本在异步复制尚未完成时读取剪贴板并直接退出；修正轮询及 Xvfb 向隔离 D-Bus 会话传递显示环境后，以相同清单和剪贴板断言通过。镜像使用 `.invalid` 合成地址，不下载资源，因此本次不证明实际下载站可达，也不替代 Fcitx5/IBus 的系统输入验收。完整 quick 的原有失败仍未关闭。
 
 ## Consequences
 
