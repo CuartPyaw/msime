@@ -7423,7 +7423,9 @@ fn cross_commit_spacing_is_independent_and_validates_excluded_apps() {
             Err(PreferencesError::InvalidCrossCommitSpacingApps)
         ));
     }
+}
 
+#[test]
 fn text_edit_button_order_round_trips_and_restores_defaults() {
     let directory = tempfile::tempdir().unwrap();
     let store = PreferencesStore::new(directory.path());
