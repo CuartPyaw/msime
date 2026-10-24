@@ -4660,6 +4660,10 @@ public final class MSIMEInputService extends InputMethodService {
         String face = entries.get(0).face();
         // 与句号键一样按墨迹居中放大画：全角「，」原样居中时只剩键底一个小点。
         CenteredGlyphSpan.apply(quickPunctuationButton, face, 1.3f);
+        if (quickPunctuationButton instanceof KeyHintButton hintButton) {
+            hintButton.setCornerHint(commaSecondaryPeriod()
+                ? ChineseSymbolFaces.face(".", sendsChinesePunctuation(), punctuationMarks()) : "");
+        }
         quickPunctuationButton.setContentDescription("常用标点：" + face
             + (commaSecondaryPeriod() ? "；长按输入句号" : "；长按选择常用标点"));
     }
@@ -8937,7 +8941,8 @@ public final class MSIMEInputService extends InputMethodService {
         bindSymbolPanelHold(layerButton);
         symbolPanelButton = keyId(button(controls, "符", imePanels::showSymbolPanel), "SoftSymbol");
         symbolPanelButton.setContentDescription("打开符号面板");
-        quickPunctuationButton = keyId(button(controls, ",", this::insertQuickPunctuation), "Comma");
+        quickPunctuationButton = keyId(addRowButton(controls, new KeyHintButton(this), ",",
+            this::insertQuickPunctuation, true), "Comma");
         quickPunctuationButton.setOnLongClickListener(ignored -> {
             if (commaSecondaryPeriod()) {
                 imeKeyFeedback.playFeedback(quickPunctuationButton);

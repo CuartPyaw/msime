@@ -386,7 +386,10 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
         try {
             Rect option = bounds(awaitStableBounds(described("输入 " + symbol)));
             inject(started, MotionEvent.ACTION_MOVE, option.centerX(), option.centerY());
-            await(described("输入 " + symbol).and(AccessibilityNodeInfo::isSelected));
+            stage = "English drag selected " + letter + " to " + symbol;
+            // 显式重读跨窗口选中状态，避免 API 35 保留弹窗初次出现时的节点。
+            await(described("输入 " + symbol).and(node -> node.refresh() && node.isSelected()));
+            stage = "English drag " + (cancel ? "cancel " : "release ") + letter + " to " + symbol;
             inject(started, cancel ? MotionEvent.ACTION_CANCEL : MotionEvent.ACTION_UP,
                 option.centerX(), option.centerY());
             finished = true;
