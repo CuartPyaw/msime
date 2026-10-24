@@ -7312,8 +7312,11 @@ fn candidate_page_len_matches_the_published_page_without_building_rows() {
     short.focus(true).unwrap();
     type_key(&mut short);
     assert_eq!(short.candidate_page_len(), 3);
-    short.dispatch(Action::NextPage).unwrap();
-    assert_eq!(short.candidate_page_len(), 5);
+    let next = short.dispatch(Action::NextPage).unwrap().view;
+    // 展开后长出第二页，当前页只有剩余两行；轻量计数必须与发布页一致。
+    assert_eq!(next.page, 1);
+    assert_eq!(short.candidate_page_len(), 2);
+    assert_eq!(short.candidate_page_len(), next.candidates.len());
 
     let mut runtime = withholding_runtime(12, 8, 5);
     runtime.focus(true).unwrap();
@@ -7458,21 +7461,20 @@ fn online_candidates_do_not_change_engine_after_generation_exhaustion() {
 
 #[test]
 fn expansion_that_fills_the_current_page_does_not_advance_past_it() {
-    // Three offered is a single short page. Asking for the next one has nowhere to go, so the
-    // arrivals fill this page instead - advancing would step straight over them.
-    let mut runtime = withholding_runtime(3, 4, 5);
+    // 展开只补满当前页、没有长出新页时留在原页；长出新页的场景由相邻的翻页回归覆盖。
+    let mut runtime = withholding_runtime(3, 2, 5);
     runtime.focus(true).unwrap();
     type_key(&mut runtime);
     let filled = runtime.dispatch(Action::NextPage).unwrap().view;
     assert_eq!(filled.page, 0);
-    assert_eq!(filled.page_count, 2);
+    assert_eq!(filled.page_count, 1);
     assert_eq!(filled.candidates.len(), 5);
     assert_eq!(
         filled.candidates.first().map(|c| c.text.as_str()),
         Some("candidate-0")
     );
-    // The page is no longer short, so the next request moves on as usual.
-    assert_eq!(runtime.dispatch(Action::NextPage).unwrap().view.page, 1);
+    // 所有候选已展开，再按下一页也不能越过唯一一页。
+    assert_eq!(runtime.dispatch(Action::NextPage).unwrap().view.page, 0);
 }
 
 #[test]
