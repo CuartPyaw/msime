@@ -33,7 +33,7 @@ iOS 已有全拼 14 键和多种 26 键双拼方案，但双拼只能使用 26 �
 - iOS 原生设置、键盘扩展和 Host API 共享同一个布局字段；切换双拼 profile 不会丢失 14 键选择，默认值仍是 26 键。
 - 14 键双拼复用现有键面、拼音选择条、候选面板、分词和退格契约，物理字母输入保持原有 26 键行为。
 - 旧版客户端不认识 `touch_shuangpin_layout` 时会按 #9404 已接受的降级边界处理；iOS 账号同步不携带该本机布局，因此跨设备不会覆盖本机选择。
-- #9404 当前尚未合入 `develop` 且远端状态为冲突；本分支只能作为 stacked PR，合并前需先让共享基础 PR 更新并合入。
+- #9404 已合入 `develop`；本分支将其后的 3 个 iOS 提交迁到固定基点 `4c4571f8797548ac4d24b5806a96a2b84438ffe5`，直接面向 `develop`。迁移无需手工解决冲突，Android 共享基础不再混入本 PR 的差异。
 
 ## Verification
 
@@ -50,3 +50,11 @@ iOS 已有全拼 14 键和多种 26 键双拼方案，但双拼只能使用 26 �
 - `python3 scripts/test-fourteen-key-table.py` 通过。
 - 原生产品 `MSIMEApp` 与内嵌键盘扩展的 arm64 模拟器构建通过，包含设置页的真实 SwiftUI 编译；构建前按锁文件校验并准备本地语音运行库。模拟器库只有 arm64，构建命令显式传入 `ARCHS=arm64 ONLY_ACTIVE_ARCH=YES`。
 - `pnpm run verify-notes`、本次改动的 Rust 格式检查和差异检查在提交前执行。
+
+### 依赖合入后的组合验证
+
+上述原生 App、模拟器与系统编辑器结果对应迁移前提交，不能作为新组合的通过证明。迁移后共享 Host API 的 14 键双拼、client-core 的布局门控和 legacy 混输回归均实际执行并通过；为基点中两个旧 `MixedInputPreferences` 测试字面量补入 `..MixedInputPreferences::default()`，保留原有断言。键表一致性、Rust 格式和差异检查通过，OpenCC 输入由锁定下载器补齐并校验。
+
+Linux 组合验证使用固定 NDK 28 中的 Clang 19 构建 WASM，并通过其检查与严格 Clippy。Windows 主机策略测试在系统 Clang 与 GNU ld 下执行 164 项通过、2 项因已有主机差异排除、76 项仍需 Windows 构建。切回 NDK Clang 默认的 LLD 时，检查脚本把它的 `undefined symbol:` 当作新编译错误；该诊断与脚本已经识别的 GNU `undefined reference`、Apple `Undefined symbols` 都表示无法独立链接的翻译单元，因此补齐同类匹配，实际编译错误继续失败。修正后在原 NDK Clang 19 与 LLD 组合下重跑完整 `bash scripts/verify-local.sh --quick`，退出 0；同一套 Windows 主机测试实际通过 164 项，Rust workspace、Android 目标与 Java 宿主、WASM、Linux 设置外壳及原生宿主均通过。HarmonyOS 真打包、Windows MinGW、macOS 与 Apple bridge 因该 Linux 构建环境缺少对应输入或宿主而按脚本规则跳过。
+
+Apple 迁移后组合仍未重验：独立 macOS SSH 入口拒绝认证，旧 `macmini` 地址经机器身份核对实际是本机；本机系统盘不足 50 GiB，未新建完整 Apple 构建树。
