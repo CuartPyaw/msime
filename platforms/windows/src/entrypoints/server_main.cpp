@@ -1042,16 +1042,23 @@ int wmain(int argc, wchar_t **argv) {
           (void)persist_traditional_output(directory, *traditional_output,
                                            click.desired);
         });
-    // TSF 的 Ctrl+Shift+J 同样经一个有界工作线程写偏好，同样要在 WindowsServer 构造之前就有。写成功后立刻更新托盘看到的方案，方案本身由偏好监视器发布给会话。
+    // TSF 的 Ctrl+Shift+J 同样经一个有界工作线程写偏好，同样要在 WindowsServer 构造之前就有。写成功后立刻更新托盘看到的方案，并唤醒偏好监视器，让当前会话尽快切换方案。
+    auto wake_preferences =
+        std::make_shared<std::pair<std::mutex, std::function<void()>>>();
     SingleClickWorker<JapaneseToggleRequest> japanese_toggles(
         [directory = config.state_root, language_dictionaries, tray_preferences,
-         tray_preferences_mutex](const JapaneseToggleRequest &) {
+         tray_preferences_mutex, wake_preferences](const JapaneseToggleRequest &) {
           const auto scheme =
               toggle_japanese_scheme(directory, language_dictionaries);
           if (!scheme)
             return;
-          std::lock_guard<std::mutex> lock(*tray_preferences_mutex);
-          tray_preferences->scheme = *scheme;
+          {
+            std::lock_guard<std::mutex> lock(*tray_preferences_mutex);
+            tray_preferences->scheme = *scheme;
+          }
+          std::lock_guard lock(wake_preferences->first);
+          if (wake_preferences->second)
+            wake_preferences->second();
         });
     auto candidate_fonts = std::make_shared<CandidateFontMailbox>();
     auto candidate_style = std::make_shared<CandidateWindowStyleMailbox>();
@@ -1265,6 +1272,20 @@ int wmain(int argc, wchar_t **argv) {
                   })
             : preview_key_handler(config),
         [](const FocusRoute &, const FanyImeNamedpipeData &) { return true; });
+    // Server 构造期间已可接收切换；安装与调用共用锁，异常展开也先撤销并等完旧回调。
+    struct PreferenceWakeBinding {
+      decltype(wake_preferences) &callback;
+      ~PreferenceWakeBinding() {
+        std::lock_guard lock(callback->first);
+        callback->second = {};
+      }
+    } preference_wake_binding{wake_preferences};
+    {
+      std::lock_guard lock(wake_preferences->first);
+      wake_preferences->second = [&server] { server.wake_preferences(); };
+      // 补查构造期间已完成、当时尚无回调接收的偏好写入。
+      wake_preferences->second();
+    }
     // Its palette is applied once the theme is resolved, alongside the toolbar's.
     WaveOverlay voice_overlay;
     VoiceInputSession *voice_session = nullptr;
