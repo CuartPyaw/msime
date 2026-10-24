@@ -343,6 +343,7 @@ def build(
         "No such file or directory",
         "Undefined symbols",
         "undefined reference",
+        "undefined symbol:",  # LLD 与 GNU ld 对同一种缺失链接依赖使用不同诊断。
     )
     missing = MISSING_HEADER.search(compiled.stderr)
     if missing:
