@@ -73,19 +73,19 @@ printf '%s\n' "$result" | tee target/android/ocr-product-smoke.log
 product_status=0
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* && "$result" != *MSIME_DEVICE_SMOKE_FAILED* ]] || product_status=1
 # 运行时撤权会杀死目标进程，另起专项验证撤权后的原生入口，不让 instrumentation 自杀。
-if [[ "$product_status" == 0 ]]; then
-  "$adb" -s "$serial" shell pm revoke app.msime.android android.permission.CAMERA
-  if (( api >= 31 )); then
-    "$adb" -s "$serial" shell am start -W -n app.msime.android/app.msime.android.home.HomeActivity >/dev/null
-  fi
-  denied=$("$adb" -s "$serial" shell am instrument "${instrument_options[@]}" -w -e ocr-permission-denied true \
-    app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke)
-  printf '%s\n' "$denied" | tee target/android/ocr-product-permission.log
-  [[ "$denied" == *MSIME_DEVICE_SMOKE_PASSED* && "$denied" != *MSIME_DEVICE_SMOKE_FAILED* ]] || product_status=1
+# 撤权专项独立运行，前一个用例失败也保留其结果，不让串行断言掩盖权限覆盖。
+"$adb" -s "$serial" shell pm grant app.msime.android android.permission.CAMERA
+"$adb" -s "$serial" shell pm revoke app.msime.android android.permission.CAMERA
+if (( api >= 31 )); then
+  "$adb" -s "$serial" shell am start -W -n app.msime.android/app.msime.android.home.HomeActivity >/dev/null
 fi
+denied=$("$adb" -s "$serial" shell am instrument "${instrument_options[@]}" -w -e ocr-permission-denied true \
+  app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke)
+printf '%s\n' "$denied" | tee target/android/ocr-product-permission.log
+[[ "$denied" == *MSIME_DEVICE_SMOKE_PASSED* && "$denied" != *MSIME_DEVICE_SMOKE_FAILED* ]] || product_status=1
 "$adb" -s "$serial" shell svc wifi enable
 "$adb" -s "$serial" shell svc data enable
-for frame in captured preview result editor selection permission failure; do
+for frame in captured preview result editor selection hidden resumed permission failure; do
   "$adb" -s "$serial" pull "/sdcard/Android/data/app.msime.android/files/ocr-product-$frame.png" \
     "target/android/ocr-product-$frame.png" >/dev/null 2>&1 || true
 done

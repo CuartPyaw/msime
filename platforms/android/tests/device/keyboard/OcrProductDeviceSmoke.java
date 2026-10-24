@@ -160,18 +160,53 @@ public final class OcrProductDeviceSmoke extends DeviceSmoke {
         // 未拍照时隐藏键盘后再次打开，必须能重新取得相机，不能只验证拍照回调里的释放。
         stage = "release preview when keyboard hides";
         camera();
-        automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
+        home();
         editor();
         camera();
+        screenshot("resumed");
         // 识别后离开输入框不能把待选结果带入下一个编辑器。
         stage = "discard results after editor switch";
         tap(node -> equalsText("拍照并识别", node.getText()) && node.isEnabled());
-        automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME);
+        home();
         editor();
         SystemClock.sleep(2000);
         dropStaleNodes();
         AccessibilityNodeInfo target = awaitAny(field("msime-test-plain"));
         check(target.getText() == null || target.getText().length() == 0, "late recognition cannot insert in another editor");
+        for (android.view.accessibility.AccessibilityWindowInfo window : automation.getWindows())
+            check(findAny(window.getRoot(), described("拍照识字面板")) == null,
+                "late recognition cannot restore OCR panel in another editor");
+    }
+
+    /** HOME 请求异步切换任务，确认桌面已获得焦点且键盘消失后才能重开编辑器。 */
+    private void home() throws Exception {
+        String launcher;
+        // 通过测试的 shell 身份解析桌面，避免依赖产品进程的包可见性权限。
+        try (InputStream input = new android.os.ParcelFileDescriptor.AutoCloseInputStream(
+                automation.executeShellCommand("cmd package resolve-activity --brief -a android.intent.action.MAIN -c android.intent.category.HOME"))) {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            byte[] buffer = new byte[256];
+            int count;
+            while ((count = input.read(buffer)) != -1) bytes.write(buffer, 0, count);
+            String output = new String(bytes.toByteArray(), java.nio.charset.StandardCharsets.UTF_8).trim();
+            String component = output.substring(output.lastIndexOf('\n') + 1).trim();
+            check(component.indexOf('/') > 0, "dedicated AVD has a resolved launcher");
+            launcher = component.substring(0, component.indexOf('/'));
+        }
+        check(automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME), "request home transition");
+        long deadline = SystemClock.uptimeMillis() + 15000;
+        do {
+            dropStaleNodes();
+            boolean activeHome = false, keyboard = false;
+            for (android.view.accessibility.AccessibilityWindowInfo window : automation.getWindows()) {
+                AccessibilityNodeInfo root = window.getRoot();
+                if (window.getType() == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD) keyboard = true;
+                if (window.isActive() && root != null && equalsText(launcher, root.getPackageName())) activeHome = true;
+            }
+            if (activeHome && !keyboard) { screenshot("hidden"); return; }
+            SystemClock.sleep(100);
+        } while (SystemClock.uptimeMillis() < deadline);
+        throw new AssertionError("home transition must finish before reopening synthetic editor");
     }
 
     private void copySource() throws Exception {
