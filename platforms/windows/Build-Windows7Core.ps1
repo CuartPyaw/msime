@@ -28,6 +28,7 @@ $output = Join-Path $OutputDirectory $Architecture
 $previousBootstrap = $env:RUSTC_BOOTSTRAP
 $previousTarget = $env:CARGO_TARGET_DIR
 $previousDebug = $env:CARGO_PROFILE_RELEASE_DEBUG
+$previousEncodedFlags = $env:CARGO_ENCODED_RUSTFLAGS
 Push-Location $RepoRoot
 try {
     $sysroot = & rustc --print sysroot
@@ -39,6 +40,12 @@ try {
     $env:RUSTC_BOOTSTRAP = '1'
     $env:CARGO_TARGET_DIR = Join-Path $RepoRoot 'target'
     $env:CARGO_PROFILE_RELEASE_DEBUG = '2'
+    # TSF 把核心作为插件载入任意应用；Win7 无法从插件目录解析随包 UCRT 转发。
+    # 对标准库及原生依赖统一静态链接 CRT，不能只给最终 DLL 补链接参数。
+    $flags = if ($null -ne $previousEncodedFlags) { @($previousEncodedFlags.Split([char]31)) }
+        elseif ($env:RUSTFLAGS) { @($env:RUSTFLAGS.Split([char[]]" `t`r`n", [StringSplitOptions]::RemoveEmptyEntries)) }
+        else { @() }
+    $env:CARGO_ENCODED_RUSTFLAGS = (@($flags) + @('-C', 'target-feature=+crt-static')) -join [char]31
     Invoke-CoreCommand cmake @('-S', (Join-Path $PSScriptRoot 'compat'), '-B', $nativeBuild,
         '-G', 'Visual Studio 17 2022', '-A', $cmakeArch)
     Invoke-CoreCommand cmake @('--build', $nativeBuild, '--config', 'Release', '--parallel', '4')
@@ -54,6 +61,9 @@ try {
     Invoke-CoreCommand cargo ($cargo + @('-p', 'msime-host-api', '--lib') + $link)
     & (Join-Path $PSScriptRoot 'Test-PortableExecutable.ps1') -LiteralPath (Join-Path $release 'msime_host_api.dll') -Architecture $Architecture -Kind dll
     $audit = @(& (Join-Path $PSScriptRoot 'Test-Windows7CoreImports.ps1') -LiteralPath (Join-Path $release 'msime_host_api.dll'))
+    if (@($audit[0].Imports | Where-Object { $_.Library -match '^(api-ms-win-crt-.*|ucrtbase|vcruntime[0-9_]*|msvcp[0-9_]*)\.dll$' }).Count) {
+        throw 'Win7 TSF core must not import a dynamic CRT from the editor process'
+    }
     $files = @('msime_host_api.dll', 'msime_host_api.dll.lib', 'msime_host_api.pdb')
     New-Item -ItemType Directory -Force -Path $output | Out-Null
     # MCP 会把 host-api 当依赖重新链接，立即保存这一份带兼容钩子的 DLL 与符号。
@@ -74,5 +84,6 @@ try {
     $env:RUSTC_BOOTSTRAP = $previousBootstrap
     $env:CARGO_TARGET_DIR = $previousTarget
     $env:CARGO_PROFILE_RELEASE_DEBUG = $previousDebug
+    $env:CARGO_ENCODED_RUSTFLAGS = $previousEncodedFlags
     Pop-Location
 }

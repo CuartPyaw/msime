@@ -10,6 +10,8 @@ Rust 的普通 Windows MSVC 目标没有 Win7 运行保证。改用 Win7 目标�
 
 `Build-Windows7Core.ps1` 在仓库固定的 Rust 1.97.1 上用 `build-std=std,panic_unwind` 构建 `x86_64-win7-windows-msvc` / `i686-win7-windows-msvc`。前置条件是安装该工具链的 `rust-src`，不修改普通构建的目标和发布入口。启用 `build-std` 的 `RUSTC_BOOTSTRAP`、产物目录与符号配置只在脚本期间设置，退出时恢复环境。
 
+Win7 核心与 MCP 的标准库、Rust 和原生依赖统一以 `target-feature=+crt-static` 构建；C++ 延迟加载对象也使用静态 CRT。编码参数保留调用方设置，脚本退出时恢复。原因是 TSF 会作为插件进入目录各异的编辑器，[微软 UCRT 部署约束](https://learn.microsoft.com/en-us/cpp/windows/universal-crt-deployment)明确指出 Windows 8 之前无法从插件目录解析应用本地 UCRT 转发。只在 Server 旁带 CRT 能启动 EXE，却不能保证编辑器冷装载核心；不能依赖宿主已安装运行库或预加载 DLL。
+
 `compat/Windows7DelayLoad.cpp` 使用 MSVC 自带的延迟加载机制，只链接进 Win7 核心和 MCP。三个已确认的系统模块从系统目录探测，可用函数返回同一个系统地址；Win7 缺少的 `combase.dll` 以系统 `ole32.dll` 作为模块，调用它本来就提供的旧 COM 函数。WinRT 错误描述通过传统 `IErrorInfo` 进入线程错误槽，HRESULT 仍由 Rust 错误对象保存。未知 DLL 和未知函数继续失败，不提供通用空实现。
 
 cpal 默认录音与播放所用的虚拟 GUID 在旧系统上由 `IMMDeviceEnumerator::GetDefaultAudioEndpoint` 和 `IMMDevice::Activate` 完成激活。WRL 实现原异步操作接口，在工作线程进入 MTA 后激活设备，通过原完成回调交付结果；操作对象保留结果和 COM 引用，调用方可以重复读取。系统原有异步接口可用时仍走原接口。产品没有使用的新系统进程回环参数不作虚假模拟。
@@ -34,8 +36,11 @@ Windows 11 上的 x64 与 x86 专用构建完整产出同源核心 DLL 与 MCP�
 
 同源的 x86 与 x64 TSF DLL 均已链接对应 Win7 核心，并通过实际 DLL 类工厂创建、引用和卸载测试。该检查在 Windows 11 上执行，不包含安装注册、应用输入或 Win7 运行验收。
 
+Win7 完整安装实测曾在注册 TSF 时以错误 127 失败。全新外部进程的探针能稳定复现旧包失败，预加载相邻 UCRT 才能通过；静态 CRT 修复后，x64 的 TSF 与核心各自从独占空目录的新进程冷装载通过，随后应用本地布局中的 46 个 DLL、3491 项导入和序号全部通过。x86、重建后的安装包及真实编辑器输入仍需本轮继续验收。
+
 ## Alternatives considered
 
+- **把 UCRT 随 TSF 依赖闭包安装。** 无需系统更新，也能复用动态 CRT 产物；但 Win7 的插件目录转发限制使全新进程无法加载，预加载 `ucrtbase.dll` 后通过恰恰会掩盖缺陷。改用静态 CRT，并在未加载产品依赖的外部进程逐个验收 DLL。系统级安装 UCRT 会修改所有应用共享组件，也使干净 SP1 的安装依赖更新，因此不作为本产品的隐含前提。
 - **全局降级依赖与 Rust 工具链。** 可以复用普通构建，但会扩大现代 Windows 和其他平台的回归范围。专用目标与最终链接参数把兼容实现限制在兼容构建中。
 - **给缺失的音频接口直接返回 `E_NOTIMPL`。** 足以消除装载障碍，保留错误传播；但新版 cpal 的普通默认设备也会调用它，会让现有语音与音效失效，因此实现真实的旧 WASAPI 激活。
 - **手工改写第三方导入库或生成绑定。** 可以把旧 COM 函数改到 `ole32.dll`，但还要维护第三方源码、导入符号和链接顺序。采用工具链提供的延迟加载机制，并以实际 PE 清单防止新增接口未经适配进入产物。
