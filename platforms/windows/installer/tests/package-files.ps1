@@ -554,6 +554,11 @@ foreach($name in @('MetasequoiaImeTsf.dll','msime_host_api.dll','synthetic-runti
 }
 '@
     Write-Fixture 'target/windows-notices/THIRD_PARTY_NOTICES.txt' $voiceNotices
+    $rejected = $false
+    try { & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -Windows7Architecture x64 }
+    catch { $rejected = $_.Exception.Message -match 'HarfBuzz' }
+    if (-not $rejected) { throw 'Win7 package accepted notices missing HarfBuzz' }
+    Write-Fixture 'target/windows-notices/THIRD_PARTY_NOTICES.txt' ($voiceNotices + "`nHarfBuzz synthetic license")
     foreach ($arch in @('x64', 'x86')) {
         if ($arch -eq 'x86') { Remove-Item -LiteralPath (Join-Path $fixture 'target/windows7-full/x64') -Recurse -Force }
         & (Join-Path $installer 'Prepare-PackageFiles.ps1') -RepoRoot $fixture -Windows7Architecture $arch

@@ -37,7 +37,7 @@ Copy-Item target/windows7-core/x64/msime_host_api.dll target/windows-full/x64/wi
 ctest --test-dir target/windows-full/x64/win7-settings -C RelWithDebInfo --output-on-failure
 ```
 
-32 位构建把 `x64` 路径改成 `x86`，`-A x64` 改成 `-A Win32`，依赖前缀也必须为 x86。没有预备依赖前缀时，可用 vcpkg 工具链与此目录的最小清单安装锁定的 `nlohmann-json`；安装目录仍放在 `target/windows-native-deps` 下。测试使用独立合成数据，经实际窗口通知与工作线程调用 Rust 配置存储，覆盖修订号冲突、未修改字段保留和退出时的待保存修改，以及实际设置文件的导出、修改、导入恢复与取消选择。测试仅在系统文件选择边界注入合成路径，不代替系统对话框的桌面验收。CI 使用同源普通核心覆盖原生控件与持久化，不代表 Win7 实机或整个产品验证通过。
+32 位构建把 `x64` 路径改成 `x86`，`-A x64` 改成 `-A Win32`，依赖前缀也必须为 x86。没有预备依赖前缀时，可用 vcpkg 工具链与此目录的清单安装锁定的 `nlohmann-json` 与原生表情面板使用的 HarfBuzz Core；安装目录仍放在 `target/windows-native-deps` 下。测试使用独立合成数据，经实际窗口通知与工作线程调用 Rust 配置存储，覆盖修订号冲突、未修改字段保留和退出时的待保存修改，以及实际设置文件的导出、修改、导入恢复与取消选择。测试仅在系统文件选择边界注入合成路径，不代替系统对话框的桌面验收。CI 使用同源普通核心覆盖原生控件与持久化，不代表 Win7 实机或整个产品验证通过。
 
 在交互桌面另外验证默认系统文件选择器的打开与取消：
 

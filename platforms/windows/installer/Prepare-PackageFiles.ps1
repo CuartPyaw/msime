@@ -318,6 +318,11 @@ if ($null -ne $voiceRuntimeFrom) {
     }
 }
 
+# Win7 的原生候选与表情面板静态链接 HarfBuzz，不能沿用新增依赖前的旧声明集合。
+if ($Windows7Architecture -and -not ([IO.File]::ReadAllText($thirdPartyNotices).ToLowerInvariant().Contains('harfbuzz'))) {
+    throw 'Win7 第三方声明缺少 HarfBuzz，请按实际依赖前缀重新运行 Collect-Notices.ps1'
+}
+
 New-Item -ItemType Directory -Path $PackageDirectory -Force | Out-Null
 $targetAppData = Join-Path $PackageDirectory 'app_data'
 $targetServer = Join-Path $PackageDirectory 'server_exe'

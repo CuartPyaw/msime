@@ -10,6 +10,9 @@
 #include <iterator>
 #include <new>
 #include <string>
+#if defined(MSIME_WINDOWS7_EMOJI_SHAPING)
+#include "Windows7EmojiShaping.h"
+#endif
 
 namespace msime::windows::compat {
 namespace emoji_font_detail {
@@ -78,6 +81,9 @@ struct Font {
   ComPtr<IDWriteFontCollection> collection;
   ComPtr<IDWriteFont> font;
   bool registered = false;
+#if defined(MSIME_WINDOWS7_EMOJI_SHAPING)
+  std::unique_ptr<Shaper> shaper;
+#endif
   Font() {
     if (FAILED(DWriteCreateFactory(DWRITE_FACTORY_TYPE_SHARED, __uuidof(IDWriteFactory), reinterpret_cast<IUnknown**>(factory.GetAddressOf())))) return;
     wchar_t executable[32768]{};
@@ -92,8 +98,16 @@ struct Font {
     ComPtr<IDWriteFontFamily> family;
     if (collection->GetFontFamilyCount() && SUCCEEDED(collection->GetFontFamily(0, &family)))
       family->GetFirstMatchingFont(DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL, &font);
+#if defined(MSIME_WINDOWS7_EMOJI_SHAPING)
+    if (font) shaper = std::make_unique<Shaper>(path, font.Get());
+#endif
   }
-  ~Font() { font.Reset(); collection.Reset(); if (registered) factory->UnregisterFontCollectionLoader(loader.Get()); }
+  ~Font() {
+#if defined(MSIME_WINDOWS7_EMOJI_SHAPING)
+    shaper.reset();
+#endif
+    font.Reset(); collection.Reset(); if (registered) factory->UnregisterFontCollectionLoader(loader.Get());
+  }
 };
 inline Font& bundled() { static Font instance; return instance; }
 inline bool native_fallback(IDWriteFactory* factory) {
@@ -136,12 +150,14 @@ inline unsigned ApplyWindows7EmojiFallback(IDWriteFactory* factory, IDWriteTextL
   for (UINT32 index = 0; index < length;) {
     const UINT32 begin = index;
     const auto base = scalar_at(index);
+    const auto base_end = index;
     if (!covered(base)) continue;
     bool needed = absent(base);
     bool regional = base >= 0x1F1E6 && base <= 0x1F1FF;
     // 变体选择符、肤色、键帽和 ZWJ 连接的表情必须整簇选字，不能逐个码点拆成不同字体。
     while (index < length) {
       UINT32 end = index; const auto scalar = scalar_at(end);
+      if (scalar == 0xFE0E) { index = end; continue; }
       if (scalar == 0xFE0F || scalar == 0xFE0E || scalar == 0x20E3 ||
           (scalar >= 0x1F3FB && scalar <= 0x1F3FF) || (scalar >= 0xE0020 && scalar <= 0xE007F)) {
         needed = needed || scalar == 0xFE0F || scalar == 0x20E3 || absent(scalar);
@@ -159,7 +175,18 @@ inline unsigned ApplyWindows7EmojiFallback(IDWriteFactory* factory, IDWriteTextL
     }
     if (!needed) continue;
     const DWRITE_TEXT_RANGE range{begin, index - begin};
-    if (SUCCEEDED(layout->SetFontCollection(emoji.collection.Get(), range)) && SUCCEEDED(layout->SetFontFamilyName(L"Noto Emoji", range))) ++mapped;
+    if (SUCCEEDED(layout->SetFontCollection(emoji.collection.Get(), range)) && SUCCEEDED(layout->SetFontFamilyName(L"Noto Emoji", range))) {
+#if defined(MSIME_WINDOWS7_EMOJI_SHAPING)
+      FLOAT size = 0;
+      if (index > base_end && emoji.shaper && SUCCEEDED(layout->GetFontSize(begin, &size))) {
+        const auto shaped = emoji.shaper->shape(text + begin, index - begin, size);
+        if (shaped) layout->SetInlineObject(shaped.Get(), range);
+      }
+#else
+      (void)base_end;
+#endif
+      ++mapped;
+    }
   }
   return mapped;
 }

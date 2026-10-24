@@ -23,7 +23,9 @@ public:
   }
   HRESULT STDMETHODCALLTYPE DrawUnderline(void*, FLOAT, FLOAT, const DWRITE_UNDERLINE*, IUnknown*) override { return S_OK; }
   HRESULT STDMETHODCALLTYPE DrawStrikethrough(void*, FLOAT, FLOAT, const DWRITE_STRIKETHROUGH*, IUnknown*) override { return S_OK; }
-  HRESULT STDMETHODCALLTYPE DrawInlineObject(void*, FLOAT, FLOAT, IDWriteInlineObject*, BOOL, BOOL, IUnknown*) override { return S_OK; }
+  HRESULT STDMETHODCALLTYPE DrawInlineObject(void* context, FLOAT x, FLOAT y, IDWriteInlineObject* object, BOOL sideways, BOOL rtl, IUnknown* effect) override {
+    return object->Draw(context, this, x, y, sideways, rtl, effect);
+  }
 };
 }
 int main() {
@@ -55,5 +57,12 @@ int main() {
   assert(SUCCEEDED(layout->GetFontFamilyName(0, name, 80, &range)) && range.startPosition == 0 && range.length == 8);
   GlyphCheck joined;
   assert(SUCCEEDED(layout->Draw(nullptr, &joined, 0, 0)) && joined.missing == 0 && joined.glyphs == 5);
+  assert(SUCCEEDED(layout->GetMetrics(&metrics)) && metrics.width > 80 && metrics.width < 120);
+  FLOAT x = 0, y = 0; DWRITE_HIT_TEST_METRICS hit{};
+  assert(SUCCEEDED(layout->HitTestTextPosition(0, FALSE, &x, &y, &hit)) && hit.textPosition == 0 && hit.length == 8);
+  const std::wstring text_digit = L"1\uFE0E";
+  layout.Reset();
+  assert(SUCCEEDED(font.factory->CreateTextLayout(text_digit.c_str(), static_cast<UINT32>(text_digit.size()), format.Get(), 400, 100, &layout)));
+  assert(ApplyWindows7EmojiFallback(font.factory.Get(), layout.Get(), text_digit.c_str(), static_cast<UINT32>(text_digit.size())) == 0);
   std::puts("Win7 private emoji font: waving hand and newer emoji shape without missing glyphs; UTF-16 ranges and Chinese font preserved");
 }
