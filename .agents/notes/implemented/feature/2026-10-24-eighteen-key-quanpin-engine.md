@@ -16,6 +16,7 @@ Windows 的组字与上屏仍归 TSF 与 Server 会话所有。本切片只实�
 
 ## Historical audit
 
+- [Android 十八键全拼入口](2026-10-24-android-eighteen-key-quanpin.md)：复用本引擎和编号 4 接入 Android 原生设置与键面，Windows 原生接线仍由 #8936 跟踪。
 - [十四键](../../implemented/feature/2026-10-10-fourteen-key.md)：部分重叠，沿用多义全拼与独立组码入口；十八键的字母分组和 Windows 宿主链路是新增决定。
 - [Windows 屏幕键盘设置](../../implemented/feature/2026-10-11-windows-settings-screen-keyboard.md)：部分重叠，面板仍由共享组件承载，原生设置归属不变。
 - [九键双拼](../../implemented/feature/2026-10-10-nine-key-shuangpin.md)：独立能力；十八键全拼不改成固定两键一个音节的双拼。

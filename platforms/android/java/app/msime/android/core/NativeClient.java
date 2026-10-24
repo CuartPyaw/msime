@@ -364,9 +364,10 @@ public final class NativeClient {
     public static String setNineKeyMode(long session, boolean enabled) {
         return TextPolicy.utf8(setNineKeyModeRaw(session, enabled));
     }
-    /** 换引擎的组码网格：{@link #KEY_GRID_NONE}、{@link #KEY_GRID_NINE_KEY} 或 {@link #KEY_GRID_FOURTEEN_KEY}。只在组字结束后调用；`View.key_grid` 是权威状态。 */
+    /** 换引擎的组码网格；只在组字结束后调用，`View.key_grid` 是权威状态。 */
     public static String setKeyGrid(long session, int grid) {
-        if (grid != KEY_GRID_NONE && grid != KEY_GRID_NINE_KEY && grid != KEY_GRID_FOURTEEN_KEY)
+        if (grid != KEY_GRID_NONE && grid != KEY_GRID_NINE_KEY && grid != KEY_GRID_FOURTEEN_KEY
+                && grid != KEY_GRID_EIGHTEEN_KEY)
             throw new IllegalArgumentException("Unknown key grid");
         return TextPolicy.utf8(setKeyGridRaw(session, grid));
     }
@@ -376,7 +377,9 @@ public final class NativeClient {
     public static final int KEY_GRID_NINE_KEY = 1;
     /** 当前全拼或双拼方案的 14 键。 */
     public static final int KEY_GRID_FOURTEEN_KEY = 2;
-    /** 14 键的一键：`letter` 是这一组里的一个小写字母，宿主送首字母；返回与 {@link #character} 相同的输入响应。 */
+    /** 全拼十八键，与共享 C ABI 布局编号一致。 */
+    public static final int KEY_GRID_EIGHTEEN_KEY = 4;
+    /** 字母组网格的一键：`letter` 是组内的小写字母，宿主送首字母；返回与 {@link #character} 相同的输入响应。 */
     public static String gridKey(long session, char letter) {
         if (letter < 'a' || letter > 'z') throw new IllegalArgumentException("Grid key must be a lowercase letter");
         return TextPolicy.utf8(gridKeyRaw(session, letter));
