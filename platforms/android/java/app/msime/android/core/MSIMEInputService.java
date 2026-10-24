@@ -2530,9 +2530,17 @@ public final class MSIMEInputService extends InputMethodService {
         return !allowLearning || incognitoEnabled;
     }
 
-    /** 把隐私模式和不允许学习的输入框告诉共享层：这样的会话不记选词位置和上屏效率。用户在设置里关掉学习不算，那时统计照常。 */
+    /** 隐私输入不记录统计，也不显示上屏后联想；同步 Java 视图，旧候选立即失效。用户单独关闭学习时仍记录统计。 */
     private void markPrivateSession() {
-        if (session != 0) NativeClient.setPrivateSession(session, learningSuppressed());
+        if (session == 0) return;
+        try {
+            // 隐私设置返回布尔值，先校验信封，再单独读取候选视图。
+            JSONObject result = new JSONObject(NativeClient.setPrivateSession(session, learningSuppressed()));
+            if (!strictBoolean(result, "ok"))
+                throw new InputFailurePolicy.Failure(InputFailurePolicy.Reason.RUNTIME_REJECTED);
+            strictBoolean(result, "value");
+            view = value(NativeClient.view(session));
+        } catch (JSONException | LinkageError error) { fail(error); }
     }
 
     private void applyVoicePreferences(JSONObject preferences) {
@@ -5367,6 +5375,13 @@ public final class MSIMEInputService extends InputMethodService {
         }
         // 迟到的回报可能只是输入法自己上一次写入的回声（例如上屏之后用户已经按下了下一个键），那不是光标移动，不能把新开始的组字取消掉；对不上任何预期的才按原来的规则处理。
         boolean ownEcho = selectionEcho.acknowledge(newStart, newEnd, composingStart, composingEnd);
+        if (!ownEcho && selectionChanged && session != 0 && view != null && view.optBoolean("prediction", false)) {
+            try {
+                // 新位置也切断个人词序与重排上下文，不能把随后选中的词记成旧位置的后续词。
+                view = value(NativeClient.focus(session, true)).getJSONObject("view");
+                render();
+            } catch (JSONException | LinkageError error) { fail(error); }
+        }
         if (!ownEcho && selectionChanged) englishCorrectionRejectedPrefix = "";
         if (!ownEcho && quickDeleteUndo != null && !quickDeleteUndo.atSelection(newStart, newEnd)) {
             // 分段删除的中间选区回报可能迟到；按编辑器此刻的真实位置核对，不能仅凭旧回报丢掉备份。
@@ -7720,7 +7735,8 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     boolean candidateManagementEnabled() {
-        if (view == null || !InputViewValuePolicy.textOr(view, "local_mode", "none").equals("none")) return false;
+        if (view == null || view.optBoolean("prediction", false)
+                || !InputViewValuePolicy.textOr(view, "local_mode", "none").equals("none")) return false;
         int scheme = InputViewValuePolicy.scheme(view, 0);
         // 粤拼、注音、越南语、藏文和笔画的候选不属于拼音用户词库，不能固定、删除或调整顺序。
         return scheme != 2 && scheme != 3 && scheme != KoreanInputPolicy.KOREAN_SCHEME

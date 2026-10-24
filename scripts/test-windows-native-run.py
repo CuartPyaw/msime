@@ -368,9 +368,6 @@ def build(
         "No such file or directory",
         "Undefined symbols",
         "undefined reference",
-        "undefined symbol:",  # LLD 与 GNU ld 对同一种缺失链接依赖使用不同诊断。
-        # MSVC 的同类诊断：这个原生源文件仍需由 Windows CMake 目标链接系统库。
-        "unresolved external symbol",
     )
     # MSVC 链接器也会把诊断写到 stdout；错误码不受系统显示语言影响。
     diagnostic = compiled.stdout + compiled.stderr
@@ -380,11 +377,15 @@ def build(
         if found:
             return None, f"cannot find {missing.group(1)}, which this repository has at {found}: the include path here is missing its directory"
     if any(marker in diagnostic for marker in ordinary) or re.search(
-        r"\berror LNK(?:2001|2019|1120):", diagnostic
+        r"\berror LNK(?:2001|2019|1120|1561):", diagnostic
     ):
         return None, ""
-    # MSVC 的链接诊断可能本地化且写入 stdout；只识别缺少符号／入口的确定错误码。
-    if re.search(r"\berror LNK(?:2001|2019|1561):", compiled.stdout + compiled.stderr):
+    # LLVM 在 Windows 上的同类链接错误也表示缺少独立翻译单元的依赖。
+    if sys.platform == "win32" and any(
+        line.startswith(("lld-link: error: undefined symbol:",
+                         "lld-link: error: subsystem must be defined"))
+        for line in diagnostic.splitlines()
+    ):
         return None, ""
     if relative in HOST_DIFFERENCES:
         return None, ""
