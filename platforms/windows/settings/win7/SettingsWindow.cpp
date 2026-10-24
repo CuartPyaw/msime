@@ -2126,7 +2126,7 @@ struct SettingsWindow::State {
     layout_body();
     const wchar_t* message = L"读取设置失败，请重新读取后重试。";
     switch (result->outcome) {
-    case Outcome::loaded: message = L"更改会自动保存。"; break;
+    case Outcome::loaded: message = L"设置已就绪。"; break;
     case Outcome::saved: message = L"已保存。"; break;
     case Outcome::conflict: message = L"设置已在其他窗口中更新，已重新读取；本次修改未覆盖其他窗口的设置。"; break;
     case Outcome::invalid_change: message = L"无法修改这个设置，请重新读取后重试。"; break;
