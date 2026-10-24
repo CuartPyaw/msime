@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$Program,
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
-    [switch]$InputOnly
+    [switch]$InputOnly,
+    [switch]$VoiceHotkeyOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -603,6 +604,155 @@ function Select-ComboChoice($window, [string]$id, [string]$label) {
     $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
     $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
 }
+# 仅操作独立合成窗口，验证录键经过原生事件、共享预检及真实偏好保存。
+function Assert-VoiceToggleRecorder($window, [IntPtr]$handle) {
+    function Read-VoiceBinding {
+        $saved = Get-Content -LiteralPath (Join-Path $state 'preferences.json') -Raw | ConvertFrom-Json
+        $field = $saved.preferences.keybindings.PSObject.Properties['toggle_voice_input']
+        if ($field) { return [string]$field.Value }
+        return ''
+    }
+    function Wait-VoiceBinding([string]$expected) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            if ((Read-VoiceBinding) -eq $expected) { return }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        throw "语音绑定保存值不符：期望 $expected，实际 $(Read-VoiceBinding)"
+    }
+    function Wait-VoiceRecorder([string]$expected = '') {
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $button = Find-ById $window 'voice-toggle-recorder'
+            if ($button -and -not $button.Current.IsOffscreen -and $button.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $button.Current.IsEnabled -and
+                (-not $expected -or $button.Current.Name -eq "语音输入开始／结束：$expected")) { return $button }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        $actual = if ($button) { "Name=$($button.Current.Name), Offscreen=$($button.Current.IsOffscreen), Focus=$($button.Current.HasKeyboardFocus)" } else { '控件不存在' }
+        Save-Window $window 'voice-hotkey-failed.png'
+        throw "语音录键控件缺失或显示值不符：期望 $expected，实际 $actual"
+    }
+    function Show-VoiceRecorder {
+        # 滚动是一次准备动作；录键中只读状态，避免 UIA 滚动把焦点从按钮移走并取消录键。
+        $content = Find-ById $window 'settings-content'
+        if ($content) {
+            [object]$scroll = $null
+            if ($content.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$scroll) -and $scroll.Current.VerticallyScrollable) {
+                $scroll.SetScrollPercent(-1, 100)
+            }
+        }
+        return Wait-VoiceRecorder
+    }
+    function Record-VoiceKeys([string]$keys) {
+        $button = Show-VoiceRecorder
+        [SettingsWindowProbe]::SetForegroundWindow($handle) | Out-Null
+        $button.SetFocus()
+        if ([SettingsWindowProbe]::GetForegroundWindow() -ne $handle) { throw '合成设置窗口未获得前台焦点' }
+        $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        Wait-VoiceRecorder '请按组合键…' | Out-Null
+        [System.Windows.Forms.SendKeys]::SendWait($keys)
+    }
+    Open-Page $window 'voice'
+    Select-PageTab $window 'voice-tab-input' '服务配置'
+    Record-VoiceKeys '^%{F8}'
+    Wait-VoiceBinding 'Ctrl+Alt+F8'
+    Show-VoiceRecorder | Out-Null
+    Wait-VoiceRecorder 'Ctrl+Alt+F8' | Out-Null
+    Start-Sleep -Milliseconds 150
+    Save-Window $window 'voice-hotkey-bound.png'
+    Record-VoiceKeys '{ESC}'
+    Wait-VoiceBinding 'Ctrl+Alt+F8'
+    Record-VoiceKeys '^{F9}'
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $conflict = Find-ByName $window '与现有快捷键冲突，请换一个组合键'
+        if ($conflict) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $conflict) { throw '原生录键没有显示固定语音键冲突' }
+    Wait-VoiceBinding 'Ctrl+Alt+F8'
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+    Open-Page $window 'about'
+    Open-Page $window 'voice'
+    Select-PageTab $window 'voice-tab-input' '服务配置'
+    Show-VoiceRecorder | Out-Null
+    Wait-VoiceRecorder 'Ctrl+Alt+F8' | Out-Null
+    Record-VoiceKeys '{BACKSPACE}'
+    Wait-VoiceBinding ''
+    Show-VoiceRecorder | Out-Null
+    Wait-VoiceRecorder '未绑定' | Out-Null
+    Start-Sleep -Milliseconds 150
+    Save-Window $window 'voice-hotkey-cleared.png'
+    Write-Host '语音原生录键、取消、固定键冲突、切页恢复与解绑通过'
+}
+function Assert-SentenceModelSettings($window, [string]$theme) {
+    Open-Page $window 'typing'
+    Select-PageTab $window 'input-tab-candidates' '语法模型'
+    $models = @(
+        @{value = 'wanxiang'; label = '万象 LTS（约 380 MB，CC-BY-4.0）'; pack = 'grammar-model-wanxiang'},
+        @{value = 'baguwen_word'; label = '八股文·词级（约 197 MB，LGPL-3.0）'; pack = 'grammar-model-baguwen'},
+        @{value = 'baguwen_compact'; label = '八股文·词级紧凑（约 39 MB，LGPL-3.0）'; pack = 'grammar-model-baguwen-compact'},
+        @{value = 'none'; label = '不使用'; pack = ''}
+    )
+    $path = Join-Path $state 'preferences.json'
+    foreach ($width in @(1000, 800)) {
+        $handle = [IntPtr]$window.Current.NativeWindowHandle
+        if (-not [SettingsWindowProbe]::SetWindowPos($handle, [IntPtr]::Zero, 0, 0, $width, 780, 0x0040)) { throw 'Model fixture resize failed' }
+        foreach ($model in $models) {
+            # 模型设置在页面底部，必须滚到控件可见再操作和截图。
+            $content = Find-ById $window 'settings-content'
+            $content.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern).SetScrollPercent(-1, 100)
+            Start-Sleep -Milliseconds 250
+            $combo = Find-ById $window 'sentence-grammar-model'
+            if (-not $combo -or $combo.Current.IsOffscreen) { throw 'Grammar model selector is not visible' }
+            $combo.SetFocus()
+            $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+            $deadline = [DateTime]::UtcNow.AddSeconds(10)
+            do {
+                Start-Sleep -Milliseconds 100
+                $item = Find-ByName $combo $model.label
+            } while (-not $item -and [DateTime]::UtcNow -lt $deadline)
+            if (-not $item) { throw "Missing grammar model option: $($model.value)" }
+            # 选择后页面会重建，不再调用旧下拉框的 Collapse。
+            $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+            $ready = $false
+            $deadline = [DateTime]::UtcNow.AddSeconds(10)
+            do {
+                Start-Sleep -Milliseconds 150
+                try {
+                    $saved = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+                    $property = $saved.preferences.sentence_association.PSObject.Properties['grammar_model']
+                    $value = if ($property) { $property.Value } else { 'none' }
+                    $ready = $value -eq $model.value
+                    foreach ($choice in $models) {
+                        if (-not $choice.pack) { continue }
+                        $download = Find-ById $window "sentence-model-download-$($choice.pack)"
+                        if ($choice.pack -eq $model.pack) {
+                            $ready = $ready -and $null -ne $download -and $download.Current.IsEnabled
+                        } else {
+                            $ready = $ready -and $null -eq $download
+                        }
+                    }
+                } catch [System.Windows.Automation.ElementNotAvailableException] {
+                    $ready = $false
+                }
+            } while (-not $ready -and [DateTime]::UtcNow -lt $deadline)
+            if (-not $ready) { throw "Grammar model selection did not save and refresh its download action: $($model.value)" }
+            $content = Find-ById $window 'settings-content'
+            $content.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern).SetScrollPercent(-1, 100)
+            Start-Sleep -Milliseconds 250
+            Save-Window $window "$theme-$width-model-$($model.value).png"
+            # 导航后重新读取持久化值；整个专项不点击下载，不访问模型服务。
+            Open-Page $window 'toolbar'
+            Open-Page $window 'typing'
+            Select-PageTab $window 'input-tab-candidates' '语法模型'
+            $combo = Find-ById $window 'sentence-grammar-model'
+            $selection = @($combo.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection())
+            if ($selection.Count -ne 1 -or $selection[0].Current.Name -ne $model.label) { throw 'Grammar model selection was not retained after navigation' }
+        }
+    }
+    Write-Host "$theme grammar model choices, persisted values and immediate download actions passed"
+}
 function Start-SettingsWindow([string]$route) {
     # 进程先记进脚本作用域的 $process，窗口没打开时 finally 也能把它收掉。
     $script:process = Start-Process -FilePath $programPath -ArgumentList "--route=$route" -PassThru
@@ -723,6 +873,19 @@ function Save-Window($element, [string]$file) {
 try {
     New-Item -ItemType Directory -Force $state | Out-Null
     $env:MSIME_CLIENT_STATE_DIR = $state
+    if ($VoiceHotkeyOnly) {
+        if (-not [SettingsWindowProbe]::SetDllDirectory([IO.Path]::GetDirectoryName($programPath))) { throw 'Settings DLL path could not be set' }
+        $defaults = [SettingsWindowProbe]::DefaultPreferences() | ConvertFrom-Json
+        if (-not $defaults.ok) { throw 'Default preferences could not be loaded' }
+        $document = @{format_version = 1; revision = 1; preferences = $defaults.value}
+        [IO.File]::WriteAllText((Join-Path $state 'preferences.json'), ($document | ConvertTo-Json -Depth 64))
+        $window = Start-SettingsWindow 'settings:voice'
+        Assert-VoiceToggleRecorder $window $process.MainWindowHandle
+        $process.CloseMainWindow() | Out-Null
+        if (-not $process.WaitForExit(10000) -or $process.ExitCode -ne 0) { throw '语音录键验证窗口未正常退出' }
+        $process = $null
+        exit 0
+    }
     New-CanvasPreviewFixture
     if (-not [SettingsWindowProbe]::SetDllDirectory([IO.Path]::GetDirectoryName($programPath))) { throw 'Settings DLL path could not be set' }
     $defaults = [SettingsWindowProbe]::DefaultPreferences() | ConvertFrom-Json
@@ -1100,6 +1263,7 @@ try {
                 }
             }
         }
+        Assert-SentenceModelSettings $window $theme
         # 通过真实单选控件切换方案，再读合成偏好确认保存成功，避免只验证静态页面。方案卡片在「输入方案」标签里。
         Open-Page $window 'typing'
         Select-PageTab $window 'input-tab-scheme' '中文方案'

@@ -732,6 +732,8 @@ impl HostSession {
         options.shuangpin_preedit_uses_raw = preferences.shuangpin_preedit_uses_raw;
         options.single_character_only = preferences.single_character_only;
         options.learning = preferences.learning;
+        options.next_word_prediction =
+            preferences.next_word_prediction && cfg!(target_os = "android");
         options.learn_english_on_enter = preferences.enter_learns_english_word;
         options.autocorrect_transposition = preferences.quanpin.autocorrect_transposition;
         options.autocorrect_neighbor = preferences.quanpin.autocorrect_neighbor;
@@ -811,6 +813,7 @@ impl HostSession {
         apply_punctuation_marks(&mut options, &preferences);
         // 先构建并校验，失败时原会话仍然可用。
         let mut engine = Session::new(&options).map_err(|e| e.to_string())?;
+        engine.set_prediction_allowed(!self.statistics_private);
         // 云候选席位不是 EngineOptions；新引擎默认关闭，每次重建都要恢复当前偏好。
         engine.set_cloud_candidates_enabled(preferences.cloud_candidates);
         engine.set_english_online_candidates_enabled(preferences.english_online_candidates);
@@ -2047,6 +2050,8 @@ impl HostOptions {
             single_character_only: self.preferences.single_character_only,
             learning: self.preferences.learning,
             learn_english_on_enter: self.preferences.enter_learns_english_word,
+            next_word_prediction: self.preferences.next_word_prediction
+                && cfg!(target_os = "android"),
             autocorrect_transposition: self.preferences.quanpin.autocorrect_transposition,
             autocorrect_neighbor: self.preferences.quanpin.autocorrect_neighbor,
             fuzzy_pinyin_rules: self.preferences.fuzzy_pinyin.active_rules(),
@@ -3369,7 +3374,7 @@ const SELECTION_BATCH: u64 = 32;
 #[cfg(test)]
 mod tests;
 
-/// 只看偏好时，运行 `scheme` 的会话以哪种组码网格开始（宿主的 `msime_client_set_key_grid` 和 `msime_client_set_nine_key_mode` 仍可覆盖，但覆盖只对设下它时的方案有效）。Android 双拼看独立的 `touch_shuangpin_layout`，14 键按当前 26 键方案派生；其他宿主保留但忽略这个偏好。全拼看 `touch_keyboard_layout`：九键是九键，14 键是 14 键，九键双拼按 `nine_key_shuangpin_profile` 取表（自定义表不能用时按默认的内置方案）。注音只有九键，还要选了「注音 9 键」触屏方案，这个方案只有 Android 键盘会写：`touch_keyboard_layout` 是所有方案共用的一个字段，桌面宿主为全拼九宫格设它（Linux 的九键开关），那里的注音会话必须留在大千键位，不能继承九宫格。
+/// 只看偏好时，运行 `scheme` 的会话以哪种组码网格开始（宿主的 `msime_client_set_key_grid` 和 `msime_client_set_nine_key_mode` 仍可覆盖，但覆盖只对设下它时的方案有效）。Android 和 iOS 双拼看独立的 `touch_shuangpin_layout`，14 键按当前 26 键方案派生；其他宿主保留但忽略这个偏好。全拼看 `touch_keyboard_layout`：九键是九键，14 键是 14 键，九键双拼按 `nine_key_shuangpin_profile` 取表（自定义表不能用时按默认的内置方案）。注音只有九键，还要选了「注音 9 键」触屏方案，这个方案只有 Android 键盘会写：`touch_keyboard_layout` 是所有方案共用的一个字段，桌面宿主为全拼九宫格设它（Linux 的九键开关），那里的注音会话必须留在大千键位，不能继承九宫格。
 pub(crate) fn layout_key_grid(
     scheme: Option<SchemeType>,
     preferences: &Preferences,
@@ -3382,7 +3387,7 @@ fn layout_key_grid_for(
     scheme: Option<SchemeType>,
     preferences: &Preferences,
 ) -> Option<KeyGrid> {
-    if platform == HostPlatform::Android
+    if matches!(platform, HostPlatform::Android | HostPlatform::Ios)
         && scheme == Some(SchemeType::Shuangpin)
         && preferences.touch_shuangpin_layout == TouchShuangpinLayout::FourteenKey
         && preferences.touch_keyboard_layout != TouchKeyboardLayout::Handwriting

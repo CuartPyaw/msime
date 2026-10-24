@@ -119,8 +119,14 @@ IBus 与 Fcitx5 的专项验收分别是 `ibus-engine-smoke <已验证词库目�
 ```sh
 msime-linux-setup              # 用已备齐的词库准备状态目录
 msime-linux-setup --download   # 允许按随装的词库锁取回缺失词库（首次约 170 MB）
+msime-linux-setup --list-downloads   # 只列出本版本词库的下载地址、大小、SHA-256 和保存目录
 msime-linux-setup --update --download   # 升级之后只取回过期的那几项词库并切换过去
 ```
+
+自动下载缓慢或超时时，可以在首次配置页展开「手动下载词库」，或运行 `msime-linux-setup --list-downloads`。清单来自当前安装包的词库锁，列出全部文件的原地址、当前国内镜像、大小、SHA-256 和默认保存目录；读取清单不联网、不创建目录，也不启动配置。将链接交给浏览器或其他下载工具，按清单中的文件名保存全部文件，再取消页面上的自动下载并点击「开始配置」，或在终端运行不带 `--download` 的 `msime-linux-setup`。如果保存在其他目录，用 `msime-linux-setup --resources /绝对路径` 指向它。已有状态目录仍可查看清单；`--list-downloads --json` 输出相同信息的 JSON，不能与下载、配置或注册选项混用。
+
+首次配置清单的原生窗口回归是 `tests/tools/first-run-downloads-ui.py <CMake安装前缀> <证据目录>`，依赖 `tauri-driver`、`WebKitWebDriver`、`Xvfb` 和 `xclip`。在独立 Xvfb 与 D-Bus 会话中，为 `XDG_CONFIG_HOME`、`XDG_DATA_HOME`、`XDG_CACHE_HOME` 和 `XDG_RUNTIME_DIR` 指向专用测试目录，并把 `MSIME_CLIENT_HOST_OPTIONS` 设为尚不存在的测试状态目录内的 `runtime-options.json`，从安装好的 `msime-linux-settings` 打开窗口。该回归检查真实系统剪贴板，并拒绝已经配置的目录；不下载、配置或注册输入法。
+
 
 它按 `desktop-dictionary.lock.json` 逐个核对词库的名称、大小和 SHA-256，再调用 `msime-linux-prepare` 在 `$XDG_CONFIG_HOME/msime-client`（默认 `~/.config/msime-client`）建立状态并发布 `runtime-options.json`，最后把输入法加入正在运行的 Fcitx5 或 IBus 的输入法列表（见下文）。词库目录按「随包安装的 `${CMAKE_INSTALL_DATADIR}/msime-client/resources` → `$XDG_DATA_HOME/msime-client/resources`」的顺序查找，`--resources` 显式指定优先；状态目录必须尚不存在，已存在时报错而不是覆盖，只有下文的 `--update` 例外。所有需要取回的词库先在同一文件系统的临时目录里下载并逐个校验，全部通过后才改名放进词库目录；校验不过或下载中断就中止，词库目录一个文件都不动，不会留下半份或新旧混杂的词库。锁之外的文件同样报出来，因为宿主会因此拒绝整份词库，而下载补不掉它们，需要用户自己移走。例外是 Engine 的 `helpcodes` 子目录（`crates/client-core/src/resources.rs` 的 `ResourceStore::verify`）。
 

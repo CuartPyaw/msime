@@ -216,6 +216,65 @@ impl PinyinDatabase {
         rows
     }
 
+    /// 上屏后的词库续词：先限定完整读音和汉字前缀，再按权重取未上屏的后缀。只遍历对应的索引范围，不反查整份词库。
+    pub fn query_next_words(&self, word: &str, pinyin: &str, limit: usize) -> Vec<DictRow> {
+        let segments: Vec<String> = pinyin.split('\'').map(str::to_owned).collect();
+        if self.connection.is_none()
+            || !crate::text::is_all_han(word)
+            || segments.len() != word.chars().count()
+            || !has_only_complete_pinyin_segments(&segments)
+            || limit == 0
+        {
+            return Vec::new();
+        }
+        let limit = limit.min(32);
+        let prefix = longer_phrase_prefix(&segments);
+        let upper = key_prefix_upper_bound(&prefix);
+        let initial = segments[0].as_bytes()[0];
+        let mut result = Vec::new();
+        // 编号表之后只有一个溢出桶；同一词面有多条读音时在 LIMIT 前去重，避免吞掉后面的建议。
+        for size in segments.len() + 1..=MAXIMUM_NUMBERED_SYLLABLES.max(segments.len()) + 1 {
+            let Some(table) = quanpin_table(size, initial) else {
+                continue;
+            };
+            let sql = format!(
+                "SELECT MIN(key), value, MAX(weight) FROM \"{table}\" \
+                 WHERE key>=?1 AND key<?2 AND substr(value,1,?3)=?4 \
+                 AND length(value)>?3 GROUP BY value ORDER BY MAX(weight) DESC, value LIMIT ?5"
+            );
+            for mut row in self.rows(
+                &sql,
+                rusqlite::params![
+                    prefix,
+                    upper,
+                    word.chars().count() as i64,
+                    word,
+                    limit as i64
+                ],
+                Some(limit),
+            ) {
+                let Some(suffix) = row.value.strip_prefix(word) else {
+                    continue;
+                };
+                if !crate::text::is_all_han(suffix) {
+                    continue;
+                }
+                row.value = suffix.to_owned();
+                row.key = row.key.strip_prefix(&prefix).unwrap_or_default().to_owned();
+                result.push(row);
+            }
+        }
+        result.sort_by(|left, right| {
+            right
+                .weight
+                .cmp(&left.weight)
+                .then_with(|| left.value.cmp(&right.value))
+        });
+        deduplicate_by_value(&mut result);
+        result.truncate(limit);
+        result
+    }
+
     /// Exact-key batch lookup of complete segmentations, one `IN (...)` statement per table in table-name order, stable-sorted by weight; no value dedup (QQ:1268-1303).
     pub fn query_exact_segmentations_keyed_flat(
         &self,
@@ -1397,6 +1456,51 @@ mod tests {
             .is_empty());
         assert!(database.query_longer_phrases(&segments, 0, 12).is_empty());
         assert!(database.query_longer_phrases(&segments, 3, 0).is_empty());
+    }
+
+    #[test]
+    fn next_word_continuations_filter_han_prefix_before_limiting() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = pinyin_db(
+            directory.path(),
+            &[
+                ("tbl_2_c", "chi'fan", "迟返", 1000),
+                ("tbl_2_c", "chi'fan", "吃饭", 100),
+                ("tbl_2_c", "chi'fan", "吃饭", 50),
+                ("tbl_3_c", "chi'dong'xi", "吃东西", 80),
+                ("tbl_2_c", "chi'hao", "吃好", 70),
+                ("tbl_2_c", "chuan'fan", "吃错", 900),
+                ("tbl_2_c", "chi'fan", "吃", 200),
+            ],
+        );
+        let database = PinyinDatabase::open(&path);
+        let rows = database.query_next_words("吃", "chi", 2);
+        assert_eq!(values(&rows), ["饭", "东西"]);
+        assert_eq!(rows[0].key, "fan");
+        assert_eq!(rows[1].key, "dong'xi");
+        assert!(database.query_next_words("", "chi", 2).is_empty());
+        assert!(database.query_next_words("吃", "ch", 2).is_empty());
+        assert!(database.query_next_words("吃", "chi", 0).is_empty());
+        assert!(database.query_next_words("吃%", "chi", 2).is_empty());
+    }
+
+    #[test]
+    fn next_word_continuations_handle_multi_character_and_supplementary_han() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = pinyin_db(
+            directory.path(),
+            &[
+                ("tbl_3_p", "ping'guo'shu", "苹果树", 100),
+                ("tbl_4_p", "ping'guo'shou'ji", "苹果手机", 90),
+                ("tbl_2_j", "ji'xiang", "𠮷祥", 80),
+            ],
+        );
+        let database = PinyinDatabase::open(&path);
+        assert_eq!(
+            values(&database.query_next_words("苹果", "ping'guo", 8)),
+            ["树", "手机"]
+        );
+        assert_eq!(values(&database.query_next_words("𠮷", "ji", 8)), ["祥"]);
     }
 
     #[test]

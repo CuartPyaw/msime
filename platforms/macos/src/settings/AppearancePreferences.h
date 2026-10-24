@@ -131,6 +131,7 @@ extern BOOL (*MSIMEInputModeEnabledProbe)(NSString *identifier);
 /// 中日英循环切换（共享偏好 `keybindings.trilingual_cycle`，默认关）：打开后「切换中英文」那一组快捷键按 中 → 日 → 英 → 中 转圈。顺序和「有组字时先上屏原始字母」在共享层，见 `crates/client-core/src/language_cycle.rs`。
 @property(nonatomic) BOOL trilingualCycle;
 @property(nonatomic) BOOL shiftTapShortcut;
+@property(nonatomic, readonly) BOOL shiftTapRequiresEditable;
 @property(nonatomic) BOOL controlTapShortcut;
 /// 单按 Caps Lock 切换中英文（共享偏好 `keybindings.switch_language_caps_lock`），缺省为关。
 @property(nonatomic) BOOL capsLockTapShortcut;
@@ -141,6 +142,8 @@ extern BOOL (*MSIMEInputModeEnabledProbe)(NSString *identifier);
 @property(nonatomic, readonly) msime::mac::ToggleChord englishCandidatesToggleChord;
 @property(nonatomic, readonly) msime::mac::ToggleChord fullWidthToggleChord;
 @property(nonatomic, readonly) msime::mac::ToggleChord punctuationToggleChord;
+/// 自定义语音开始／结束热键；缺省不绑定，固定语音键由原有偏好独立控制。
+@property(nonatomic, readonly) msime::mac::ToggleChord voiceInputToggleChord;
 @property(nonatomic) BOOL traditionalOutput;
 @property(nonatomic) BOOL fullWidthInput;
 @property(nonatomic) BOOL chinesePunctuation;

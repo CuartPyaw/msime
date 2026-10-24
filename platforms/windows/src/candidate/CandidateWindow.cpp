@@ -355,7 +355,7 @@ CandidateWindow::CandidateWindow(Reader reader, Click click, unsigned font_size,
                                  std::vector<std::string> fallback_fonts,
                                  std::optional<bool> dark_theme,
                                  bool horizontal, bool show_preedit, Page page,
-                                 Rendered rendered, bool mouse_wheel)
+                                 Rendered rendered, bool mouse_wheel, bool attach_typing_effect)
     : reader_(std::move(reader)), click_(std::move(click)), page_(std::move(page)),
       rendered_(std::move(rendered)),
       font_size_(font_size),
@@ -413,7 +413,8 @@ CandidateWindow::CandidateWindow(Reader reader, Click click, unsigned font_size,
                             nullptr, descriptor.hInstance, this);
   if (!window_)
     throw std::runtime_error("Candidate window unavailable");
-  TypingEffectSignal::instance().attach(window_);
+  if (attach_typing_effect)
+    TypingEffectSignal::instance().attach(window_);
   // 与 macOS 候选窗每个子视图的 accessibilityLabel 对应：读屏通过 UI Automation 读到每行候选、页码、翻页箭头、预编辑和 logo。
   accessible_ = std::make_unique<AccessibleWindow>(window_);
   // 悬停提示，与 macOS 每个候选按钮的 toolTip 对应。建不出来不算候选窗失败，只是没有提示。
@@ -679,6 +680,8 @@ void CandidateWindow::invalidate_geometry() {
     InvalidateRect(window_, nullptr, FALSE);
 }
 void CandidateWindow::hide_now() {
+  if (flyout_) flyout_->hide();
+  menu_target_ = {};
   KillTimer(window_, image_frame_timer);
   image_frames_.stop();
   image_epoch_ = 0;
@@ -1323,8 +1326,14 @@ CandidateWindow::wrap_measure(const CandidatePresentation &value) {
                           width, font_fallback_.Get());
   };
 }
+void CandidateWindow::set_typing_effect_active(bool active) {
+  if (active)
+    TypingEffectSignal::instance().attach(window_);
+  else
+    TypingEffectSignal::instance().detach(window_);
+}
 void CandidateWindow::take_typing_effect() {
-  const std::optional<uint32_t> packed = TypingEffectSignal::instance().take();
+  const std::optional<uint32_t> packed = TypingEffectSignal::instance().take(window_);
   if (!packed)
     return;
   // A 0 decodes to no combo and no flash, which kills both timers below and clears a count still on the card.
@@ -2843,6 +2852,11 @@ LRESULT CALLBACK CandidateWindow::procedure(HWND window, UINT message,
       case WM_CANCELMODE:
       case WM_CAPTURECHANGED:
       case WM_MOUSELEAVE:
+        // 失焦时同步关闭非模态菜单，旧候选的文字和操作不能留在原桌面上。
+        if (message == WM_CANCELMODE) {
+          if (self->flyout_) self->flyout_->hide();
+          self->menu_target_ = {};
+        }
         // 拖滚动条时指针可以离开卡片，捕获还在就接着拖，只收起悬停。
         if (message == WM_MOUSELEAVE && self->thumb_grab_ && GetCapture() == window) {
           self->hovered_cell_.reset();

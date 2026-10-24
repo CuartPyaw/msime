@@ -846,7 +846,7 @@ int main(int argc, char **argv) {
       const auto conflicting_snapshot = load_snapshot(conflicting.dump());
       {
         FocusGate maintenance_gate;
-        InputQueue maintenance_queue(maintenance_gate, 1, 2, options.dump());
+        InputQueue maintenance_queue(maintenance_gate, 2, 2, options.dump());
         PipeTicket maintenance_ticket{314, {41, 42, 43}};
         auto maintenance = maintenance_queue.submit(
             [&](InputState &state) {
@@ -854,9 +854,22 @@ int main(int argc, char **argv) {
                       "Maintenance preference client failed");
               require(state.quiesce_dictionaries() == 1,
                       "Maintenance did not release the session");
+              // 新窗口或新线程在维护期间接入，不能重新持有共享词库锁。
+              PipeTicket arriving{315, {44, 45, 46}};
+              require(state.connected(arriving).accepted,
+                      "Maintenance rejected a new connection");
+              require(state.quiesce_dictionaries() == 0,
+                      "Connection recreated a session during maintenance");
+              arriving.generations = {47, 48, 49};
+              require(state.connected(arriving).accepted,
+                      "Maintenance rejected a reconnection");
+              require(state.quiesce_dictionaries() == 0,
+                      "New connection reacquired a dictionary session");
               state.publish_preferences(latest_snapshot);
-              require(state.resume_dictionaries() == 1,
+              require(state.resume_dictionaries() == 2,
                       "Maintenance did not rebuild the session");
+              require(state.resume_dictionaries() == 0,
+                      "Repeated resume rebuilt existing sessions");
             });
         require(maintenance && maintenance->get() == InputTaskStatus::Completed,
                 "Preference publication during maintenance failed");

@@ -25,7 +25,7 @@ fn touch_shuangpin_layout_defaults_persists_and_rejects_unsupported_layouts() {
     };
     store.save(0, configured.clone()).unwrap();
     assert_eq!(store.load().unwrap().preferences, configured);
-    let mut invalid = legacy;
+    let mut invalid = legacy.clone();
     invalid["touch_shuangpin_layout"] = "nine_key".into();
     assert!(serde_json::from_value::<Preferences>(invalid).is_err());
     let mut malformed = legacy;
@@ -2948,8 +2948,10 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
     assert_eq!(
         store.load().unwrap().preferences.mixed_input,
         MixedInputPreferences {
+            enabled: true,
             english: false,
             minimum_prefix: 3,
+            first_page_count: 1,
             emoji: true,
             kaomoji: true,
             japanese: false,
@@ -2962,6 +2964,7 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
     for mask in 0..32 {
         let preferences = Preferences {
             mixed_input: MixedInputPreferences {
+                enabled: true,
                 english: mask & 1 != 0,
                 emoji: mask & 2 != 0,
                 kaomoji: mask & 4 != 0,
@@ -2970,6 +2973,7 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
                 quick_phrase: true,
                 quick_phrase_frequency: true,
                 minimum_prefix: mask % 8 + 1,
+                first_page_count: 1,
             },
             ..Preferences::default()
         };
@@ -7385,4 +7389,69 @@ fn sentence_collocation_tuning_rejects_non_finite_values() {
             "{key}"
         );
     }
+}
+
+#[test]
+fn text_edit_button_order_round_trips_and_restores_defaults() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(directory.path());
+    let mut preferences = store.load().unwrap().preferences;
+    assert_eq!(
+        preferences.touch_text_edit_button_order,
+        default_text_edit_button_order()
+    );
+    preferences.touch_text_edit_button_order.reverse();
+    let expected = preferences.touch_text_edit_button_order.clone();
+    let saved = store.save(0, preferences).unwrap();
+    assert_eq!(
+        store
+            .load()
+            .unwrap()
+            .preferences
+            .touch_text_edit_button_order,
+        expected
+    );
+    assert_eq!(
+        store
+            .restore_defaults(saved.revision)
+            .unwrap()
+            .preferences
+            .touch_text_edit_button_order,
+        default_text_edit_button_order()
+    );
+    let mut old_document = serde_json::to_value(Preferences::default()).unwrap();
+    old_document
+        .as_object_mut()
+        .unwrap()
+        .remove("touch_text_edit_button_order");
+    let old: Preferences = serde_json::from_value(old_document).unwrap();
+    assert_eq!(
+        old.touch_text_edit_button_order,
+        default_text_edit_button_order()
+    );
+}
+
+#[test]
+fn text_edit_button_order_rejects_missing_duplicate_and_unknown_actions() {
+    let directory = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(directory.path());
+    for order in [
+        vec![],
+        vec![TextEditButton::Copy; 7],
+        default_text_edit_button_order()[..6].to_vec(),
+    ] {
+        let preferences = Preferences {
+            touch_text_edit_button_order: order,
+            ..Preferences::default()
+        };
+        assert!(matches!(
+            store.save(0, preferences),
+            Err(PreferencesError::InvalidTextEditButtonOrder)
+        ));
+        assert_eq!(store.load().unwrap().revision, 0);
+    }
+    let mut unknown = serde_json::to_value(Preferences::default()).unwrap();
+    unknown["touch_text_edit_button_order"][6] = serde_json::json!("return");
+    let error = serde_json::from_value::<Preferences>(unknown).unwrap_err();
+    assert!(error.to_string().contains("unknown variant `return`"));
 }

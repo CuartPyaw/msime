@@ -29,7 +29,7 @@ public final class ExpressionPage extends ReloadingDetailPage {
     private static final int DISCOVER_LIMIT = 8;
     private static final String[] SENTENCE_LABELS = {"关闭", "标准", "增强"};
     private static final String SENTENCE_DESCRIPTION =
-        "输入多音节拼音时组合整句候选；标准使用词库，增强增加神经模型重排。上屏后不推荐下一个词";
+        "输入多音节拼音时组合整句候选；标准使用词库，增强增加神经模型重排。下一词推荐由「上屏后联想」单独控制";
     /** 共享偏好 `quote_style` 的取值与显示文字，缺省（文档里没有这个键）是弯引号。 */
     private static final String[] QUOTE_STYLES = {"curly", "corner", "corner_when_traditional"};
     private static final String[] QUOTE_STYLE_LABELS = {"弯引号 “ ” ‘ ’", "直角引号 「 」『 』", "繁体输出时用直角引号"};
@@ -128,6 +128,9 @@ public final class ExpressionPage extends ReloadingDetailPage {
         GroupCard intelligence = GroupCard.add(sectionColumn(target, "智能"), "智能");
         int sentence = sentenceLevel(values.optJSONObject("sentence_association"));
         intelligence.nav("整句候选", SENTENCE_DESCRIPTION, SENTENCE_LABELS[sentence], () -> pickSentence(sentence));
+        intelligence.toggle("上屏后联想", "选词上屏后推荐后续文字，点选才上屏；使用现有词库，开启学习时也参考个人词序，隐私输入不显示",
+            values.optBoolean("next_word_prediction", false),
+            checked -> savePreferences(edit -> edit.put("next_word_prediction", checked)));
         InputFeatureToggle english = InputFeatureToggle.ENGLISH_SUGGESTIONS;
         intelligence.toggle(english.title(), english.description(),
             values.optBoolean(english.key(), english.enabledByDefault()),

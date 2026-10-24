@@ -269,6 +269,7 @@ fn local_mode_resource_gates_preserve_unrelated_modes() {
         single_character_only: false,
         learning: false,
         learn_english_on_enter: true,
+        next_word_prediction: false,
         autocorrect_transposition: false,
         autocorrect_neighbor: false,
         fuzzy_pinyin_rules: 0,
@@ -3137,7 +3138,10 @@ fn fourteen_key_grid_crosses_the_host_boundary() {
     let handle = test_host(dir.path());
     read(msime_client_focus(handle, true));
     assert_eq!(read(msime_client_view(handle))["value"]["key_grid"], "none");
-    assert_eq!(read(msime_client_set_key_grid(handle, 4))["ok"], false);
+    assert_eq!(
+        read(msime_client_set_key_grid(handle, u8::MAX))["ok"],
+        false
+    );
     assert_eq!(read(msime_client_view(handle))["value"]["key_grid"], "none");
     let enabled = read(msime_client_set_key_grid(handle, 2));
     assert_eq!(enabled["value"]["key_grid"], "fourteen_key");
@@ -3329,7 +3333,7 @@ fn check_fourteen_key_selection_retreat(shuangpin: bool) {
 }
 
 #[test]
-fn fourteen_key_shuangpin_preference_is_only_applied_by_android() {
+fn fourteen_key_shuangpin_preference_is_applied_by_touch_hosts() {
     let preferences = Preferences {
         scheme: InputScheme::Shuangpin,
         touch_shuangpin_layout: TouchShuangpinLayout::FourteenKey,
@@ -3346,7 +3350,7 @@ fn fourteen_key_shuangpin_preference_is_only_applied_by_android() {
         let grid = layout_key_grid_for(platform, Some(SchemeType::Shuangpin), &preferences);
         assert_eq!(
             grid.is_some(),
-            platform == HostPlatform::Android,
+            matches!(platform, HostPlatform::Android | HostPlatform::Ios),
             "{platform:?}"
         );
     }
@@ -3363,7 +3367,10 @@ fn fourteen_key_shuangpin_layout_tracks_profile_changes_and_preserves_hardware_i
     };
     let handle = test_host_with_pinyin_fixture(dir.path(), preferences.clone());
     read(msime_client_focus(handle, true));
-    let automatic_grid = if ffi::host::compiled_platform() == HostPlatform::Android {
+    let automatic_grid = if matches!(
+        ffi::host::compiled_platform(),
+        HostPlatform::Android | HostPlatform::Ios
+    ) {
         "fourteen_key"
     } else {
         "none"
@@ -15873,6 +15880,71 @@ fn pronunciation_request_reads_the_table_beside_resources() {
 }
 
 #[test]
+fn pronunciation_request_falls_back_to_explicit_bundled_table() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("state/generation");
+    let supplementary = root.path().join("bundle/Contents/Resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    let install = |directory: &std::path::Path, reading: &str| {
+        std::fs::create_dir_all(directory).unwrap();
+        let database = rusqlite::Connection::open(directory.join("en-phonetic.db")).unwrap();
+        database
+            .execute_batch(
+                "CREATE TABLE en_phonetics(word TEXT PRIMARY KEY, phonetic TEXT NOT NULL) WITHOUT ROWID;
+                 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+                 INSERT INTO meta VALUES('kind', 'en_phonetic');
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        database
+            .execute("INSERT INTO en_phonetics VALUES('sky', ?1)", [reading])
+            .unwrap();
+    };
+    install(&supplementary.join("pronunciations"), "skaɪ");
+    let call = |request: Value| {
+        let request = serde_json::to_vec(&request).unwrap();
+        let resources = resources.to_str().unwrap();
+        read(unsafe {
+            msime_client_pronunciation_request(
+                request.as_ptr(),
+                request.len(),
+                resources.as_ptr(),
+                resources.len(),
+            )
+        })
+    };
+    let base = json!({"generation": 9, "items": [{"text": "sky", "language": "en"}]});
+    assert_eq!(call(base.clone())["value"]["pronunciations"], json!([]));
+    let mut request = base.clone();
+    request["supplementary_resources"] = json!(supplementary);
+    let result = call(request.clone());
+    assert_eq!(
+        result["ok"], true,
+        "包内音标表必须能作为旧资源目录的显式回退：{result}"
+    );
+    assert_eq!(
+        result["value"],
+        json!({"generation": 9, "pronunciations": [
+            {"text": "sky", "language": "en", "pronunciation": "/skaɪ/"}
+        ]})
+    );
+    // 活动资源旁的表优先，显式补充目录不能覆盖它。
+    install(&root.path().join("state/pronunciations"), "skaɪ primary");
+    assert_eq!(
+        call(request.clone())["value"]["pronunciations"][0]["pronunciation"],
+        "/skaɪ primary/"
+    );
+    for invalid in [
+        "relative/resources".to_string(),
+        String::new(),
+        "/".repeat(4097),
+    ] {
+        request["supplementary_resources"] = json!(invalid);
+        assert_eq!(call(request.clone())["ok"], false);
+    }
+}
+
+#[test]
 fn english_glosses_fill_single_characters_from_the_character_table() {
     let root = tempfile::tempdir().unwrap();
     let resources = root.path().join("generation");
@@ -18172,6 +18244,7 @@ fn voice_capture_device_export_lists_wasapi_endpoints_on_windows_only() {
 }
 
 mod fuzzy_single;
+mod initial_learning;
 mod lifecycle_traces;
 #[cfg(any(
     target_os = "macos",

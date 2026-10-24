@@ -5965,6 +5965,8 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             linux_setup::linux_setup_status,
             #[cfg(target_os = "linux")]
+            linux_setup::linux_dictionary_downloads,
+            #[cfg(target_os = "linux")]
             linux_setup::run_linux_setup,
             #[cfg(target_os = "linux")]
             linux_setup::run_linux_dictionary_update,

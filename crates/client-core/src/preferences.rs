@@ -106,6 +106,25 @@ pub enum NumberKeypadOrder {
     Calculator,
 }
 
+/// 文本编辑面板可排序的侧边动作；方向、选择、文档边界与换行固定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextEditButton {
+    Copy,
+    Paste,
+    SelectAll,
+    Cut,
+    Space,
+    NumberPad,
+    Delete,
+}
+
+/// 从左列上到下，再到右列前三格；换行固定在右下角。
+pub fn default_text_edit_button_order() -> Vec<TextEditButton> {
+    use TextEditButton::*;
+    vec![Copy, Paste, SelectAll, Cut, Space, NumberPad, Delete]
+}
+
 /// 触屏 26 键按「123」切到的数字层。桌面宿主原样保留、不使用。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -1131,6 +1150,9 @@ pub struct Preferences {
     /// its model is installed.
     #[serde(default)]
     pub sentence_association: SentenceAssociationPreferences,
+    /// 上屏后推荐下一词；Android 原生键盘提供入口，独立于整句候选，默认关闭。
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub next_word_prediction: bool,
     #[serde(default)]
     pub custom_translation: CustomTranslationPreferences,
     #[serde(default)]
@@ -1232,7 +1254,7 @@ pub struct Preferences {
     /// Android 大屏竖屏也使用分离键盘；还需宿主的分离主开关开启，默认关闭。其他宿主原样保留。
     #[serde(default)]
     pub touch_keyboard_split_portrait: bool,
-    /// Android 双拼键盘的 26 / 14 键选择；默认 26 键，其他宿主保留该字段。
+    /// Android 和 iOS 双拼键盘的 26 / 14 键选择；默认 26 键，其他宿主保留该字段。
     #[serde(default, skip_serializing_if = "TouchShuangpinLayout::is_default")]
     pub touch_shuangpin_layout: TouchShuangpinLayout,
     /// 触屏键盘列出哪些方案、选中哪一个；桌面宿主原样保留、不使用。
@@ -1255,6 +1277,9 @@ pub struct Preferences {
     /// 九宫格数字层按电话还是计算器排列；字母层不受影响。
     #[serde(default)]
     pub touch_number_keypad_order: NumberKeypadOrder,
+    /// Android 文本编辑面板七个侧边动作的完整排列；其他宿主保留但不使用。
+    #[serde(default = "default_text_edit_button_order")]
+    pub touch_text_edit_button_order: Vec<TextEditButton>,
     /// 26 键按「123」时出一行 1 到 0 的数字符号页，还是九宫格那样的 3×3 数字层。
     #[serde(default)]
     pub touch_twenty_six_key_number_layout: TwentySixKeyNumberLayout,
@@ -2647,6 +2672,9 @@ impl Default for NavigationPreferences {
 pub struct KeybindingPreferences {
     #[serde(default = "enabled_by_default")]
     pub switch_language_shift: bool,
+    /// macOS 单按 Shift 只在可确认的可编辑焦点生效；依赖辅助功能权限，默认关闭。
+    #[serde(default)]
+    pub switch_language_shift_requires_editable: bool,
     #[serde(default)]
     pub switch_language_ctrl: bool,
     /// Linux 已默认处理这个组合键；关闭时交还应用，不改输入法框架的全局绑定。
@@ -2686,6 +2714,9 @@ pub struct KeybindingPreferences {
         skip_serializing_if = "is_default_toggle_punctuation"
     )]
     pub toggle_punctuation: String,
+    /// 额外的语音开始／结束热键；空串表示不绑定，不改变既有固定语音快捷键。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub toggle_voice_input: String,
 }
 
 /// 三个切换热键的出厂值，沿用旧版 Windows v0.11.1 `engine/contracts/input_state_shortcuts.h` 的 `defaultBinding`。
@@ -2708,6 +2739,11 @@ impl KeybindingPreferences {
     pub fn punctuation_chord(&self) -> Option<crate::key_chord::KeyChord> {
         toggle_chord(&self.toggle_punctuation)
     }
+
+    /// 自定义语音切换键；空串或非法写法为 `None`。
+    pub fn voice_input_chord(&self) -> Option<crate::key_chord::KeyChord> {
+        toggle_chord(&self.toggle_voice_input)
+    }
 }
 
 /// 「不绑定」在文档里存成空串而不是缺键：缺键读回出厂值，空串才留在「不绑定」。
@@ -2720,7 +2756,7 @@ fn toggle_chord(text: &str) -> Option<crate::key_chord::KeyChord> {
     }
 }
 
-/// 三个可重绑切换热键之一。
+/// 可重绑切换热键之一。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToggleHotkeySlot {
     /// `keybindings.toggle_english_candidates`。
@@ -2732,6 +2768,9 @@ pub enum ToggleHotkeySlot {
     /// `keybindings.toggle_punctuation`。
     #[serde(rename = "toggle_punctuation")]
     Punctuation,
+    /// `keybindings.toggle_voice_input`。
+    #[serde(rename = "toggle_voice_input")]
+    VoiceInput,
 }
 
 /// 一个组合键已被谁占用：另一个切换热键，或某个开关随附的快捷键 / macOS 维护键。
@@ -2740,6 +2779,7 @@ pub enum ToggleChordOwner {
     EnglishCandidates,
     FullWidth,
     Punctuation,
+    VoiceInput,
     /// `keybindings.switch_language_shift` 打开时 macOS 同时启用 `Shift+Space`。
     SwitchLanguageShift,
     /// `keybindings.switch_language_ctrl_space` 打开时的 `Ctrl+Space`。
@@ -2767,6 +2807,7 @@ impl ToggleChordOwner {
             Self::EnglishCandidates => "toggle_english_candidates",
             Self::FullWidth => "toggle_full_width",
             Self::Punctuation => "toggle_punctuation",
+            Self::VoiceInput => "toggle_voice_input",
             Self::SwitchLanguageShift => "switch_language_shift",
             Self::SwitchLanguageCtrlSpace => "switch_language_ctrl_space",
             Self::SwitchLanguageCtrlAltSpace => "switch_language_ctrl_alt_space",
@@ -2795,8 +2836,8 @@ pub enum ToggleHotkeyRejection {
 }
 
 impl KeybindingPreferences {
-    /// 三个切换热键的槽位与当前 chord：空串或非法写法为 `None`（不绑定）。
-    fn toggle_chords(&self) -> [(ToggleHotkeySlot, Option<crate::key_chord::KeyChord>); 3] {
+    /// 切换热键的槽位与当前 chord：空串或非法写法为 `None`（不绑定）。
+    fn toggle_chords(&self) -> [(ToggleHotkeySlot, Option<crate::key_chord::KeyChord>); 4] {
         [
             (
                 ToggleHotkeySlot::EnglishCandidates,
@@ -2804,6 +2845,7 @@ impl KeybindingPreferences {
             ),
             (ToggleHotkeySlot::FullWidth, self.full_width_chord()),
             (ToggleHotkeySlot::Punctuation, self.punctuation_chord()),
+            (ToggleHotkeySlot::VoiceInput, self.voice_input_chord()),
         ]
     }
 
@@ -2909,6 +2951,7 @@ impl KeybindingPreferences {
                         ToggleHotkeySlot::EnglishCandidates => ToggleChordOwner::EnglishCandidates,
                         ToggleHotkeySlot::FullWidth => ToggleChordOwner::FullWidth,
                         ToggleHotkeySlot::Punctuation => ToggleChordOwner::Punctuation,
+                        ToggleHotkeySlot::VoiceInput => ToggleChordOwner::VoiceInput,
                     },
                     chord,
                 });
@@ -2922,12 +2965,13 @@ impl KeybindingPreferences {
         Ok(chord.to_string())
     }
 
-    /// 三个切换热键的写法归一成规范形；不是 chord 的原样留下，交给 `Preferences::validate` 拒绝。
+    /// 切换热键的写法归一成规范形；不是 chord 的原样留下，交给 `Preferences::validate` 拒绝。
     pub fn normalize_toggle_hotkeys(&mut self) {
         for text in [
             &mut self.toggle_english_candidates,
             &mut self.toggle_full_width,
             &mut self.toggle_punctuation,
+            &mut self.toggle_voice_input,
         ] {
             if let Ok(chord) = text.trim().parse::<crate::key_chord::KeyChord>() {
                 *text = chord.to_string();
@@ -2940,6 +2984,7 @@ impl Default for KeybindingPreferences {
     fn default() -> Self {
         Self {
             switch_language_shift: true,
+            switch_language_shift_requires_editable: false,
             switch_language_ctrl: false,
             switch_language_ctrl_space: true,
             switch_language_ctrl_alt_space: true,
@@ -2951,6 +2996,7 @@ impl Default for KeybindingPreferences {
             toggle_english_candidates: default_toggle_english_candidates(),
             toggle_full_width: default_toggle_full_width(),
             toggle_punctuation: default_toggle_punctuation(),
+            toggle_voice_input: String::new(),
         }
     }
 }
@@ -3154,6 +3200,7 @@ impl Default for Preferences {
             vim_mode_apps: Vec::new(),
             ai_assistant: AiAssistantPreferences::default(),
             sentence_association: SentenceAssociationPreferences::default(),
+            next_word_prediction: false,
             custom_translation: CustomTranslationPreferences::default(),
             tencent_tmt: TencentTmtPreferences::default(),
             niutrans: NiuTransPreferences::default(),
@@ -3202,6 +3249,7 @@ impl Default for Preferences {
             touch_keyboard_height_adjustment: 0,
             touch_voice_shortcut: false,
             touch_number_keypad_order: NumberKeypadOrder::default(),
+            touch_text_edit_button_order: default_text_edit_button_order(),
             touch_twenty_six_key_number_layout: TwentySixKeyNumberLayout::default(),
             touch_shuangpin_key_hints: false,
             touch_japanese_toggle_input: true,
@@ -3935,6 +3983,14 @@ impl Preferences {
     }
 
     pub fn validate(&self) -> Result<(), PreferencesError> {
+        let expected = default_text_edit_button_order();
+        if self.touch_text_edit_button_order.len() != expected.len()
+            || !expected
+                .iter()
+                .all(|button| self.touch_text_edit_button_order.contains(button))
+        {
+            return Err(PreferencesError::InvalidTextEditButtonOrder);
+        }
         for helpcode in [&self.quanpin_helpcode, &self.shuangpin_helpcode] {
             if !matches!(
                 helpcode.trigger_key.as_str(),
@@ -4137,7 +4193,7 @@ impl Preferences {
         if self.word_character.enabled && paging {
             return Err(PreferencesError::ConflictingKeyBindings);
         }
-        // 三个切换热键两两不同，且不占已被其他开关认走的组合键。保留表随各开关开合：开关关掉时组合键已经还给应用，绑给它不冲突。占用表的完整说明见 `KeybindingPreferences::occupied_toggle_chords`，设置页的录键试写走同一个表。
+        // 切换热键两两不同，且不占已被其他开关认走的组合键。保留表随各开关开合：开关关掉时组合键已经还给应用，绑给它不冲突。占用表的完整说明见 `KeybindingPreferences::occupied_toggle_chords`，设置页的录键试写走同一个表。
         let keybindings = &self.keybindings;
         let occupied: Vec<crate::key_chord::KeyChord> = keybindings
             .occupied_toggle_chords(self.voice_input.hotkey_ctrl_f9)
@@ -4149,6 +4205,7 @@ impl Preferences {
             &keybindings.toggle_english_candidates,
             &keybindings.toggle_full_width,
             &keybindings.toggle_punctuation,
+            &keybindings.toggle_voice_input,
         ] {
             if text.trim().is_empty() {
                 continue;
@@ -4195,6 +4252,8 @@ impl PreferencesSnapshot {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PreferencesError {
+    #[error("text edit button order must contain each of the seven side actions once")]
+    InvalidTextEditButtonOrder,
     #[error("辅助码触发键必须为空或 ; / \\ ` = 中的一个标点")]
     InvalidHelpcodeTriggerKey,
     #[error("五笔二三候选键必须是两个不同的单个 ASCII 标点")]

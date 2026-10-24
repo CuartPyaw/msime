@@ -27,45 +27,11 @@ import { GroupList, Row } from "../core/platform-controls";
 import { SelectRow } from "../settings/select-row";
 import { SliderRow } from "../settings/slider-row";
 import { SwitchRow } from "../settings/switch-row";
+import { CheckGlyph } from "../core/check-glyph";
+import { ChevronGlyph } from "../core/chevron-glyph";
 import { RgbColorRow } from "../settings/rgb-color-row";
 
 type Category = "背景" | "按键" | "文本" | "设计" | "我的";
-
-function CheckGlyph() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="3"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="m5 12.5 4.5 4.5L19 7.5" />
-    </svg>
-  );
-}
-
-function ChevronGlyph() {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      <path d="m9 6 6 6-6 6" />
-    </svg>
-  );
-}
 
 const percent = (value: number) => `${Math.round(value * 100)}%`;
 
@@ -284,7 +250,7 @@ export function TouchKeyboardSkinEditor({
                 <strong>AI 皮肤抽卡</strong>
                 <small>一次抽三款原创皮肤，喜欢就留下</small>
               </span>
-              <ChevronGlyph />
+              <ChevronGlyph size={16} />
             </>
           }
         />

@@ -551,6 +551,7 @@ export {
   LinuxSetupPage,
   nextSetupProgress,
   type LinuxSetupClient,
+  type LinuxDictionaryDownloads,
   type LinuxSetupLine,
   type LinuxSetupRegistration,
   type LinuxSetupStage,
@@ -1573,6 +1574,15 @@ export {
 } from "./settings/settings-input-description";
 export { SettingsWarning, type SettingsWarningProps } from "./settings/settings-warning";
 export { ErrorAlert, type ErrorAlertProps } from "./core/error-alert";
+export { CheckGlyph, type CheckGlyphProps } from "./core/check-glyph";
+export {
+  ChevronGlyph,
+  type ChevronGlyphProps,
+  type ChevronGlyphVariant,
+} from "./core/chevron-glyph";
+export { SearchGlyph, type SearchGlyphProps } from "./core/search-glyph";
+export { CloseGlyph, type CloseGlyphProps } from "./core/close-glyph";
+export { PlusGlyph, type PlusGlyphProps, type PlusGlyphVariant } from "./core/plus-glyph";
 export { formatDateTime, formatZhDate, formatZhMonthDay } from "./core/format-date";
 export { formatZhNumber, formatZhPercent } from "./core/format-number";
 export { StatusMessage, type StatusMessageProps } from "./core/status-message";

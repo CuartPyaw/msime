@@ -410,6 +410,12 @@ public final class ClipboardSegmentDragDeviceSmoke extends DeviceSmoke {
         SystemClock.sleep(200);
         card.refresh();
         assertFixedCard(card);
+        stage = "vertical drag inside a fixed card does not insert it";
+        await(field("msime-test-plain").and(node -> node.isShowingHintText()
+            || node.getText() == null || node.getText().length() == 0));
+        card = await(node -> node.isLongClickable() && node.isVisibleToUser()
+            && node.getText() != null && node.getText().toString().startsWith(word(0)));
+        card.getBoundsInScreen(bounds);
         stage = "horizontal delete still works after vertical drag";
         // 纵向手势会交给外层列表；横滑前重新定位卡片，不能复用滚动前的坐标。
         card.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());

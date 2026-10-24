@@ -33,6 +33,7 @@ STDAPI CKeyHandlerEditSession::DoEditSession(TfEditCookie ec)
         {
             if (textService && token != 0)
             {
+                if (textService->_FinishWubiLocalEdit(token, applied)) return;
                 if (applied)
                 {
                     textService->_CompleteDeferredKeyReplay(token);

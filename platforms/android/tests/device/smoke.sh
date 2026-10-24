@@ -11,6 +11,7 @@ statistics=false
 core=false
 feedback=false
 diagnostics=false
+text_edit_layout=false
 for option in "${@:2}"; do
   case "$option" in
     # --core 跑安装、词库准备、打字主路径及剪贴板保存生命周期；其余键盘套件在 API 28 上仍不支持。
@@ -20,7 +21,8 @@ for option in "${@:2}"; do
     --statistics) statistics=true ;;
     --feedback) feedback=true ;;
     --diagnostics) diagnostics=true ;;
-    *) echo "usage: smoke.sh [emulator-5580] [--core] [--settings] [--handwriting] [--statistics] [--feedback] [--diagnostics]" >&2; exit 1 ;;
+    --text-edit-layout) text_edit_layout=true ;;
+    *) echo "usage: smoke.sh [emulator-5580] [--core] [--settings] [--handwriting] [--statistics] [--feedback] [--diagnostics] [--text-edit-layout]" >&2; exit 1 ;;
   esac
 done
 [[ "$serial" == emulator-* ]] || { echo "Only the dedicated emulator is supported" >&2; exit 1; }
@@ -99,6 +101,12 @@ run_instrumentation() {
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.DeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "System input acceptance failed" >&2; exit 1; }
+if [[ "$text_edit_layout" == true ]]; then
+  result=$(run_instrumentation app.msime.android.test/app.msime.android.test.TextEditRecentClipboardDeviceSmoke -e layout-only true)
+  printf '%s\n' "$result"
+  [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Text edit layout acceptance failed" >&2; exit 1; }
+  exit 0
+fi
 if [[ "$core" != true ]]; then
   result=$(run_instrumentation app.msime.android.test/app.msime.android.test.ChineseLanguageReturnDeviceSmoke -e japanese-toggle true)
   printf '%s\n' "$result"
@@ -157,6 +165,10 @@ printf '%s\n' "$result"
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.StaleCandidateDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Stale candidate callback acceptance failed" >&2; exit 1; }
+# 空闲联想只在点选时上屏，自己的选区回声保留候选，外部移动和隐私模式清除候选。
+result=$(run_instrumentation app.msime.android.test/app.msime.android.test.StaleCandidateDeviceSmoke -e next-word true)
+printf '%s\n' "$result"
+[[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Next word prediction acceptance failed" >&2; exit 1; }
 # 横向候选条不展开也能越过分页和分批边界，左右返回后按全局身份选词。
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.CandidatePanelDeviceSmoke -e continuous-strip true)
 printf '%s\n' "$result"
@@ -373,6 +385,10 @@ printf '%s\n' "$result"
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.LetterHintPunctuationDeviceSmoke -e english-hold true)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "English letter hold acceptance failed" >&2; exit 1; }
+# 英文三排角标在两种方向上均应上屏，包含 D、X、C 的非 ASCII 符号。
+result=$(run_instrumentation app.msime.android.test/app.msime.android.test.LetterHintPunctuationDeviceSmoke -e english-swipe true)
+printf '%s\n' "$result"
+[[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "English symbol swipe acceptance failed" >&2; exit 1; }
 if [[ "$settings" == true ]]; then
   for suite in OptionSheetDeviceSmoke SettingsDeviceSmoke SettingsLifecycleSmoke AccountStorageDeviceSmoke CloudClipboardKeystoreDeviceSmoke CloudClipboardDriverDeviceSmoke CloudClipboardRelayDeviceSmoke; do
     result=$("$adb" -s "$serial" shell am instrument -w "app.msime.android.test/app.msime.android.test.$suite")

@@ -374,8 +374,12 @@ char *msime_client_touch_quick_symbols(const uint8_t *value, size_t length);
  * Creates the directory/lock file if absent, never overwrites preference contents.
  */
 char *msime_client_load_preferences(const uint8_t *directory, size_t length);
-/* 三个可重绑切换热键（keybindings.toggle_english_candidates、toggle_full_width、toggle_punctuation）按共享 KeyChord 契约解码。请求是 JSON {"keybindings": object}（<=65536 字节）；keybindings 缺省或为 null 时按出厂值，不是 object 时返回错误。value 是 {"english_candidates","full_width","punctuation"}，每项是 null（写法为空或不合法：不绑定）或 {"key": 主键规范名, "ctrl": bool, "alt": bool, "shift": bool, "meta": bool}；规范名是 client-core KeyChord 的 Display 输出（KeyA-KeyZ、Digit0-Digit9、F1-F12、Space、Semicolon、Equal、Comma、Minus、Period、Slash、Backquote、BracketLeft、Backslash、BracketRight、Quote），宿主按规范名认键，写法的解析只在 Rust 一侧。结果用 msime_client_string_free 释放。 */
+/* 可重绑切换热键（keybindings.toggle_english_candidates、toggle_full_width、toggle_punctuation、toggle_voice_input）按共享 KeyChord 契约解码。请求是 JSON {"keybindings": object}（<=65536 字节）；keybindings 缺省或为 null 时按出厂值，不是 object 时返回错误。value 是 {"english_candidates","full_width","punctuation","voice_input"}，每项是 null（写法为空或不合法：不绑定）或 {"key": 主键规范名, "ctrl": bool, "alt": bool, "shift": bool, "meta": bool}；规范名是 client-core KeyChord 的 Display 输出（KeyA-KeyZ、Digit0-Digit9、F1-F12、Space、Semicolon、Equal、Comma、Minus、Period、Slash、Backquote、BracketLeft、Backslash、BracketRight、Quote），宿主按规范名认键，写法的解析只在 Rust 一侧。结果用 msime_client_string_free 释放。 */
 char *msime_client_toggle_hotkey_chords(const uint8_t *request, size_t length);
+// 录键试写：{"field": 槽位, "chord": 写法, "keybindings": 偏好, "voice_ctrl_f9": bool}。
+// value 为 {"ok": true, "chord": 规范写法}，或 {"ok": false, "kind": "invalid"|"conflict", "owner"?: 占用者}。
+// 请求最多 64 KiB，不落盘；返回值通过 msime_client_string_free 释放。
+char *msime_client_check_toggle_hotkey(const uint8_t *request, size_t length);
 /* 私有的聚合打字统计。JSON 请求（<=65536 字节）：
  * {directory:绝对路径,action:{operation:"load"|"reset"}}
  * {directory,action:{operation:"set_enabled",enabled:bool}}
@@ -743,8 +747,12 @@ char *msime_client_apply_translations(uint64_t session, uint64_t generation,
  * target_language absent or "en" reads msime-english.db and the user's glosses. fr/ja/es/ru/de/ko read only offline-glosses/zh-<lang>.db beside resources, or, when that is absent and state_root (absolute; pass the translation query's state_root) is given, the same file in the downloaded <state_root>/resource-packs/offline-glosses pack; they ignore user_data. When neither is installed the result is {generation,translations:[]}, not an error. Any other value is an invalid request. Only Chinese candidates get a non-English gloss. */
 char *msime_client_candidate_gloss_request(const uint8_t *request, size_t request_length,
                                            const uint8_t *resources, size_t resources_length);
-/* Pronounce copied English texts without a session, for the line a host draws beside a gloss.
- * JSON request: {generation,items:[{text,language}]}; language must be "en". text is an English candidate or one line of an English gloss; only its first term is pronounced, without a leading to/a/an/the, and a term with any unknown word gets nothing. The response is {generation,pronunciations:[{text,language,pronunciation}]} with "/…/" IPA, omitting texts that have none. The table is pronunciations/en-phonetic.db beside resources; when it is not installed the result is {generation,pronunciations:[]}, not an error. May run on a worker thread. */
+/* 不持有会话地查询英文候选或英文释义的读音，可在宿主工作线程调用。
+ * JSON 请求：{generation,items:[{text,language}],supplementary_resources?}；language 必须为 "en"。
+ * text 为英文候选或一行英文释义；只读首个词组，忽略开头的 to/a/an/the，任一词未知则不返回该组。
+ * 响应为 {generation,pronunciations:[{text,language,pronunciation}]}，读音为 "/…/" IPA，没有音标的项省略。
+ * 优先读 resources 旁的 pronunciations/en-phonetic.db；缺失时可从 supplementary_resources 下读取同名相对路径。
+ * 补充目录为可选的绝对路径，最多 4096 字节；缺省保持旧行为。两处均未安装时返回空 pronunciations，不报错。 */
 char *msime_client_pronunciation_request(const uint8_t *request, size_t request_length,
                                          const uint8_t *resources, size_t resources_length);
 /* Break copied Chinese candidates into words with their English, without a session, for a line a host draws under the gloss lines (never a committable gloss column).
@@ -769,14 +777,15 @@ char *msime_client_set_english_mode(uint64_t session, bool enabled);
  * 创建和重建会话时按偏好自动开启：全拼看 touch_keyboard_layout 是否为 nine_key（fourteen_key 则开 14 键）；注音还要求 touch_keyboard_schemes 选中（或在没有选中项时启用了）zhuyin_nine_key，这个方案只有 Android 写，桌面宿主为全拼九宫格写下的 nine_key 不会让注音会话离开大千键位。宿主设下的网格只保留到方案或 touch_keyboard_layout 改变为止。
  * View.touch_keyboard_layout 是已应用的宿主呈现偏好；日文九键宿主只用它，不开启引擎的九键模式。 */
 char *msime_client_set_nine_key_mode(uint64_t session, bool enabled);
-/* 换引擎的组码网格：0 关，1 九键（同 msime_client_set_nine_key_mode），2 当前全拼或双拼方案的 14 键（QWERTY 上相邻两个字母一个键，L、M 单独一键），3 九键双拼（表按已应用的 nine_key_shuangpin_profile 取）。只在组字结束后调用；14 键只给全拼或双拼，九键双拼只给全拼，对其他方案开启、在组字中切换都会被拒绝，其他取值报错，会话不变。Value 是 View。
- * View.key_grid 是权威状态："none"、"nine_key"、"fourteen_key" 或 "nine_key_shuangpin"。View.nine_key 只在九键下为真。Android 双拼创建和重建会话时按 touch_shuangpin_layout 选择 26 或 14 键，其他宿主保留但忽略该偏好，14 键表从已应用的 shuangpin_profile 及自定义表派生，分号与 L 共键。几种网格共用 View.nine_key_spellings、nine_key_reading、nine_key_single_character、nine_key_strokes，以及 msime_client_choose_nine_key_spelling 和 msime_client_set_nine_key_filter；14 键的分词键照九键送 '\''。14 键下数字不是输入，照常是选词键。九键双拼的数字从 msime_client_character 进来（方案用到的数字，可以有 1 和 0），和九键一样不当选词键，没有英文九键；创建和重建会话时 touch_keyboard_layout 为 nine_key_shuangpin 的全拼会话自动开启它。 */
+/* 切换引擎的组码网格：0 关闭，1 九键（同 msime_client_set_nine_key_mode），2 当前全拼或双拼方案的 14 键（QWERTY 上相邻两个字母一个键，L、M 单独一键），3 九键双拼（表按已应用的 nine_key_shuangpin_profile 取），4 十八键全拼（Q WE RT Y U IO P / A SD FG H JK L / Z XC V BN M）。只在组字结束后调用；14 键只给全拼或双拼，十八键和九键双拼只给全拼，对其他方案开启、在组字中切换都会被拒绝，其他取值报错，会话不变。返回值中的 View 反映结果。
+ * View.key_grid 是权威状态："none"、"nine_key"、"fourteen_key"、"eighteen_key" 或 "nine_key_shuangpin"。View.nine_key 只在九键下为真。Android 和 iOS 的双拼会话在创建和重建时按 touch_shuangpin_layout 选择 26 或 14 键，其他宿主保留但忽略该偏好，14 键表从已应用的 shuangpin_profile 及自定义表派生，分号与 L 共键。几种网格共用 View.nine_key_spellings、nine_key_reading、nine_key_single_character、nine_key_strokes，以及 msime_client_choose_nine_key_spelling 和 msime_client_set_nine_key_filter；字母归组键盘的分词键照九键送 '\''。字母归组键盘下数字不是输入，照常是选词键。九键双拼的数字从 msime_client_character 进来（方案用到的数字，可以有 1 和 0），和九键一样不当选词键，没有英文九键；创建和重建会话时 touch_keyboard_layout 为 nine_key_shuangpin 的全拼会话自动开启它。 */
 char *msime_client_set_key_grid(uint64_t session, uint8_t grid);
-/* 14 键的一键：letter 是这一组里的任一小写字母，引擎归成这一组，宿主约定送首字母（q e t u o a d g j l z c b m）。返回与 msime_client_character 相同的输入响应。不在 14 键下、方案不是全拼或双拼、在本地模式或专用英文里、26 键正在组字、或 letter 不是 a-z 时 handled=false，会话不变。
- * 硬件键盘的字母照常经 msime_client_character 走当前方案的 26 键：14 键组字进行中它们 handled=false，同九键。 */
+/* 字母归组键盘（14 键或十八键）的一键：letter 是这一组里的任一小写字母，引擎归成这一组，宿主约定送首字母（十四键为 q e t u o a d g j l z c b m，十八键见上方映射）。返回与 msime_client_character 相同的输入响应。不在字母归组键盘下、方案不兼容、在本地模式或专用英文里、26 键正在组字、或 letter 不是 a-z 时 handled=false，会话不变。
+ * 硬件键盘的字母照常经 msime_client_character 走当前方案的 26 键：字母归组键盘组字进行中它们 handled=false，同九键。 */
 char *msime_client_grid_key(uint64_t session, uint8_t letter);
-/* 标出隐私会话（隐私模式、不允许学习的输入框）：这个会话的选词位置和上屏效率不记入打字统计。用户在设置里关掉学习不算隐私会话。学习本身仍由偏好里的 learning 决定。Value 是设下的布尔值。 */
+/* 标出隐私会话（隐私模式、不允许学习的输入框）：不记录选词位置和上屏效率，并立即禁止、清除上屏后联想；宿主须重新读取 View，以丢弃旧候选代次。用户单独关掉学习不算隐私会话；学习本身仍由 learning 偏好决定。Value 是设下的布尔值。 */
 char *msime_client_set_private_session(uint64_t session, bool enabled);
+/* Android 的 next_word_prediction 偏好开启时，View.prediction=true 标记上屏后的空闲联想：editing_text、preedit 和 reading 为空；只有显式选择候选才上屏。空格、回车、数字、导航和失焦不提交联想；普通状态省略 prediction 字段，宿主缺省按 false 读取。 */
 /* 中日英循环切换的状态机（`crates/client-core/src/language_cycle.rs`），一个键在 中 → 日 → 英 → 中 之间转圈。顺序来自旧版 Windows 正式版 `engine/contracts/trilingual_input.h` 的 `Next()`：中文 → 日文 → 英文 → 中文；参与循环的是「切换中英文」那一组快捷键，不是 Ctrl+Shift+J。
  * 参数：enabled 是 keybindings.trilingual_cycle；mode 是按下循环键那一刻的模式，0 中文、1 日文、2 英文；scheme 是实际在跑的方案，编号同 View.scheme；last_chinese_scheme 是要回去的中文方案（0/1/2/5/6/9），-1 表示还没记下；has_composition 是宿主会话里还有组字（已选词段或未上屏的拼音）。
  * Value 是 {mode, scheme, commit_raw}：mode 同上编号；scheme 是进入中文时要切到的方案，null 表示只换中英模式；commit_raw 为真时先原样上屏正在组的内容（已选词段保留，剩下没选的拼音串照原样出去），再换模式。value 为 null 表示这一键不循环（开关关着，这一组快捷键仍是二态切换），宿主照旧自己处理这个键。非法编号返回错误。
