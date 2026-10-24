@@ -1,4 +1,5 @@
 #include "SettingsWindow.h"
+#include "SettingsChrome.h"
 #include "KeyboardSkinPage.h"
 #include "SettingsRoutes.h"
 #include "AboutForm.h"
@@ -928,7 +929,15 @@ struct SettingsWindow::State {
   HWND selector_label = nullptr;
   HWND status = nullptr;
   HWND reload = nullptr;
+  HWND navigation_tree = nullptr;
+  HWND heading = nullptr;
+  HWND page_summary = nullptr;
+  std::array<HTREEITEM, chrome::pages.size()> navigation_pages{};
+  bool syncing_navigation = false;
   HFONT font = nullptr;
+  HFONT heading_font = nullptr;
+  HFONT strong_font = nullptr;
+  HBRUSH background_brush = CreateSolidBrush(chrome::background);
   HINSTANCE instance = nullptr;
   UINT dpi = USER_DEFAULT_SCREEN_DPI;
   int scroll = 0;
@@ -1049,13 +1058,56 @@ struct SettingsWindow::State {
   bool controls() {
     dpi = msime::windows::compat::system_dpi();
     font = CreateFontW(-dip(14), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
-        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei");
+    heading_font = CreateFontW(-dip(25), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei");
+    strong_font = CreateFontW(-dip(14), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
+        OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
     for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板", L"词库", L"背单词", L"插件", L"关于与帮助", L"社区插件", L"社区词库与回复模板", L"语音输入", MSIME_EDITION_HANDWRITING != 0 ? L"屏幕键盘与手写" : L"屏幕键盘", L"连接 AI 助手", L"键盘皮肤制作"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
-    tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
+    // 保留页面索引控件作为路由适配；实际导航使用可键盘操作和读屏的分类树。
+    ShowWindow(selector, SW_HIDE);
+    ShowWindow(selector_label, SW_HIDE);
+    navigation_tree = add(window, WC_TREEVIEWW, L"设置导航", WS_TABSTOP | TVS_HASBUTTONS | TVS_LINESATROOT | TVS_SHOWSELALWAYS | TVS_FULLROWSELECT | TVS_NOHSCROLL, page_navigation);
+    TreeView_SetBkColor(navigation_tree, chrome::sidebar);
+    TreeView_SetTextColor(navigation_tree, chrome::ink);
+    TreeView_SetLineColor(navigation_tree, chrome::muted);
+    TreeView_SetItemHeight(navigation_tree, dip(32));
+    TreeView_SetIndent(navigation_tree, dip(14));
+    const auto group = [&](const wchar_t* title, std::initializer_list<int> children, bool expanded) {
+      TVINSERTSTRUCTW entry{};
+      entry.hParent = TVI_ROOT; entry.hInsertAfter = TVI_LAST;
+      entry.item.mask = TVIF_TEXT | TVIF_PARAM | TVIF_STATE;
+      entry.item.pszText = const_cast<wchar_t*>(title); entry.item.lParam = -1;
+      entry.item.stateMask = TVIS_BOLD; entry.item.state = TVIS_BOLD;
+      const auto parent = TreeView_InsertItem(navigation_tree, &entry);
+      for (const auto page : children) {
+        entry.hParent = parent; entry.item.state = 0;
+        entry.item.pszText = const_cast<wchar_t*>(chrome::pages[static_cast<size_t>(page)].title);
+        if (page == 20 && !MSIME_EDITION_HANDWRITING) entry.item.pszText = const_cast<wchar_t*>(L"屏幕键盘");
+        entry.item.lParam = page;
+        navigation_pages[static_cast<size_t>(page)] = TreeView_InsertItem(navigation_tree, &entry);
+      }
+      if (expanded) TreeView_Expand(navigation_tree, parent, TVE_EXPAND);
+    };
+    group(L"输入设置", {3, 0, 4, 5, 1}, true);
+    group(L"输入工具", {19, 20, 6, 21}, false);
+    group(L"词库与数据", {13, 14, 11, 12, 15}, false);
+    group(L"个性外观", {8, 22}, true);
+    group(L"社区", {9, 17, 18}, false);
+    group(L"账号与应用", {7, 10, 2, 16}, false);
+    syncing_navigation = true;
+    TreeView_SelectItem(navigation_tree, navigation_pages[0]);
+    syncing_navigation = false;
+    heading = add(window, L"STATIC", chrome::pages[0].title, SS_LEFT, page_heading);
+    SendMessageW(heading, WM_SETFONT, reinterpret_cast<WPARAM>(heading_font), FALSE);
+    page_summary = add(window, L"STATIC", chrome::pages[0].description, SS_LEFT, page_description);
+    tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP | TCS_OWNERDRAWFIXED | TCS_FIXEDWIDTH | TCS_BUTTONS | TCS_FLATBUTTONS, page_tabs);
+    SetWindowSubclass(tabs, tabs_proc, 1, reinterpret_cast<DWORD_PTR>(this));
+    TabCtrl_SetItemSize(tabs, dip(98), dip(34));
     for (size_t index = 0; index < input::shortcut_tabs.size(); ++index) {
       TCITEMW item{};
       item.mask = TCIF_TEXT;
@@ -1066,7 +1118,7 @@ struct SettingsWindow::State {
         0, 0, 1, 1, window, reinterpret_cast<HMENU>(static_cast<INT_PTR>(page_body)), instance, this);
     if (!body) return false;
     status = add(window, L"STATIC", L"正在读取设置…", SS_LEFT, status_text);
-    reload = add(window, L"BUTTON", L"重新读取", WS_TABSTOP | BS_PUSHBUTTON, reload_settings);
+    reload = add(window, L"BUTTON", L"刷新设置", WS_TABSTOP | BS_PUSHBUTTON, reload_settings);
     row(L"STATIC", L"输入法快捷键仅在对应输入状态或候选窗口显示时生效。翻页方式和以词定字在「输入 › 选词与翻页」中设置。", SS_LEFT, -1, 0, 48);
     row(L"STATIC", L"切换中英文", SS_LEFT, -1, 58, 24);
     const auto language = row(WC_COMBOBOXW, L"切换中英文", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL,
@@ -1597,18 +1649,25 @@ struct SettingsWindow::State {
     GetClientRect(window, &client);
     const int width = client.right;
     const int height = client.bottom;
-    MoveWindow(selector_label, dip(24), dip(18), dip(80), dip(26), TRUE);
-    MoveWindow(selector, dip(112), dip(12), std::max(width - dip(136), 1), dip(160), TRUE);
+    const int left = dip(224);
+    const int available = std::max(width - left - dip(32), 1);
+    MoveWindow(navigation_tree, dip(12), dip(86), dip(180), std::max(height - dip(118), 1), TRUE);
+    MoveWindow(heading, left, dip(27), available, dip(38), TRUE);
+    MoveWindow(page_summary, left, dip(74), available, dip(38), TRUE);
     const bool has_tabs = surface == Surface::shortcuts || surface == Surface::reference ||
         std::any_of(input_pages.begin(), input_pages.end(), [this](const auto& page) { return page.first == surface; }) ||
         std::any_of(expression_pages.begin(), expression_pages.end(), [this](const auto& page) { return page.first == surface; });
     ShowWindow(tabs, has_tabs ? SW_SHOW : SW_HIDE);
-    MoveWindow(tabs, dip(24), dip(52), std::max(width - dip(48), 1), dip(30), TRUE);
-    const int body_top = has_tabs ? 94 : 58;
-    MoveWindow(body, dip(24), dip(body_top), std::max(width - dip(48), 1), std::max(height - dip(body_top + 86), 1), TRUE);
-    MoveWindow(status, dip(24), height - dip(76), std::max(width - dip(48), 1), dip(38), TRUE);
-    MoveWindow(reload, width - dip(144), height - dip(34), dip(120), dip(28), TRUE);
+    MoveWindow(tabs, left, dip(124), available, dip(38), TRUE);
+    // 低分辨率下六个输入子页等宽排开，标题仍完整可读。
+    const int tab_count = std::max(TabCtrl_GetItemCount(tabs), 1);
+    TabCtrl_SetItemSize(tabs, std::min(dip(112), available / tab_count - dip(3)), dip(34));
+    const int body_top = has_tabs ? 184 : 130;
+    MoveWindow(body, left, dip(body_top), available, std::max(height - dip(body_top + 66), 1), TRUE);
+    MoveWindow(status, left, height - dip(45), std::max(available - dip(130), 1), dip(32), TRUE);
+    MoveWindow(reload, width - dip(142), height - dip(48), dip(110), dip(30), TRUE);
     layout_body();
+    InvalidateRect(window, nullptr, FALSE);
   }
 
   void layout_body() {
@@ -1632,7 +1691,8 @@ struct SettingsWindow::State {
     GetScrollInfo(body, SB_VERT, &info);
     scroll = info.nPos;
     GetClientRect(body, &client);
-    for (const auto& item : items) {
+    for (size_t index = 0; index < items.size(); ++index) {
+      const auto& item = items[index];
       const auto scheme_top = item.surface == Surface::scheme ? scheme_form.position(item.handle) :
           item.surface == Surface::translation ? translation_form.position(item.handle) : std::optional<int>(item.top);
       const bool visible = surface == item.surface && scheme_top.has_value();
@@ -1641,13 +1701,32 @@ struct SettingsWindow::State {
       if (visible != was_visible) ShowWindow(item.handle, visible ? SW_SHOW : SW_HIDE);
       if (!visible) continue;
       const int top = reference ? 0 : dip(*scheme_top) - scroll;
-      const int width = std::max(client.right - dip(8), 1L);
+      int width = std::max(client.right - dip(24), 1L);
       const int height = reference ? client.bottom : dip(item.height);
+      int left = dip(4);
+      wchar_t type[32]{};
+      GetClassNameW(item.handle, type, 32);
+      const auto style = GetWindowLongPtrW(item.handle, GWL_STYLE);
+      if (lstrcmpiW(type, WC_COMBOBOXW) == 0) width = std::min(width, dip(360));
+      if (lstrcmpiW(type, L"BUTTON") == 0 && (style & BS_TYPEMASK) == BS_PUSHBUTTON)
+        width = std::min(width, dip(280));
+      if (lstrcmpiW(type, L"EDIT") == 0 && !(style & ES_MULTILINE)) width = std::min(width, dip(480));
+      // 输入方案采用成行设置卡：左侧标签、右侧选项，避免两个全宽下拉框撑满页面。
+      int placed_top = top;
+      if (surface == Surface::scheme && (GetDlgCtrlID(item.handle) == scheme_language || GetDlgCtrlID(item.handle) == scheme_chinese)) {
+        left = std::max(dip(160), static_cast<int>(client.right) / 2);
+        width = std::max(static_cast<int>(client.right) - left - dip(16), 1);
+        placed_top -= dip(34);
+      } else if (surface == Surface::scheme && lstrcmpiW(type, L"STATIC") == 0 && item.height == 24) {
+        width = std::max(dip(144), static_cast<int>(client.right) / 2 - dip(20));
+        placed_top += dip(4);
+      }
       RECT previous{};
       if (GetWindowRect(item.handle, &previous)) MapWindowPoints(nullptr, body, reinterpret_cast<POINT*>(&previous), 2);
-      if (previous.left != 0 || previous.top != top || previous.right != width || previous.bottom != top + height)
-        MoveWindow(item.handle, 0, top, width, height, TRUE);
+      if (previous.left != left || previous.top != placed_top || previous.right != left + width || previous.bottom != placed_top + height)
+        MoveWindow(item.handle, left, placed_top, width, height, TRUE);
     }
+    InvalidateRect(body, nullptr, FALSE);
   }
 
   void scroll_to(int position) {
@@ -2047,7 +2126,7 @@ struct SettingsWindow::State {
     layout_body();
     const wchar_t* message = L"读取设置失败，请重新读取后重试。";
     switch (result->outcome) {
-    case Outcome::loaded: message = L""; break;
+    case Outcome::loaded: message = L"更改会自动保存。"; break;
     case Outcome::saved: message = L"已保存。"; break;
     case Outcome::conflict: message = L"设置已在其他窗口中更新，已重新读取；本次修改未覆盖其他窗口的设置。"; break;
     case Outcome::invalid_change: message = L"无法修改这个设置，请重新读取后重试。"; break;
@@ -2146,6 +2225,15 @@ struct SettingsWindow::State {
     }
     if (id == page_selector && HIWORD(command) == CBN_SELCHANGE) {
       const auto selected = SendMessageW(selector, CB_GETCURSEL, 0, 0);
+      if (selected < 0 || static_cast<size_t>(selected) >= chrome::pages.size()) return;
+      SetWindowTextW(heading, chrome::pages[static_cast<size_t>(selected)].title);
+      SetWindowTextW(page_summary, chrome::pages[static_cast<size_t>(selected)].description);
+      syncing_navigation = true;
+      const auto tree_item = navigation_pages[static_cast<size_t>(selected)];
+      TreeView_Expand(navigation_tree, TreeView_GetParent(navigation_tree, tree_item), TVE_EXPAND);
+      TreeView_SelectItem(navigation_tree, tree_item);
+      TreeView_EnsureVisible(navigation_tree, tree_item);
+      syncing_navigation = false;
       TabCtrl_DeleteAllItems(tabs);
       if (selected == 0 || selected == 3 || selected == 4) {
         std::vector<const wchar_t*> titles;
@@ -2755,6 +2843,36 @@ struct SettingsWindow::State {
     if (!job.changes.empty()) submit(std::move(job));
   }
 
+  // 保留系统标签的焦点、键盘与无障碍行为，只统一绘制背景、文字和选中线。
+  static LRESULT CALLBACK tabs_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR id, DWORD_PTR data) {
+    auto* self = reinterpret_cast<State*>(data);
+    if (message == WM_NCDESTROY) RemoveWindowSubclass(hwnd, tabs_proc, id);
+    if (message == WM_ERASEBKGND) return TRUE;
+    if (message == WM_PAINT) {
+      PAINTSTRUCT paint{}; const auto dc = BeginPaint(hwnd, &paint);
+      RECT client{}; GetClientRect(hwnd, &client);
+      chrome::fill(dc, client, chrome::background);
+      chrome::fill(dc, {0, client.bottom - self->dip(1), client.right, client.bottom}, chrome::line);
+      const int selected = TabCtrl_GetCurSel(hwnd);
+      const auto old = SelectObject(dc, self->font);
+      SetBkMode(dc, TRANSPARENT);
+      for (int index = 0; index < TabCtrl_GetItemCount(hwnd); ++index) {
+        RECT rect{}; TabCtrl_GetItemRect(hwnd, index, &rect);
+        wchar_t title[128]{}; TCITEMW tab{}; tab.mask = TCIF_TEXT; tab.pszText = title; tab.cchTextMax = 128;
+        TabCtrl_GetItem(hwnd, index, &tab);
+        SelectObject(dc, index == selected ? self->strong_font : self->font);
+        SetTextColor(dc, index == selected ? chrome::accent : chrome::muted);
+        DrawTextW(dc, title, -1, &rect, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+        if (index == selected) {
+          chrome::fill(dc, {rect.left + self->dip(12), client.bottom - self->dip(3), rect.right - self->dip(12), client.bottom}, chrome::accent);
+          if (GetFocus() == hwnd) { InflateRect(&rect, -self->dip(3), -self->dip(3)); DrawFocusRect(dc, &rect); }
+        }
+      }
+      SelectObject(dc, old); EndPaint(hwnd, &paint); return 0;
+    }
+    return DefSubclassProc(hwnd, message, wparam, lparam);
+  }
+
   static LRESULT CALLBACK body_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam) {
     auto* self = reinterpret_cast<State*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
     if (message == WM_NCCREATE) {
@@ -2762,6 +2880,18 @@ struct SettingsWindow::State {
       SetWindowLongPtrW(hwnd, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(self));
     }
     if (!self) return DefWindowProcW(hwnd, message, wparam, lparam);
+    if (message == WM_CTLCOLORSTATIC || message == WM_CTLCOLORBTN || message == WM_CTLCOLOREDIT || message == WM_CTLCOLORLISTBOX) {
+      const auto dc = reinterpret_cast<HDC>(wparam);
+      SetBkColor(dc, chrome::background);
+      SetBkMode(dc, TRANSPARENT);
+      SetTextColor(dc, IsWindowEnabled(reinterpret_cast<HWND>(lparam)) ? chrome::ink : chrome::muted);
+      return reinterpret_cast<LRESULT>(self->background_brush);
+    }
+    if (message == WM_ERASEBKGND) {
+      RECT client{}; GetClientRect(hwnd, &client);
+      chrome::fill(reinterpret_cast<HDC>(wparam), client, chrome::background);
+      return TRUE;
+    }
     if (message == WM_COMMAND) {
       wchar_t type[32]{};
       GetClassNameW(reinterpret_cast<HWND>(lparam), type, 32);
@@ -2832,6 +2962,33 @@ struct SettingsWindow::State {
     if (!self) return DefWindowProcW(hwnd, message, wparam, lparam);
     switch (message) {
     case WM_CREATE: return self->controls() ? 0 : -1;
+    case WM_ERASEBKGND: return TRUE;
+    case WM_CTLCOLORSTATIC: {
+      const auto dc = reinterpret_cast<HDC>(wparam);
+      SetBkColor(dc, chrome::background); SetBkMode(dc, TRANSPARENT);
+      SetTextColor(dc, reinterpret_cast<HWND>(lparam) == self->page_summary || reinterpret_cast<HWND>(lparam) == self->status ? chrome::muted : chrome::ink);
+      return reinterpret_cast<LRESULT>(self->background_brush);
+    }
+    case WM_PAINT: {
+      PAINTSTRUCT paint{}; const auto dc = BeginPaint(hwnd, &paint);
+      RECT client{}; GetClientRect(hwnd, &client);
+      chrome::fill(dc, client, chrome::background);
+      chrome::fill(dc, {0, 0, self->dip(204), client.bottom}, chrome::sidebar);
+      chrome::fill(dc, {self->dip(203), 0, self->dip(204), client.bottom}, chrome::line);
+      const auto previous = SelectObject(dc, self->strong_font);
+      SetBkMode(dc, TRANSPARENT); SetTextColor(dc, chrome::ink);
+      const auto icon = static_cast<HICON>(LoadImageW(self->instance, MAKEINTRESOURCEW(101), IMAGE_ICON, self->dip(32), self->dip(32), LR_SHARED));
+      if (icon) DrawIconEx(dc, self->dip(20), self->dip(24), icon, self->dip(32), self->dip(32), 0, nullptr, DI_NORMAL);
+      RECT brand{self->dip(62), self->dip(22), self->dip(199), self->dip(47)};
+      DrawTextW(dc, MSIME_EDITION_DISPLAY_NAME, -1, &brand, DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS);
+      SelectObject(dc, self->font); SetTextColor(dc, chrome::muted);
+      RECT subtitle{self->dip(62), self->dip(48), self->dip(198), self->dip(70)};
+      DrawTextW(dc, L"偏好设置", -1, &subtitle, DT_SINGLELINE | DT_VCENTER);
+      RECT foot{self->dip(22), client.bottom - self->dip(30), self->dip(190), client.bottom - self->dip(8)};
+      DrawTextW(dc, L"水杉 · 随心输入", -1, &foot, DT_SINGLELINE | DT_VCENTER);
+      chrome::fill(dc, {self->dip(224), client.bottom - self->dip(60), client.right - self->dip(32), client.bottom - self->dip(59)}, chrome::line);
+      SelectObject(dc, previous); EndPaint(hwnd, &paint); return 0;
+    }
     case WM_TIMER:
       if (wparam == 72) self->poll_statistics();
       else if (wparam == 73) self->account_form.tick();
@@ -2856,6 +3013,27 @@ struct SettingsWindow::State {
     case WM_COMMAND: self->command(wparam); return 0;
     case WM_NOTIFY: {
       const auto* notification = reinterpret_cast<NMHDR*>(lparam);
+      if (notification->idFrom == page_navigation) {
+        if (notification->code == TVN_SELCHANGEDW && !self->syncing_navigation) {
+          const auto* changed = reinterpret_cast<NMTREEVIEWW*>(lparam);
+          const auto page = changed->itemNew.lParam;
+          if (page >= 0 && static_cast<size_t>(page) < chrome::pages.size()) {
+            SendMessageW(self->selector, CB_SETCURSEL, page, 0);
+            self->command(MAKEWPARAM(page_selector, CBN_SELCHANGE));
+          }
+          return 0;
+        }
+        if (notification->code == NM_CUSTOMDRAW) {
+          auto* draw = reinterpret_cast<NMTVCUSTOMDRAW*>(lparam);
+          if (draw->nmcd.dwDrawStage == CDDS_PREPAINT) return CDRF_NOTIFYITEMDRAW;
+          if (draw->nmcd.dwDrawStage == CDDS_ITEMPREPAINT) {
+            const bool selected = (draw->nmcd.uItemState & CDIS_SELECTED) != 0;
+            draw->clrTextBk = selected ? chrome::selection : chrome::sidebar;
+            draw->clrText = selected ? chrome::accent : draw->nmcd.lItemlParam < 0 ? chrome::muted : chrome::ink;
+            return CDRF_NEWFONT;
+          }
+        }
+      }
       if (notification->idFrom == page_tabs && notification->code == TCN_SELCHANGE) {
         const auto page = SendMessageW(self->selector, CB_GETCURSEL, 0, 0);
         const auto tab = TabCtrl_GetCurSel(self->tabs);
@@ -2911,6 +3089,9 @@ SettingsWindow::~SettingsWindow() {
   state_->updates_worker.reset();
   state_->worker.reset();
   if (state_->font) DeleteObject(state_->font);
+  if (state_->heading_font) DeleteObject(state_->heading_font);
+  if (state_->strong_font) DeleteObject(state_->strong_font);
+  if (state_->background_brush) DeleteObject(state_->background_brush);
   if (state_->com_initialized) CoUninitialize();
 }
 
@@ -2919,7 +3100,7 @@ bool SettingsWindow::create(HINSTANCE instance) {
   if (FAILED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED))) return false;
   state_->com_initialized = true;
   state_->instance = instance;
-  INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_TAB_CLASSES | ICC_STANDARD_CLASSES | ICC_BAR_CLASSES};
+  INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_TAB_CLASSES | ICC_TREEVIEW_CLASSES | ICC_STANDARD_CLASSES | ICC_BAR_CLASSES};
   if (!InitCommonControlsEx(&controls)) return false;
   for (const auto& entry : {std::pair{window_class, &State::window_proc}, std::pair{body_class, &State::body_proc}}) {
     WNDCLASSEXW type{};
@@ -2932,9 +3113,12 @@ bool SettingsWindow::create(HINSTANCE instance) {
     if (!RegisterClassExW(&type) && GetLastError() != ERROR_CLASS_ALREADY_EXISTS) return false;
   }
   state_->dpi = msime::windows::compat::system_dpi();
+  RECT work{}; SystemParametersInfoW(SPI_GETWORKAREA, 0, &work, 0);
+  const int width = std::min(state_->dip(1020), static_cast<int>(work.right - work.left) - state_->dip(24));
+  const int height = std::min(state_->dip(740), static_cast<int>(work.bottom - work.top) - state_->dip(24));
   HWND window = CreateWindowExW(WS_EX_CONTROLPARENT, window_class, MSIME_EDITION_DISPLAY_NAME L" · 设置",
-      WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
-      state_->dip(900), state_->dip(720), nullptr, nullptr, instance, state_.get());
+      WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, work.left + (work.right - work.left - width) / 2, work.top + (work.bottom - work.top - height) / 2,
+      width, height, nullptr, nullptr, instance, state_.get());
   if (!window) return false;
   state_->worker = std::make_unique<Worker>(window, state_->community_transport, state_->statistics_upload_transport, state_->account_transport, state_->clipboard_services.transport, state_->cloud_clipboard_services, state_->dictionary_transport, false, state_->update_transport, state_->voice_transport);
   state_->updates_worker = std::make_unique<Worker>(window, CommunityTransport{}, CommunityTransport{}, CommunityTransport{}, CommunityTransport{}, CloudClipboardServices{}, state_->dictionary_transport, true);

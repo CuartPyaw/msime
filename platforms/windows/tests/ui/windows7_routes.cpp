@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstdio>
 #include <fstream>
+#include <commctrl.h>
 #include "../../../../shared/contracts/msime_edition.h"
 
 int main() {
@@ -68,6 +69,34 @@ int main() {
       assert(GetTickCount64() < mcp_deadline); MsgWaitForMultipleObjects(0,nullptr,FALSE,20,QS_ALLINPUT);
     }
     assert(!IsWindowEnabled(GetDlgItem(mcp_page,McpPage::copy_primary)));
+    // 深链接和分类导航必须选中同一页面；切换分类不能写偏好。
+    const auto navigation = GetDlgItem(window.handle(), page_navigation);
+    assert(navigation && !(GetWindowLongPtrW(selector, GWL_STYLE) & WS_VISIBLE));
+    TVITEMW selected{}; selected.mask = TVIF_PARAM; selected.hItem = TreeView_GetSelection(navigation);
+    assert(TreeView_GetItem(navigation, &selected) && selected.lParam == 21);
+    assert(window.open_route("settings:input"));
+    const auto nav_deadline = GetTickCount64() + 5000;
+    while (SendMessageW(selector, CB_GETCURSEL, 0, 0) != 3 || !IsWindowEnabled(GetDlgItem(body, language_switch))) {
+      MSG message{}; while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) { assert(message.message != WM_QUIT); TranslateMessage(&message); DispatchMessageW(&message); }
+      assert(GetTickCount64() < nav_deadline); MsgWaitForMultipleObjects(0, nullptr, FALSE, 20, QS_ALLINPUT);
+    }
+    selected.hItem = TreeView_GetSelection(navigation);
+    assert(TreeView_GetItem(navigation, &selected) && selected.lParam == 3);
+    // 用真实树控件选择相邻的快捷键页，经过正式通知再检查页面标题。
+    const auto shortcuts = TreeView_GetNextSibling(navigation, selected.hItem);
+    assert(shortcuts && TreeView_SelectItem(navigation, shortcuts));
+    assert(SendMessageW(selector, CB_GETCURSEL, 0, 0) == 0);
+    wchar_t heading[80]{};
+    GetWindowTextW(GetDlgItem(window.handle(), page_heading), heading, 80);
+    assert(std::wstring(heading) == L"快捷键");
+    // 最小窗口和普通窗口都应把导航、正文、状态栏留在各自区域。
+    for (const auto width : {720, 1000}) {
+      SetWindowPos(window.handle(), nullptr, 0, 0, width, 650, SWP_NOMOVE | SWP_NOZORDER);
+      RECT nav{}, content{}, footer{};
+      GetWindowRect(navigation, &nav); GetWindowRect(body, &content);
+      GetWindowRect(GetDlgItem(window.handle(), reload_settings), &footer);
+      assert(nav.right < content.left && content.bottom <= footer.top);
+    }
     assert(store.load().snapshot->revision() == before.snapshot->revision());
     DestroyWindow(window.handle());
   }
