@@ -816,7 +816,7 @@ try {
         $process.CloseMainWindow() | Out-Null
         if (-not $process.WaitForExit(10000) -or $process.ExitCode -ne 0) { throw '语音录键验证窗口未正常退出' }
         $process = $null
-        return
+        exit 0
     }
     New-CanvasPreviewFixture
     if (-not [SettingsWindowProbe]::SetDllDirectory([IO.Path]::GetDirectoryName($programPath))) { throw 'Settings DLL path could not be set' }
