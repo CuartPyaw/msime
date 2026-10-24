@@ -12,7 +12,7 @@ Windows 7 已有背单词设置页，但普通托盘的独立面板仍需要 Web
 
 ### 既有笔记审计
 
-- [完整 Windows 7 支持](../../proposed/feature/2026-10-23-windows7-support.md)：部分重叠，本篇落实一个面板，不替代其安装与目标系统验收。
+- [完整 Windows 7 支持](../../implemented/feature/2026-10-23-windows7-support.md)：部分重叠，本篇落实一个面板，不替代其安装与目标系统验收。
 - [原生设置基础](../../implemented/feature/2026-10-23-windows7-native-settings-foundation.md)：部分重叠，复用该篇的背单词表单及共享服务边界。
 - [独立剪贴板面板](../../implemented/feature/2026-10-24-windows7-clipboard-panels.md)：部分重叠，共用面板开发宿主，剪贴板焦点与来源规则不适用于复习窗口。
 
@@ -26,4 +26,4 @@ Windows 11 服务会话的 x64／x86 MSVC `/W4 /WX` 构建与四套面板 CTest 
 
 ## Consequences
 
-背单词的独立原生入口可复用完整词书管理与复习能力，代价是保留设置页的长布局，需要滚动。系统文件选择、交互桌面和 Win7 SP1 尚未验证，不能把服务会话 HWND 测试当成完整产品验收。启动参数与最终全部源码 quick 仍需同批验证。
+背单词的独立原生入口可复用完整词书管理与复习能力，代价是保留设置页的长布局，需要滚动。双架构词书与复习窗口回归已在 Win7 SP1 交互桌面通过，托盘启动器与安装包已集成；设置导入／导出的系统文件对话框另在最终安装路径打开并取消。最终 quick 见[产品构建](2026-10-24-windows7-product-build.md)。

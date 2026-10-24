@@ -22,7 +22,7 @@ x64 与 x86 均产出同源 MCP，不能将 32 位安装包的 MCP 入口指向�
 
 ### 范围与历史审计
 
-- [完整 Win7 支持](../../proposed/feature/2026-10-23-windows7-support.md)：部分落地。此切片没有完成设置、面板、全部运行库、安装升级和 Win7 实机验收，完整提案继续保留。
+- [完整 Win7 支持](../../implemented/feature/2026-10-23-windows7-support.md)：部分落地。此切片没有完成设置、面板、全部运行库、安装升级和 Win7 实机验收，完整提案继续保留。
 - [DPI 与绘制回退](2026-10-23-windows-optional-dpi-and-composition.md)：互补。前者处理原生宿主接口，本切片处理 Rust 依赖的装载边界，两者都不能单独代表产品已支持 Win7。
 - 按 Win7、combase、延迟加载检索活跃笔记，没有既有 Rust 兼容导入决定需要替换；既有候选材质中的动态 WinRT 装载不改变。
 
@@ -32,7 +32,7 @@ Windows 11 上的 x64 与 x86 专用构建完整产出同源核心 DLL 与 MCP�
 
 `windows7-delay-load` 验证系统目录装载、原生函数地址透传、旧 COM 地址、未知导入拒绝、错误描述经真实 COM 线程槽往返，以及录音和播放默认 GUID 的工作线程回调、结果重复读取和输出引用。音频设备缺失时保留真实的端点错误，不据此宣称录音或播放通过。
 
-`windows7-core-load` 实际装载收集后的 x64 与 x86 DLL，验证 ABI 3、DirectWrite 字体枚举、WASAPI 设备枚举和响应释放，不录音、不输出字体或设备身份。Win7 SP1 验收仍未完成。
+`windows7-core-load` 实际装载收集后的 x64 与 x86 DLL，验证 ABI 3、DirectWrite 字体枚举、WASAPI 设备枚举和响应释放，不录音、不输出字体或设备身份。Win7 SP1 x64 上两架构核心装载、兼容接口、全部依赖与 TSF 冷启动均通过；真实 TSF 输入见[产品构建](2026-10-24-windows7-product-build.md)。
 
 同源的 x86 与 x64 TSF DLL 均已链接对应 Win7 核心，并通过实际 DLL 类工厂创建、引用和卸载测试。该检查在 Windows 11 上执行，不包含安装注册、应用输入或 Win7 运行验收。
 

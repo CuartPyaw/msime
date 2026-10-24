@@ -507,7 +507,8 @@ private:
         if (executable) folder_ = *executable / L"THIRD_PARTY_NOTICES.txt";
         else notice_ = L"无法定位第三方组件许可。";
       } else {
-        const Json request{{"platform", "windows7"}, {"current_version", MSIME_WINDOWS_VERSION}, {"edition", MSIME_EDITION_ID}};
+        const Json request{{"platform", "windows7"}, {"current_version", MSIME_WINDOWS_VERSION}, {"edition", MSIME_EDITION_ID},
+            {"arch", control_text::utf8(build_architecture()).value_or("")}};
         try { about_response_ = update_transport_ ? Json::parse(update_transport_(request.dump()), nullptr, false) : theme_data::call(msime_client_update_check, request); }
         catch (const std::exception&) { about_response_ = Json{{"ok", false}, {"error", "update_unavailable"}}; }
       }

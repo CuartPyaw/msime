@@ -22,7 +22,8 @@ int main() {
   { std::ofstream edition(path / L"edition", std::ios::binary); edition << MSIME_EDITION_ID; assert(edition.good()); }
   PreferencesStore store(path.u8string()); const auto initial = store.load(); assert(initial.snapshot);
   std::string edition = MSIME_EDITION_ID; edition[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(edition[0])));
-  const auto name = "MetasequoiaIME-" + edition + "_Windows7_Setup_v999.0.0.exe";
+  const auto architecture = msime::settings::build_architecture() == L"x86_64" ? "x64" : "x86";
+  const auto name = "MetasequoiaIME-" + edition + "_Setup_v999.0.0_win7_" + architecture + ".exe";
   Json response{{"ok", true}, {"value", {{"status", "none"}}}};
   unsigned requests = 0, copies = 0;
   const auto thread = GetCurrentThreadId(); std::wstring copied;
@@ -30,6 +31,7 @@ int main() {
   {
     SettingsWindow window({}, {}, {}, {}, {}, {}, clipboard, {}, {}, [&](const std::string& bytes) {
       assert(GetCurrentThreadId() != thread); const auto request = Json::parse(bytes); ++requests;
+      assert(request.at("arch") == control_text::utf8(msime::settings::build_architecture()).value());
       assert(request.at("platform") == "windows7" && request.at("edition") == MSIME_EDITION_ID && !request.at("current_version").get<std::string>().empty());
       return response.dump();
     });
@@ -48,6 +50,8 @@ int main() {
     click(AboutForm::check_update); assert(IsWindowEnabled(control(AboutForm::download)) && IsWindowEnabled(control(AboutForm::mirror)));
     assert(text(AboutForm::update_detail).find(name) != std::string::npos && text(AboutForm::update_detail).find("certutil -hashfile") != std::string::npos);
     assert(text(AboutForm::update_detail).find(std::string(64, 'a')) != std::string::npos);
+    response["value"]["update"]["installer_name"] = "MetasequoiaIME-" + edition + "_Setup_v999.0.0_win7_" + (std::string(architecture) == "x64" ? "x86" : "x64") + ".exe";
+    click(AboutForm::check_update); assert(!IsWindowEnabled(control(AboutForm::download)) && text(AboutForm::update_detail).empty());
     response["value"]["update"]["installer_name"] = "MetasequoiaIME-Full_Setup_v999.0.0.exe";
     click(AboutForm::check_update); assert(!IsWindowEnabled(control(AboutForm::download)) && text(AboutForm::update_detail).empty());
     response["value"]["update"] = update; response["value"]["status"] = "current";

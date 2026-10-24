@@ -16,7 +16,7 @@ Win7 核心脚本为 x64 和 x86 同样构建、审计、收集 MCP，继续在 
 
 ### 既有笔记审计
 
-- [完整 Windows 7 支持](../../proposed/feature/2026-10-23-windows7-support.md)：部分落地，本篇补齐 MCP 原生连接入口。
+- [完整 Windows 7 支持](../../implemented/feature/2026-10-23-windows7-support.md)：部分落地，本篇补齐 MCP 原生连接入口。
 - [Rust 核心构建](../../implemented/feature/2026-10-23-windows7-rust-core-build.md)：部分重叠，原地更新双架构 MCP 收集事实。
 - [Windows 语音与 AI 能力](../../implemented/feature/2026-10-20-windows-settings-voice-ai-mac-parity.md)：部分重叠，复用既有 MCP 规则，不改变现代设置。
 - [MCP 社区皮肤发布](../../implemented/feature/2026-10-20-mcp-community-skin-publish.md)：互补，服务端能力与账号规则继续由共享 MCP 持有。
@@ -38,4 +38,4 @@ Win7 SP1 x64 的交互桌面实际启动 x64 与 x86 `msime-mcp tools`，使用�
 
 Windows 7 的 AI 助手连接有独立 `settings:mcp` 页面，命令、权限与写入规则继续由既有共享层持有。独立子页面保持后台文件访问与根设置偏好保存分离，但要维护一组 Win32 控件、工作线程收尾和对共享状态格式的读取校验。无效或过时的响应不能保持写入按钮可用；每次成功写入后重新读取实际状态，不用草稿伪造已连接结果。
 
-Win7 上第三方 AI 助手能否运行归各自产品，页面生成的连接配置与本机 MCP 功能仍需可用。配置文件可能被其他程序并发修改，共享安装服务继续保留原子写入边界。Win7 SP1 实际 loader、安装目录、助手接入和现代产品安装升级仍须验收，Windows 11 上的双架构协议通过不代表这些已经完成。
+Win7 上第三方 AI 助手能否运行归各自产品，页面生成的连接配置与本机 MCP 功能仍需可用。配置文件可能被其他程序并发修改，共享安装服务继续保留原子写入边界。双架构 MCP 的 Win7 loader 和客户端／服务端协议已实测，产品已进入完整安装布局；真实第三方 AI 助手未启动，现代完整安装包未重新实装。

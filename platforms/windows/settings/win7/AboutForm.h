@@ -80,7 +80,8 @@ public:
     const auto next = update.at("version").at("display").get<std::string>();
     if (next.empty() || next.size() > 64 || next.find_first_not_of("0123456789.") != std::string::npos) return fail();
     std::string edition = MSIME_EDITION_ID; if (!edition.empty()) edition[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(edition[0])));
-    const auto expected = "MetasequoiaIME-" + edition + "_Windows7_Setup_v" + next + ".exe";
+    const auto architecture = build_architecture() == L"x86_64" ? "x64" : "x86";
+    const auto expected = "MetasequoiaIME-" + edition + "_Setup_v" + next + "_win7_" + architecture + ".exe";
     auto name = text("installer_name"), url = text("release_url");
     auto lowered = name; auto expected_lower = expected;
     std::transform(lowered.begin(), lowered.end(), lowered.begin(), [](unsigned char ch) { return static_cast<char>(std::tolower(ch)); });

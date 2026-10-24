@@ -14,8 +14,8 @@ Status: implemented
 
 ### 既有笔记审计
 
-- [完整 Windows 7 支持](../../proposed/feature/2026-10-23-windows7-support.md)：部分落地，此篇持有原生屏幕键盘的发送与焦点规则。
-- [Windows 屏幕键盘设置](../../implemented/feature/2026-10-11-windows-settings-screen-keyboard.md)：部分重叠，继续使用相同几何与主题配置；设置页在此切片接通，完整自定义皮肤渲染仍需实现，不能把按键窗口计为完整皮肤能力的完成。
+- [完整 Windows 7 支持](../../implemented/feature/2026-10-23-windows7-support.md)：部分落地，此篇持有原生屏幕键盘的发送与焦点规则。
+- [Windows 屏幕键盘设置](../../implemented/feature/2026-10-11-windows-settings-screen-keyboard.md)：部分重叠，继续使用相同几何与主题配置；设置页在此切片接通，完整自定义皮肤由[皮肤制作与预览](2026-10-24-windows7-keyboard-skin-editor.md)接通并验证。
 - [九键双拼键面](../../implemented/feature/2026-10-09-touch-shuangpin-key-hints.md)：部分重叠，沿用共享布局接口和已应用的方案键面。
 
 ## Alternatives considered
@@ -27,4 +27,4 @@ Status: implemented
 
 实际 HWND 测试覆盖完整键面、修饰键、按下与松开、移出取消、前台目标变化、同步发送、共享双拼提示以及配置只读；设置页测试覆盖仅保存编辑字段、修订冲突和显式恢复默认。完整版本 x64／x86，以及日语和五笔 x64 的设置窗口各 12 套测试通过；x64／x86 面板各 7 套通过，已知阻断导入检查分别覆盖面板 280／275 项，设置程序 x64 358／x86 352 项。两架构的云词库面板使用同一会话单例，整套测试必须顺序运行；同时启动会按设计拒绝第二个实例。
 
-macmini 的全仓 quick（20261024-080021）通过。完整自定义皮肤渲染与预览仍需补齐，基础 GDI 键面不能代表全部皮肤能力。真实目标应用的键盘布局、UIPI、TSF 与系统快捷键处理不能用注入接收器证明。Win7 显示与真实输入仍需系统入口验收；pve9／100 为 Win7 SP1 x64，控制台登录等待维护者补充，连接成功不计为产品验收。
+完整皮肤渲染、预览和制作操作已接通；Win7 SP1 x64 交互桌面上 x64／x86 原生窗口与像素回归通过。真实目标应用的键盘布局、UIPI 与系统快捷键不能用注入接收器证明；系统 TSF 候选与中文提交另由最终安装包的双架构记事本验收覆盖。最终 quick 见[产品构建](2026-10-24-windows7-product-build.md)。

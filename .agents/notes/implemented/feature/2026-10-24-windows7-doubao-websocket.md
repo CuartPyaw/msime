@@ -16,7 +16,7 @@ Win7 构建使用同源 libcurl 的 WebSocket 传输；现代 Windows 继续使�
 
 ### 既有笔记审计
 
-- [完整 Win7 支持](../../proposed/feature/2026-10-23-windows7-support.md)：部分重叠，本篇只补充 Server 的豆包网络传输，不替代语音面板、麦克风或真实服务验收。
+- [完整 Win7 支持](../../implemented/feature/2026-10-23-windows7-support.md)：部分重叠，本篇只补充 Server 的豆包网络传输，不替代语音面板、麦克风或真实服务验收。
 - [共享端点描述](../../implemented/architecture/2026-10-21-shared-voice-stream-endpoint.md)：部分重叠，鉴权、配置和帧编解码继续复用共享实现，不复制业务。
 - 按 `DoubaoAsrClient`、`WinHTTP` 检索活跃笔记，没有已有的 Win7 WebSocket 传输决定。
 

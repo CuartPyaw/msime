@@ -21,7 +21,7 @@ Status: implemented
 ### 既有笔记审计
 
 - [Win7 Rust 核心与延迟导入](../../implemented/feature/2026-10-23-windows7-rust-core-build.md)：部分重叠，既有规则处理普通和延迟导入，本篇补充无导入 CRT 桥接 DLL 的有限依赖校验。
-- [完整 Windows 7 支持](../../proposed/feature/2026-10-23-windows7-support.md)：部分落地，全部依赖与真实系统装载继续按完整提案验收。
+- [完整 Windows 7 支持](../../implemented/feature/2026-10-23-windows7-support.md)：部分落地，全部依赖与真实系统装载继续按完整提案验收。
 
 ## Alternatives considered
 

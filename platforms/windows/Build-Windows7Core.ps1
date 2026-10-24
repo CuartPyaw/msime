@@ -1,4 +1,4 @@
-# 在同一源码上编译 Win7 核心及 MCP；完整兼容产品还需设置、面板与安装包适配。
+# 在同一源码上编译 Win7 核心及 MCP；完整产品由 Build-Windows7Client.ps1 收集。
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][ValidateSet('x64', 'x86')][string]$Architecture,
@@ -78,7 +78,7 @@ try {
     $mcpPdbs = @('msime_mcp.pdb', 'msime-mcp.pdb' | ForEach-Object { Join-Path $release $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
     if ($mcpPdbs.Count -ne 1) { throw 'Expected one MCP server PDB output' }
     Copy-Item -LiteralPath $mcpPdbs[0] -Destination (Join-Path $output 'msime-mcp.pdb')
-    # 清单在全部构建完成后写入；核心产物不接入普通完整产品的发布流程。
+    # 清单在全部构建完成后写入；仅供 Win7 产品收集，不改变现代发布流程。
     $audit | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'windows7-core-imports.json') -Encoding UTF8
 } finally {
     $env:RUSTC_BOOTSTRAP = $previousBootstrap

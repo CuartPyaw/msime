@@ -63,7 +63,7 @@ SCANNED_SUFFIXES = {".h", ".cpp", ".rs", ".ps1", ".iss", ".rc", ".vcxproj", ".cm
 class Ispp:
     """ISPP 的一个小子集，只够展开本仓库的安装脚本。字符串是 Pascal 风格（反斜杠不转义），整数和字符串可以用 + 拼接；版本用预定义的 Ver 和 EncodeVer(主, 次, 修订[, 构建]) 比较。"""
 
-    TOKEN = re.compile(r'\s*(?:(?P<string>"[^"]*")|(?P<number>\d+)|(?P<name>[A-Za-z_]\w*)|(?P<op>==|!=|>=|!|\+|\(|\)|,))')
+    TOKEN = re.compile(r'\s*(?:(?P<string>"[^"]*")|(?P<number>\d+)|(?P<name>[A-Za-z_]\w*)|(?P<op>==|!=|>=|&&|!|\+|\(|\)|,))')
 
     def __init__(self, defines: dict[str, object]):
         self.defines = dict(defines)
@@ -79,10 +79,17 @@ class Ispp:
             position = match.end()
             kind = match.lastgroup
             tokens.append((kind, match.group(kind)))
-        value, rest = self.parse_comparison(tokens)
+        value, rest = self.parse_condition(tokens)
         if rest:
             raise SystemExit(f"ISPP subset: trailing tokens in {expression!r}")
         return value
+
+    def parse_condition(self, tokens):
+        value, tokens = self.parse_comparison(tokens)
+        while tokens and tokens[0] == ("op", "&&"):
+            right, tokens = self.parse_comparison(tokens[1:])
+            value = int(bool(value) and bool(right))
+        return value, tokens
 
     def parse_comparison(self, tokens):
         left, tokens = self.parse_sum(tokens)
@@ -112,7 +119,7 @@ class Ispp:
             value, rest = self.parse_unary(tokens[1:])
             return int(not value), rest
         if (kind, text) == ("op", "("):
-            value, rest = self.parse_comparison(tokens[1:])
+            value, rest = self.parse_condition(tokens[1:])
             if not rest or rest[0] != ("op", ")"):
                 raise SystemExit("ISPP subset: unbalanced parenthesis")
             return value, rest[1:]
@@ -200,8 +207,10 @@ def encode_ver(major: int, minor: int, revision: int, build: int = 0) -> int:
 CI_ISPP_VERSION = encode_ver(6, 7, 1)
 
 
-def preprocess(edition_id: str, light: bool = False, ispp_version: int = CI_ISPP_VERSION) -> str:
+def preprocess(edition_id: str, light: bool = False, ispp_version: int = CI_ISPP_VERSION, windows7_architecture: str | None = None) -> str:
     defines: dict[str, object] = {"Edition": edition_id, "Ver": ispp_version}
+    if windows7_architecture is not None:
+        defines["Windows7Architecture"] = windows7_architecture
     if light:
         defines["LightPackage"] = 1
     return "".join(Ispp(defines).run(SETUP))
@@ -261,7 +270,7 @@ def check_installer(errors: list[str], editions: list[dict], msime_windows: dict
         # 每个版本（包括 full）都只停本安装 server 目录里的进程：几个版本的进程同名，按映像名结束会停掉同时安装的其他版本。
         if "taskkill.exe" in output:
             errors.append(f"msime_setup.iss for edition {edition_id}: stops processes by image name, which also stops the other installed editions")
-        server_dir = "ServerDir := ExpandConstant('{commonpf64}\\" + entry["platforms"]["windows"]["install_dir"] + "\\server');"
+        server_dir = "ServerDir := ExpandConstant('{autopf}\\" + entry["platforms"]["windows"]["install_dir"] + "\\server');"
         if server_dir not in output or "StopProcessesUnder(ServerDir, '');" not in output:
             errors.append(f"msime_setup.iss for edition {edition_id}: does not stop exactly the processes under its own server directory ({server_dir!r})")
         # 停进程之前先占住 TSF 的 Server 启动互斥量，名字与已装 TIP 用的完全一致：否则加载在各程序里的 TIP 会把刚停掉的 Server 重新拉起来，[Files] 替换词库时以错误 32 失败。
@@ -280,6 +289,23 @@ def check_installer(errors: list[str], editions: list[dict], msime_windows: dict
     # 轻量包也要能展开（它走另一组 #ifdef 分支）。
     for entry in editions:
         preprocess(entry["id"], light=True)
+    # 展开两架构的 Win7 分支；现代包继续保持 x64 安装模式与原文件名。
+    for entry in editions:
+        modern = outputs[entry["id"]]
+        if "ArchitecturesAllowed=x64compatible\n" not in modern or "ArchitecturesInstallIn64BitMode=x64compatible\n" not in modern:
+            errors.append(f"edition {entry['id']}: modern architecture policy changed")
+        for arch in ("x64", "x86"):
+            for light in (False, True):
+                expanded = preprocess(entry["id"], light=light, windows7_architecture=arch)
+                expected_name = entry["platforms"]["windows"]["installer_base_name"] + "_v0.0.1" + ("_light" if light else "") + "_win7_" + arch
+                expected_arch = f"ArchitecturesAllowed={arch}os\n"
+                server_dir = "ServerDir := ExpandConstant('{autopf}\\" + entry["platforms"]["windows"]["install_dir"] + "\\server');"
+                if expected_arch not in expanded or f"OutputBaseFilename={expected_name}\n" not in expanded or "MinVersion=6.1sp1\n" not in expanded or server_dir not in expanded:
+                    errors.append(f"edition {entry['id']}: Win7 {arch} package identity, minimum OS or server directory changed")
+                if ("ArchitecturesInstallIn64BitMode=x64os\n" in expanded) != (arch == "x64"):
+                    errors.append(f"edition {entry['id']}: Win7 {arch} has incorrect install mode")
+                if ("Source: \".\\tsf_dll\\64\\*.dll\"" in expanded) != (arch == "x64"):
+                    errors.append(f"edition {entry['id']}: Win7 {arch} has incorrect 64-bit TIP payload")
     # 系统目录里的工具要绕开 WOW64 重定向才看得到真正的 System32：Inno 6 在 64 位安装模式下 Exec 本来就绕开，Inno 7 的 32 位 Setup 只有 ExecWithNativeSysDir 绕开。两个版本各展开一次，确认走到了对的那个函数。
     for version, expected in ((CI_ISPP_VERSION, "Exec("), (encode_ver(7, 0, 0), "ExecWithNativeSysDir(")):
         expanded = preprocess(editions[0]["id"], ispp_version=version)

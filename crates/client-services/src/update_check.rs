@@ -230,12 +230,16 @@ pub fn select_platform_release(
                 {
                     continue;
                 }
+                let architecture = match arch {
+                    Some("x86_64" | "x64") => "x64",
+                    Some("x86" | "i686") => "x86",
+                    _ => continue,
+                };
                 // 专用发布必须包含本版本唯一的兼容安装包；缺包时继续找较早的可安装发布。
                 let installer = edition_installer_prefix(edition).and_then(|prefix| {
                     let expected = format!(
-                        "{}{}.exe",
-                        prefix.replace("_Setup_v", "_Windows7_Setup_v"),
-                        update.version.display
+                        "{}{}_win7_{architecture}.exe",
+                        prefix, update.version.display
                     );
                     select_unique_release_asset(
                         assets.map(|assets| assets.iter().collect()),

@@ -20,7 +20,7 @@ Server 异常仅输出固定阶段名，不记录可能包含路径、凭据或�
 
 ### 既有笔记审计
 
-- [完整构建与安装布局](../../proposed/feature/2026-10-24-windows7-product-build.md)：部分重叠，本篇记录真实 Server 启动暴露的系统 API 边界，产品布局与安装生命周期仍由原笔记持有。
+- [完整构建与安装布局](../../implemented/feature/2026-10-24-windows7-product-build.md)：部分重叠，本篇记录真实 Server 启动暴露的系统 API 边界，产品布局与安装生命周期仍由原笔记持有。
 - [DPI 与绘制回退](../../implemented/feature/2026-10-23-windows-optional-dpi-and-composition.md)：部分重叠，原切片处理导入与设备路径，本篇补充 Win7 拒绝窗口样式的事实，不改变现代合成器。
 - 检索 Win7、管道权限、AppContainer 与重定向样式的活跃笔记，没有需要翻转的既有决定。
 
@@ -36,7 +36,7 @@ Server 异常仅输出固定阶段名，不记录可能包含路径、凭据或�
 
 Win7 SP1 x64 上两种进程架构的管道身份、辅助维护、语音控制连接和 DPI 五项测试均通过，共十项；Windows 11 上同套测试也通过。现代布局、DPI 与 transcript 三项回归及完整 Server 入口编译通过。已安装 Server 的 PID 在连续观测和真实管道打开期间保持不变，三条真实管道均返回当前会话与该 Server PID；关闭 UIAccess 的诊断副本也保持运行。
 
-`verify-local.sh --quick` 的两次远程门禁通过（12 分 36 秒、20 分 49 秒）。这些证据仅覆盖启动与通信边界；真实记事本的候选与中文提交仍未通过，由[产品安装提案](../../proposed/feature/2026-10-24-windows7-product-build.md)继续跟踪，不能以本篇通过宣称完整 Win7 支持。
+`verify-local.sh --quick` 的两次远程门禁通过（12 分 36 秒、20 分 49 秒）。启动与通信边界通过后，真实记事本暴露的首次文档焦点缺口由[线程焦点修复](2026-10-24-windows-tsf-activation-document-focus.md)补齐。最终受信任签名产品的 x64／x86 系统记事本均已显示候选并提交中文，完整证据见[产品构建](../../implemented/feature/2026-10-24-windows7-product-build.md)。
 
 ## Consequences
 

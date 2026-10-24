@@ -496,35 +496,51 @@ fn a_request_document_takes_only_the_known_fields() {
 }
 
 #[test]
-fn windows7_only_offers_its_own_edition_and_compatible_installer() {
+fn windows7_only_offers_its_own_edition_architecture_and_compatible_installer() {
     let compatible = release(
         "windows7-v1.2.0",
         json!([
-            { "name": "MetasequoiaIME-Full_Windows7_Setup_v1.2.0.exe", "digest": digest('a') },
-            { "name": "MetasequoiaIME-Wubi_Windows7_Setup_v1.2.0.exe", "digest": digest('b') },
-            { "name": "MetasequoiaIME-Full_Setup_v1.2.0.exe", "digest": digest('c') },
-            { "name": "MetasequoiaIME-Full_Windows7_Setup_v1.2.0.exe.sha256" }
+            { "name": "MetasequoiaIME-Full_Setup_v1.2.0_win7_x64.exe", "digest": digest('a') },
+            { "name": "MetasequoiaIME-Full_Setup_v1.2.0_win7_x86.exe", "digest": digest('b') },
+            { "name": "MetasequoiaIME-Wubi_Setup_v1.2.0_win7_x64.exe", "digest": digest('c') },
+            { "name": "MetasequoiaIME-Full_Setup_v1.2.0.exe", "digest": digest('d') },
+            { "name": "MetasequoiaIME-Full_Setup_v1.2.0_win7_x64.exe.sha256" }
         ]),
     );
     let releases = [windows_release(), compatible.clone()];
-    for architecture in [Some("x86"), Some("x86_64"), None] {
+    for (architecture, suffix, hash) in [
+        ("x86_64", "x64", 'a'),
+        ("x64", "x64", 'a'),
+        ("x86", "x86", 'b'),
+        ("i686", "x86", 'b'),
+    ] {
         assert_eq!(
-            pick(&releases, "windows7", None, architecture),
+            pick(&releases, "windows7", None, Some(architecture)),
             chosen(
-                "MetasequoiaIME-Full_Windows7_Setup_v1.2.0.exe",
-                Some(hex('a'))
+                &format!("MetasequoiaIME-Full_Setup_v1.2.0_win7_{suffix}.exe"),
+                Some(hex(hash))
             )
         );
     }
+    for architecture in [None, Some("aarch64"), Some(""), Some("unknown")] {
+        assert_eq!(pick(&releases, "windows7", None, architecture), None);
+    }
     assert_eq!(
-        pick(&releases, "windows7", Some("wubi"), None),
+        pick(&releases, "windows7", Some("wubi"), Some("x86_64")),
         chosen(
-            "MetasequoiaIME-Wubi_Windows7_Setup_v1.2.0.exe",
-            Some(hex('b'))
+            "MetasequoiaIME-Wubi_Setup_v1.2.0_win7_x64.exe",
+            Some(hex('c'))
         )
     );
-    assert_eq!(pick(&releases, "windows7", Some("pinyin"), None), None);
-    assert_eq!(pick(&[windows_release()], "windows7", None, None), None);
+    assert_eq!(pick(&releases, "windows7", Some("wubi"), Some("x86")), None);
+    assert_eq!(
+        pick(&releases, "windows7", Some("pinyin"), Some("x86_64")),
+        None
+    );
+    assert_eq!(
+        pick(&[windows_release()], "windows7", None, Some("x86_64")),
+        None
+    );
     assert_eq!(pick(&[compatible], "windows", None, None), None);
     assert_eq!(
         pick(&releases, "windows", None, None),
@@ -534,13 +550,13 @@ fn windows7_only_offers_its_own_edition_and_compatible_installer() {
 
 #[test]
 fn windows7_skips_missing_ambiguous_and_unpublished_installers() {
-    let name = "MetasequoiaIME-Full_Windows7_Setup_v1.2.0.exe";
+    let name = "MetasequoiaIME-Full_Setup_v1.2.0_win7_x64.exe";
     let valid = release("windows7-v1.2.0", json!([{ "name": name }]));
     let missing = release(
         "windows7-v9.0.0",
-        json!([{ "name": "MetasequoiaIME-Full_Setup_v9.0.0.exe" }]),
+        json!([{ "name": "MetasequoiaIME-Full_Setup_v9.0.0_win7_x86.exe" }]),
     );
-    let duplicate_name = "MetasequoiaIME-Full_Windows7_Setup_v8.0.0.exe";
+    let duplicate_name = "MetasequoiaIME-Full_Setup_v8.0.0_win7_x64.exe";
     let duplicate = release(
         "windows7-v8.0.0",
         json!([{ "name": duplicate_name }, { "name": duplicate_name }]),
@@ -554,19 +570,24 @@ fn windows7_skips_missing_ambiguous_and_unpublished_installers() {
             &[missing.clone(), duplicate.clone(), prerelease, draft],
             "windows7",
             None,
-            None
+            Some("x86_64")
         ),
         None
     );
     assert_eq!(
-        pick(&[missing, duplicate, valid.clone()], "windows7", None, None),
+        pick(
+            &[missing, duplicate, valid.clone()],
+            "windows7",
+            None,
+            Some("x86_64")
+        ),
         chosen(name, None)
     );
     let request = UpdateCheckRequest {
         platform: "windows7".into(),
         current_version: "1.0.0".into(),
         edition: None,
-        arch: None,
+        arch: Some("x86_64".into()),
     };
     assert!(matches!(
         evaluate_update(
@@ -581,15 +602,24 @@ fn windows7_skips_missing_ambiguous_and_unpublished_installers() {
 fn windows7_rejects_mismatched_release_pages_and_installer_versions() {
     let wrong_version = release(
         "windows7-v2.0.0",
-        json!([{ "name": "MetasequoiaIME-Full_Windows7_Setup_v1.0.0.exe" }]),
+        json!([{ "name": "MetasequoiaIME-Full_Setup_v1.0.0_win7_x64.exe" }]),
     );
     let mut wrong_page = release(
         "windows7-v2.0.0",
-        json!([{ "name": "MetasequoiaIME-Full_Windows7_Setup_v2.0.0.exe" }]),
+        json!([{ "name": "MetasequoiaIME-Full_Setup_v2.0.0_win7_x64.exe" }]),
     );
     wrong_page["html_url"] = json!(format!("{PAGE}/tag/windows-v2.0.0"));
+    let old_contract = release(
+        "windows7-v2.0.0",
+        json!([{ "name": "MetasequoiaIME-Full_Windows7_Setup_v2.0.0.exe" }]),
+    );
     assert_eq!(
-        pick(&[wrong_version, wrong_page], "windows7", None, None),
+        pick(
+            &[wrong_version, wrong_page, old_contract],
+            "windows7",
+            None,
+            Some("x86_64")
+        ),
         None
     );
 }

@@ -20,7 +20,7 @@ Server、候选窗和 `msimeui` 直接导入 `GetDpiForWindow`、`SetThreadDpiAw
 
 ### 边界与历史审计
 
-这是 [完整 Win7 支持](../../proposed/feature/2026-10-23-windows7-support.md) 的装载与 DPI 基础切片，不能据此宣称 Win7 产品已支持。设置应用、Rust 标准库与第三方依赖、共享面板和安装包仍需完成适配。没有修改产品默认值、TSF/Server 协议、设置入口或其他平台实现。
+这是 [完整 Win7 支持](../../implemented/feature/2026-10-23-windows7-support.md) 的装载与 DPI 基础切片，不能据此宣称 Win7 产品已支持。设置应用、Rust 标准库与第三方依赖、共享面板和安装包仍需完成适配。没有修改产品默认值、TSF/Server 协议、设置入口或其他平台实现。
 
 [候选渲染边界](../architecture/2026-10-13-cross-platform-candidate-rendering-boundaries.md) 部分重叠：候选仍归 Server，TSF DLL 不画界面。按 DPI、DirectComposition、Win7 关键词检查活跃架构与提案笔记，没有需要替换的既有兼容决定；完整支持提案保留未完成验收清单。
 
