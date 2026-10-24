@@ -12,6 +12,8 @@ Status: implemented
 
 本机 Python 启动器、Git Bash 搜索次序和原生工具读取 `/dev/fd` 的问题通过临时调用环境处理，不把本机路径、凭据或工具 shim 加入仓库。缺少 SDK、设备或构建依赖的阶段仍如实报告，不能据此声称全门禁通过。
 
+候选宽度夹具避免遮蔽外层 `inline_card`；HUD 时长和工具栏缩放的常量断言使用 `static_assert`，不让 MSVC 的常量条件警告中断 `/WX`。TSF 标点策略测试显式以 UTF-8 读取中文字符，避免开发机代码页把多个 Unicode case 折成同一个值。上述修正保留检查内容，不调整警告级别或失败基线。
+
 `candidate_layout_reload` 的离线释义夹具用原子 `create_directory` 取得独立目录，名字含单调时钟值，碰撞时换名重试；只清理自己成功创建的目录。多个 worktree 的本机门禁可以同时运行，不能在测试开头删除固定名字的共享目录。
 
 ## Existing note audit
