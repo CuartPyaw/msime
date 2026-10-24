@@ -3268,6 +3268,8 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
 }
 
 - (void)fetchOnDeviceGlosses:(NSArray<NSString *> *)words targets:(NSArray<NSString *> *)targets {
+    // 旧输入框的离线词典回调可能晚于焦点交接，不能覆盖当前输入框的系统翻译等待页。
+    if (MSIMEFocusedController != self) return;
     if (MSIMEFetchOnDeviceCandidateGlosses == nullptr) return;
     NSData *wordsJSON = [NSJSONSerialization dataWithJSONObject:words options:0 error:nil];
     NSData *targetsJSON = [NSJSONSerialization dataWithJSONObject:targets options:0 error:nil];
