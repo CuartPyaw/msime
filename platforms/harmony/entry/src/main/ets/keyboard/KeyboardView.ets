@@ -1745,7 +1745,7 @@ struct KeyboardView {
         if ($$.hint !== undefined && $$.hint.length > 0) {
           Text($$.hint)
             .fontSize(KEY_HINT_FONT_SIZE)
-            .minFontSize(7)
+            .minFontSize(6)
             .maxFontSize(KEY_HINT_FONT_SIZE)
             .heightAdaptivePolicy(TextHeightAdaptivePolicy.LAYOUT_CONSTRAINT_FIRST)
             .height(KEY_HINT_LINE_HEIGHT_VP)
