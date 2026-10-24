@@ -13642,13 +13642,15 @@ private:
         {L"baguwen_word", L"八股文·词级（约 197 MB，LGPL-3.0）"},
         {L"baguwen_compact", L"八股文·词级紧凑（约 39 MB，LGPL-3.0）"},
     };
+    auto selector = select_control(L"语法模型", choices, model, [this](std::wstring const &value) {
+      change([&](PreferencesDocument &doc) {
+        doc.SetString(L"sentence_association.grammar_model", value);
+      }, true);
+    });
+    A11y::SetAutomationId(selector, L"sentence-grammar-model");
     add_row(group, 0xE8C1, L"语法模型",
             L"octagram 语法模型给整句候选加分；模型按需下载，不随安装包。选择后切换一次输入框生效。",
-            select_control(L"语法模型", choices, model, [this](std::wstring const &value) {
-              change([&](PreferencesDocument &doc) {
-                doc.SetString(L"sentence_association.grammar_model", value);
-              }, false);
-            }));
+            selector);
     const auto pack = grammar_pack_for_model(model);
     if (pack.empty())
       return;
@@ -13669,10 +13671,12 @@ private:
     StackPanel actions;
     actions.Orientation(Orientation::Horizontal);
     actions.Spacing(8);
-    if (status != L"installed" && !installing && !removing)
-      actions.Children().Append(button_control(status == L"outdated" ? L"更新" : L"下载",
-                                                [this, pack] { install_sentence_pack(pack); },
-                                                loaded_));
+    if (status != L"installed" && !installing && !removing) {
+      auto download = button_control(status == L"outdated" ? L"更新" : L"下载",
+                                     [this, pack] { install_sentence_pack(pack); }, loaded_);
+      A11y::SetAutomationId(download, L"sentence-model-download-" + pack);
+      actions.Children().Append(download);
+    }
     if (status == L"installed" && !installing && !removing)
       actions.Children().Append(button_control(L"删除", [this, pack] { remove_sentence_pack(pack); },
                                                 loaded_));
