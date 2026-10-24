@@ -59,6 +59,7 @@ NOT_APPLICABLE = {
     "touch_japanese_toggle_input": "仅 Android 原生日语九键支持连点循环；macOS 使用物理键盘罗马字输入，共享设置页不提供此开关",
     "touch_quick_punctuation_symbols": "仅 iOS 原生触屏键盘提供自定义快捷符号；macOS 屏幕键盘不读取此列表，共享设置页不提供此项",
     "touch_number_keypad_order": "the touch keyboard's nine-key digit layer",
+    "touch_text_edit_button_order": "仅 Android 原生文本编辑面板读取七个侧边动作的排序；macOS 不提供此面板，共享设置页也不显示排序入口",
     "touch_twenty_six_key_number_layout": "the touch keyboard's 26-key digit layer",
     "touch_shuangpin_key_hints": "the touch keyboard's 26-key shuangpin letter keys",
     "touch_spelling_position": "where the touch keyboard puts the spelling; macOS composes inline and its candidate window follows `candidate_preedit_style`",

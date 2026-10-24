@@ -106,6 +106,25 @@ pub enum NumberKeypadOrder {
     Calculator,
 }
 
+/// 文本编辑面板可排序的侧边动作；方向、选择、文档边界与换行固定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextEditButton {
+    Copy,
+    Paste,
+    SelectAll,
+    Cut,
+    Space,
+    NumberPad,
+    Delete,
+}
+
+/// 从左列上到下，再到右列前三格；换行固定在右下角。
+pub fn default_text_edit_button_order() -> Vec<TextEditButton> {
+    use TextEditButton::*;
+    vec![Copy, Paste, SelectAll, Cut, Space, NumberPad, Delete]
+}
+
 /// 触屏 26 键按「123」切到的数字层。桌面宿主原样保留、不使用。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -1255,6 +1274,9 @@ pub struct Preferences {
     /// 九宫格数字层按电话还是计算器排列；字母层不受影响。
     #[serde(default)]
     pub touch_number_keypad_order: NumberKeypadOrder,
+    /// Android 文本编辑面板七个侧边动作的完整排列；其他宿主保留但不使用。
+    #[serde(default = "default_text_edit_button_order")]
+    pub touch_text_edit_button_order: Vec<TextEditButton>,
     /// 26 键按「123」时出一行 1 到 0 的数字符号页，还是九宫格那样的 3×3 数字层。
     #[serde(default)]
     pub touch_twenty_six_key_number_layout: TwentySixKeyNumberLayout,
@@ -3206,6 +3228,7 @@ impl Default for Preferences {
             touch_keyboard_height_adjustment: 0,
             touch_voice_shortcut: false,
             touch_number_keypad_order: NumberKeypadOrder::default(),
+            touch_text_edit_button_order: default_text_edit_button_order(),
             touch_twenty_six_key_number_layout: TwentySixKeyNumberLayout::default(),
             touch_shuangpin_key_hints: false,
             touch_japanese_toggle_input: true,
@@ -3939,6 +3962,14 @@ impl Preferences {
     }
 
     pub fn validate(&self) -> Result<(), PreferencesError> {
+        let expected = default_text_edit_button_order();
+        if self.touch_text_edit_button_order.len() != expected.len()
+            || !expected
+                .iter()
+                .all(|button| self.touch_text_edit_button_order.contains(button))
+        {
+            return Err(PreferencesError::InvalidTextEditButtonOrder);
+        }
         for helpcode in [&self.quanpin_helpcode, &self.shuangpin_helpcode] {
             if !matches!(
                 helpcode.trigger_key.as_str(),
@@ -4199,6 +4230,8 @@ impl PreferencesSnapshot {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PreferencesError {
+    #[error("text edit button order must contain each of the seven side actions once")]
+    InvalidTextEditButtonOrder,
     #[error("辅助码触发键必须为空或 ; / \\ ` = 中的一个标点")]
     InvalidHelpcodeTriggerKey,
     #[error("五笔二三候选键必须是两个不同的单个 ASCII 标点")]
