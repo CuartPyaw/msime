@@ -50,6 +50,7 @@ Ok(stayed)
 
 ## Verification
 
-- 本机按维护者习惯只做静态检查，Rust 编译与单测交给 CI（`ci-platforms.yml` 覆盖 `input-runtime`）。
-- 待 CI 上 `cargo test -p msime-input-runtime` 通过，重点看新增的 `paging_past_the_short_last_page_moves_the_highlight`。
-- 真机复验：输入 `szyd`，连按 `+` 翻过若干页，每次按 `1`，上屏的应当始终是当前屏幕第一行。
+- 旧的 `expansion_that_fills_the_current_page_does_not_advance_past_it` 用三个已加载、四个隐藏的候选，展开后实际有第二页，与本篇新规则冲突；夹具改为只隐藏两个候选，验证只补满唯一一页时停留。
+- `candidate_page_len_matches_the_published_page_without_building_rows` 的三加四夹具仍保留，按新规则断言已进入第二页、仅剩两行，轻量计数与同次发布页的行数一致。`paging_past_the_short_last_page_moves_the_highlight` 继续覆盖新增完整第二页时向前翻页和数字提交。
+- 固定基点 `3fc3fab9b4` 的旧分页测试有两项失败；更新后三项分页专项通过，Runtime 全量 365 项通过、1 项未修改的插件查询分配断言失败（实测 49、旧预算 46）。未提高预算。`cargo fmt --all -- --check`、clippy、笔记及差异检查通过。Windows 完整 quick 已运行但退出 1：仍有宿主可移植测试、POSIX/换行环境契约、`client-core` 测试缺字段和既有 pipe-only 警告视为错误；该机没有配置 macOS/Linux/Android 构建，不能据此宣称全部平台通过。
+- Windows 真实输入框与管道延迟的产品验收仍需单独完成；这些测试只验证共享分页行为，不能证明跨进程候选显示与提交已一致。
