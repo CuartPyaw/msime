@@ -6,6 +6,7 @@ import android.content.Intent;
 import android.graphics.Bitmap;
 import android.os.SystemClock;
 import android.system.Os;
+import android.system.OsConstants;
 import android.view.accessibility.AccessibilityNodeInfo;
 import app.msime.ocr.fixture.SyntheticOcrFixture;
 import java.io.File;
@@ -90,16 +91,7 @@ public final class OcrProductDeviceSmoke extends DeviceSmoke {
         check(connectivity.getActiveNetwork() == null, "product OCR test runs without an active network");
         stage = "clear prior synthetic module";
         File previous = new File(context.getFilesDir(), "bootstrap/state/resource-packs/ocr-module-android");
-        if (previous.exists()) {
-            File[] entries = previous.listFiles();
-            check(entries != null, "synthetic module directory readable");
-            for (File entry : entries) {
-                check(entry.getName().equals("msime-ocr-v1.apk") || entry.getName().equals("msime-model.json"),
-                    "only known synthetic module files can be removed");
-                check(entry.delete(), "remove prior synthetic module file");
-            }
-            check(previous.delete(), "remove prior synthetic module directory");
-        }
+        if (previous.exists()) clearSyntheticModule(previous, "");
         ClassLoader loader = context.getClassLoader();
         runtime = loader.loadClass("app.msime.android.OcrRuntime");
         open = runtime.getMethod("open", Context.class);
@@ -142,6 +134,25 @@ public final class OcrProductDeviceSmoke extends DeviceSmoke {
         source.delete();
         stage = "host handwriting client after OCR";
         handwritingClient();
+    }
+
+    /** ART 会在模块旁生成 oat；仅清理固定合成模块及其 x86_64 缓存，不跟随符号链接。 */
+    private void clearSyntheticModule(File path, String relative) throws Exception {
+        int mode = Os.lstat(path.getAbsolutePath()).st_mode;
+        if (relative.isEmpty() || relative.equals("oat") || relative.equals("oat/x86_64")) {
+            check(OsConstants.S_ISDIR(mode), "synthetic module cache is a real directory");
+            File[] entries = path.listFiles();
+            check(entries != null, "synthetic module directory readable");
+            for (File entry : entries)
+                clearSyntheticModule(entry, relative.isEmpty() ? entry.getName() : relative + "/" + entry.getName());
+        } else {
+            check(relative.equals("msime-ocr-v1.apk") || relative.equals("msime-model.json")
+                || relative.equals("oat/x86_64/msime-ocr-v1.odex")
+                || relative.equals("oat/x86_64/msime-ocr-v1.vdex")
+                || relative.equals("oat/x86_64/msime-ocr-v1.art"), "only known synthetic module files can be removed");
+            check(OsConstants.S_ISREG(mode), "synthetic module cache is a regular file");
+        }
+        check(path.delete(), "remove prior synthetic module entry");
     }
 
     private void productChecks() throws Exception {
