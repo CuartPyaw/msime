@@ -24,6 +24,7 @@ int main() {
   assert(settings_page_for_route("settings:dictionary") == 13 && settings_page_for_route("settings:vocabulary") == 14);
   assert(settings_page_for_route("settings:plugins") == 15);
   assert(settings_page_for_route("settings:mcp") == 21);
+  assert(settings_page_for_route("settings:keyboard-skin") == 22);
   assert(settings_page_for_route("settings:screen-keyboard") == 20 && settings_page_for_route("settings:osk") == 20);
   assert(settings_page_for_route("settings:handwriting") == (MSIME_EDITION_HANDWRITING != 0 ? 20 : 3));
   wchar_t root[MAX_PATH]{}, file[MAX_PATH]{};

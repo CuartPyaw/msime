@@ -18,7 +18,7 @@ target_include_directories(msime-win7-handwriting-window PUBLIC ../../../../crat
 target_compile_features(msime-win7-handwriting-window PUBLIC cxx_std_17)
 target_compile_definitions(msime-win7-handwriting-window PUBLIC MSIME_WINDOWS_VERSION="${MSIME_WINDOWS_VERSION}")
 target_compile_definitions(msime-win7-handwriting-window PUBLIC UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN)
-target_link_libraries(msime-win7-handwriting-window PUBLIC nlohmann_json::nlohmann_json "${MSIME_HOST_LIBRARY}" shell32 ole32 uuid advapi32 user32 gdi32 comdlg32 comctl32 crypt32)
+target_link_libraries(msime-win7-handwriting-window PUBLIC nlohmann_json::nlohmann_json "${MSIME_HOST_LIBRARY}" shell32 ole32 uuid advapi32 user32 gdi32 comdlg32 comctl32 crypt32 gdiplus msimg32)
 if(MSVC)
   target_compile_options(msime-win7-handwriting-window PRIVATE /W4 /WX /utf-8)
 else()

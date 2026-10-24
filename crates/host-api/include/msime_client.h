@@ -483,6 +483,12 @@ char *msime_client_personal_dictionary_request(const uint8_t *request, size_t le
  * atomically: use a worker. Failures carry the shared community_* codes the
  * settings pages already have wording for, not a Display string. */
 char *msime_client_custom_skin_library(const uint8_t *request, size_t length);
+
+/* 共用键盘设计操作，不写磁盘。请求 operation 为 catalog、reset、template（index）、
+ * background（index、design）或 optimize_contrast（design）。返回普通 {ok,value} JSON；
+ * catalog 返回 default、templates、backgrounds，其余返回完整设计。未知字段、无效设计、
+ * 越界索引和超过 1 MiB 的请求返回 keyboard_skin_invalid。结果由 msime_client_string_free 释放。 */
+char *msime_client_keyboard_skin_design(const uint8_t *request, size_t length);
 /* JSON {directory:absolute state root,id:publication uuid,name,design}. Starts
  * a skin trial and imports the design into the library, answering
  * {skin,trial}. One call rather than two: the trial is what remembers the skin

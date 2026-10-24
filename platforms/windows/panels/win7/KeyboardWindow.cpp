@@ -1,5 +1,6 @@
 #include "KeyboardWindow.h"
 #include "PanelContext.h"
+#include "../../settings/win7/KeyboardSkin.h"
 #include "../../settings/win7/SurfaceLauncher.h"
 #include "../../compat/WindowsDpi.h"
 #include <commctrl.h>
@@ -17,6 +18,7 @@ constexpr UINT completed_message = WM_APP + 80;
 constexpr wchar_t window_class[] = L"MSIME.Windows7Keyboard" MSIME_EDITION_NAME_SUFFIX;
 struct Configuration {
   Json preferences, theme;
+  shared::keyboard_skin::Look look;
   std::optional<std::map<WORD,std::wstring>> hints;
 };
 class Worker {
@@ -41,6 +43,7 @@ private:
             {{"global_theme",result.preferences.value("global_theme",std::string("system"))},
              {"custom_theme",result.preferences.value("custom_theme",Json::object())}, {"dark",dark},
              {"skins_directory",context.directory.u8string()}, {"layout",result.preferences.value("candidate_layout",std::string("vertical"))}})).value_or(Json());
+          result.look = shared::keyboard_skin::Look::resolved(result.preferences,result.theme);
         }
       } catch (const std::exception&) { result = {}; }
       lock.lock(); if (!stopping_) { completed_ = std::move(result); PostMessageW(window_,completed_message,0,0); }
@@ -183,6 +186,9 @@ struct KeyboardWindow::State {
       }
       SetWindowPos(host,HWND_TOPMOST,frame.left,frame.top,frame.right - frame.left,frame.bottom - frame.top,SWP_NOACTIVATE);
     }
+    if (font) DeleteObject(font);
+    font = CreateFontW(-px(12),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,OUT_DEFAULT_PRECIS,CLIP_DEFAULT_PRECIS,DEFAULT_QUALITY,DEFAULT_PITCH,configuration.look.mono() ? L"Consolas" : L"Segoe UI");
+    for (const auto& control : controls) SendMessageW(control.second,WM_SETFONT,reinterpret_cast<WPARAM>(font),TRUE);
     initially_loaded = true; rebuild(); InvalidateRect(host,nullptr,TRUE);
     notice(active_layout == "nine_key_shuangpin" && !configuration.hints ? L"九键双拼键面无法读取，按键已停用；请刷新重试。" : L"先点选编辑器，再点击按键；拖动标题栏可移动键盘。");
   }
@@ -235,9 +241,17 @@ struct KeyboardWindow::State {
     const auto found = keys.find(static_cast<int>(item.CtlID));
     const bool function = found == keys.end() || found->second.modifier || found->second.label.size() > 1;
     const bool selected = (item.itemState & ODS_SELECTED) || (found != keys.end() && keyboard::pressed(found->second,modifiers));
-    const auto fill = selected ? accent : function ? function_color : key_color;
-    auto brush = CreateSolidBrush(fill); FillRect(item.hDC,&item.rcItem,brush); DeleteObject(brush);
-    SetBkMode(item.hDC,TRANSPARENT); SetTextColor(item.hDC,(item.itemState & ODS_DISABLED) ? GetSysColor(COLOR_GRAYTEXT) : selected ? RGB(255,255,255) : text_color);
+    const auto& look = configuration.look;
+    if (shared::keyboard_skin::start()) {
+      Gdiplus::Graphics graphics(item.hDC); RECT client{}; GetClientRect(host,&client);
+      POINT origin{}; MapWindowPoints(item.hwndItem,host,&origin,1);
+      graphics.TranslateTransform(-static_cast<float>(origin.x),-static_cast<float>(origin.y));
+      shared::keyboard_skin::background(graphics,Gdiplus::RectF(0,0,static_cast<float>(client.right),static_cast<float>(client.bottom)),look,dpi / 96.0f);
+      graphics.ResetTransform();
+      shared::keyboard_skin::key(graphics,Gdiplus::RectF(static_cast<float>(item.rcItem.left),static_cast<float>(item.rcItem.top),static_cast<float>(item.rcItem.right - item.rcItem.left),static_cast<float>(item.rcItem.bottom - item.rcItem.top)),look,function,selected,dpi / 96.0f);
+    }
+    const auto foreground_color = selected || function ? shared::keyboard_skin::readable(selected ? look.accent : look.action) : look.text;
+    SetBkMode(item.hDC,TRANSPARENT); SetTextColor(item.hDC,(item.itemState & ODS_DISABLED) ? GetSysColor(COLOR_GRAYTEXT) : RGB((foreground_color >> 16) & 255,(foreground_color >> 8) & 255,foreground_color & 255));
     const auto old = SelectObject(item.hDC,font); auto bounds = item.rcItem; InflateRect(&bounds,-px(2),-px(2));
     const auto title = shared::control_text::wide(shared::control_text::read(item.hwndItem,4096).value_or(""));
     DrawTextW(item.hDC,title.c_str(),static_cast<int>(title.size()),&bounds,DT_CENTER | DT_VCENTER | (title.find(L'\n') == std::wstring::npos ? DT_SINGLELINE : DT_WORDBREAK) | DT_NOPREFIX);
@@ -253,7 +267,7 @@ struct KeyboardWindow::State {
     case WM_SIZE: state->layout(); return 0;
     case WM_COMMAND: state->command(LOWORD(wparam),HIWORD(wparam),reinterpret_cast<HWND>(lparam)); return 0;
     case WM_DRAWITEM: state->draw(*reinterpret_cast<DRAWITEMSTRUCT*>(lparam)); return TRUE;
-    case WM_ERASEBKGND: { RECT area{}; GetClientRect(window,&area); FillRect(reinterpret_cast<HDC>(wparam),&area,state->background_brush ? state->background_brush : GetSysColorBrush(COLOR_BTNFACE)); return TRUE; }
+    case WM_ERASEBKGND: { RECT area{}; GetClientRect(window,&area); if (shared::keyboard_skin::start()) { Gdiplus::Graphics graphics(reinterpret_cast<HDC>(wparam)); shared::keyboard_skin::background(graphics,Gdiplus::RectF(0,0,static_cast<float>(area.right),static_cast<float>(area.bottom)),state->configuration.look,state->dpi / 96.0f); } return TRUE; }
     case WM_CTLCOLORSTATIC: SetTextColor(reinterpret_cast<HDC>(wparam),state->text_color); SetBkColor(reinterpret_cast<HDC>(wparam),state->background); return reinterpret_cast<LRESULT>(state->background_brush ? state->background_brush : GetSysColorBrush(COLOR_BTNFACE));
     case completed_message: state->complete(); return 0;
     case WM_CLOSE: DestroyWindow(window); return 0;

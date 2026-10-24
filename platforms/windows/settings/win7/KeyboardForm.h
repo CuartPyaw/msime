@@ -16,7 +16,7 @@ namespace msime::settings::win7 {
 class KeyboardForm {
 public:
   enum Control { open = 4300, preview, height, height_value, key_gap, key_value, row_gap, row_value, voice,
-    save, reset, themes, handwriting, notice };
+    save, reset, themes, handwriting, notice, skin_editor };
   struct Command { bool handled = false, reset = false, theme = false; std::vector<Change> changes; std::optional<std::string> route; };
   int create(const std::function<HWND(const wchar_t*,const wchar_t*,DWORD,int,int,int)>& row) {
     int top = 0;
@@ -40,6 +40,7 @@ public:
     add(save,L"BUTTON",L"保存屏幕键盘设置",WS_TABSTOP | BS_PUSHBUTTON,32);
     add(reset,L"BUTTON",L"恢复默认：高度、间距和顶部语音入口",WS_TABSTOP | BS_PUSHBUTTON,32);
     add(themes,L"BUTTON",L"外观跟随主题与颜色模式：前往主题",WS_TABSTOP | BS_PUSHBUTTON,32);
+    add(skin_editor,L"BUTTON",L"制作与编辑键盘皮肤",WS_TABSTOP | BS_PUSHBUTTON,32);
     if constexpr (MSIME_EDITION_HANDWRITING != 0) add(handwriting,L"BUTTON",L"打开手写识别板",WS_TABSTOP | BS_PUSHBUTTON,32);
     add(notice,L"STATIC",L"",SS_LEFT,56); enable(false); return top;
   }
@@ -64,6 +65,7 @@ public:
     Command result; result.handled = true;
     if (HIWORD(event) != BN_CLICKED || !enabled_ || !loaded_ || !IsWindowEnabled(get(id))) return result;
     if (id == open || id == handwriting) result.route = id == open ? "keyboard" : "handwriting";
+    else if (id == skin_editor) result.route = "settings:keyboard-skin";
     else if (id == themes) result.theme = true;
     else if (id == reset) result.reset = true;
     else if (id == voice) dirty_.insert(id);

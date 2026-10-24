@@ -1,4 +1,5 @@
 #include "SettingsWindow.h"
+#include "KeyboardSkinPage.h"
 #include "SettingsRoutes.h"
 #include "AboutForm.h"
 #include "PreferencesStore.h"
@@ -83,7 +84,7 @@ bool copy_clipboard(HWND owner, std::wstring_view text) {
 }
 namespace ts = msime::settings::toolbar_size;
 namespace ps = msime::settings::punctuation;
-  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary, plugins, about, community_plugins, community_resources, voice, keyboard, mcp };
+  enum class Surface { shortcuts, reference, toolbar, developer, selection, output, punctuation, candidates, mode, advanced, scheme, gloss, translation, appearance, ai, account, themes, community, statistics, clipboard, cloud_clipboard, dictionary, vocabulary, plugins, about, community_plugins, community_resources, voice, keyboard, mcp, keyboard_skin };
 constexpr std::array<std::pair<Surface, const wchar_t*>, 6> input_pages{{
     {Surface::scheme, L"输入方案"},
     {Surface::mode, L"中英模式"}, {Surface::selection, L"选词与翻页"},
@@ -954,6 +955,7 @@ struct SettingsWindow::State {
   int about_height = 0;
   McpPage::Services mcp_services;
   std::unique_ptr<McpPage> mcp_page;
+  std::unique_ptr<KeyboardSkinPage> keyboard_skin_page;
   int keyboard_height = 0;
   bool keyboard_created = false;
   KeyboardForm keyboard_form;
@@ -1049,7 +1051,7 @@ struct SettingsWindow::State {
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH, L"Segoe UI");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
-    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板", L"词库", L"背单词", L"插件", L"关于与帮助", L"社区插件", L"社区词库与回复模板", L"语音输入", MSIME_EDITION_HANDWRITING != 0 ? L"屏幕键盘与手写" : L"屏幕键盘", L"连接 AI 助手"})
+    for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板", L"词库", L"背单词", L"插件", L"关于与帮助", L"社区插件", L"社区词库与回复模板", L"语音输入", MSIME_EDITION_HANDWRITING != 0 ? L"屏幕键盘与手写" : L"屏幕键盘", L"连接 AI 助手", L"键盘皮肤制作"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
     SendMessageW(selector, CB_SETCURSEL, 0, 0);
     tabs = add(window, WC_TABCONTROLW, L"", WS_TABSTOP, page_tabs);
@@ -1176,6 +1178,14 @@ struct SettingsWindow::State {
     if (!page->create(body, instance, font, dpi)) return;
     items.push_back({page->handle(), 0, McpPage::height, Surface::mcp});
     mcp_page = std::move(page);
+  }
+
+  void keyboard_skin_controls() {
+    if (keyboard_skin_page) return;
+    auto page = std::make_unique<KeyboardSkinPage>(preferences_directory);
+    if (!page->create(body,instance,font,dpi)) return;
+    items.push_back({page->handle(),0,KeyboardSkinPage::height,Surface::keyboard_skin});
+    keyboard_skin_page = std::move(page);
   }
 
   void keyboard_controls() {
@@ -1607,7 +1617,7 @@ struct SettingsWindow::State {
     info.cbSize = sizeof(info);
     info.fMask = SIF_RANGE | SIF_PAGE | SIF_POS;
     const bool reference = surface == Surface::reference;
-    const int total = surface == Surface::mcp ? McpPage::height : surface == Surface::keyboard ? keyboard_height : surface == Surface::voice ? voice_height : surface == Surface::community_resources ? community_resources_height : surface == Surface::community_plugins ? community_plugins_height : surface == Surface::about ? about_height : surface == Surface::plugins ? plugins_height : surface == Surface::vocabulary ? vocabulary_height : surface == Surface::dictionary ? dictionary_height : surface == Surface::cloud_clipboard ? cloud_clipboard_height : surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
+    const int total = surface == Surface::keyboard_skin ? KeyboardSkinPage::height : surface == Surface::mcp ? McpPage::height : surface == Surface::keyboard ? keyboard_height : surface == Surface::voice ? voice_height : surface == Surface::community_resources ? community_resources_height : surface == Surface::community_plugins ? community_plugins_height : surface == Surface::about ? about_height : surface == Surface::plugins ? plugins_height : surface == Surface::vocabulary ? vocabulary_height : surface == Surface::dictionary ? dictionary_height : surface == Surface::cloud_clipboard ? cloud_clipboard_height : surface == Surface::clipboard ? clipboard_height : surface == Surface::statistics ? statistics_height : surface == Surface::community ? community_height : surface == Surface::themes ? theme_height : surface == Surface::account ? account_height : surface == Surface::ai ? ai_height : surface == Surface::appearance ? appearance_height : surface == Surface::toolbar ? toolbar_height :
         surface == Surface::developer ? developer_height :
         surface == Surface::selection ? selection_height : surface == Surface::output ? output_height :
         surface == Surface::translation ? translation_form.height() : surface == Surface::gloss ? gloss_height : surface == Surface::punctuation ? punctuation_height : surface == Surface::candidates ? candidates_height :
@@ -2141,7 +2151,7 @@ struct SettingsWindow::State {
         }
         TabCtrl_SetCurSel(tabs, selected == 0 ? shortcut_tab : selected == 3 ? input_tab : expression_tab);
       }
-      surface = selected == 21 ? Surface::mcp : selected == 20 ? Surface::keyboard : selected == 19 ? Surface::voice : selected == 18 ? Surface::community_resources : selected == 17 ? Surface::community_plugins : selected == 16 ? Surface::about : selected == 15 ? Surface::plugins : selected == 14 ? Surface::vocabulary : selected == 13 ? Surface::dictionary : selected == 12 ? Surface::cloud_clipboard : selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
+      surface = selected == 22 ? Surface::keyboard_skin : selected == 21 ? Surface::mcp : selected == 20 ? Surface::keyboard : selected == 19 ? Surface::voice : selected == 18 ? Surface::community_resources : selected == 17 ? Surface::community_plugins : selected == 16 ? Surface::about : selected == 15 ? Surface::plugins : selected == 14 ? Surface::vocabulary : selected == 13 ? Surface::dictionary : selected == 12 ? Surface::cloud_clipboard : selected == 11 ? Surface::clipboard : selected == 10 ? Surface::statistics : selected == 9 ? Surface::community : selected == 8 ? Surface::themes : selected == 7 ? Surface::account : selected == 6 ? Surface::ai : selected == 5 ? Surface::appearance : selected == 4 ? expression_pages[static_cast<size_t>(expression_tab)].first : selected == 3 ?
           input_pages[static_cast<size_t>(input_tab)].first :
           selected == 2 ? Surface::developer : selected == 1 ? Surface::toolbar :
           shortcut_tab == 1 ? Surface::reference : Surface::shortcuts;
@@ -2151,6 +2161,7 @@ struct SettingsWindow::State {
       if (selected == 18) community_resources_controls();
       if (selected == 20) keyboard_controls();
       if (selected == 21) mcp_controls();
+      if (selected == 22) keyboard_skin_controls();
       if (selected == 19) voice_controls();
       scroll = 0;
       layout();

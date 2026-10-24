@@ -19219,3 +19219,35 @@ fn sentence_collocation_tuning_reaches_engine_options() {
         }
     );
 }
+
+#[test]
+fn keyboard_design_operations_are_explicit_bounded_and_do_not_need_a_state_directory() {
+    let call = |value: serde_json::Value| {
+        let request = serde_json::to_vec(&value).unwrap();
+        read(unsafe { msime_client_keyboard_skin_design(request.as_ptr(), request.len()) })
+    };
+    let catalog = call(serde_json::json!({"operation":"catalog"}));
+    assert_eq!(catalog["ok"], true);
+    assert_eq!(catalog["value"]["templates"].as_array().unwrap().len(), 15);
+    let reset = call(serde_json::json!({"operation":"reset"}));
+    assert_eq!(reset["value"], catalog["value"]["default"]);
+    assert_eq!(
+        call(serde_json::json!({"operation":"template","index":0}))["value"],
+        catalog["value"]["templates"][0]["design"]
+    );
+    for request in [
+        serde_json::json!({"operation":"template","index":99}),
+        serde_json::json!({"operation":"reset","unexpected":true}),
+    ] {
+        assert_eq!(call(request)["ok"], false);
+    }
+    assert_eq!(
+        read(unsafe { msime_client_keyboard_skin_design(std::ptr::null(), 0) })["ok"],
+        false
+    );
+    let byte = 0_u8;
+    assert_eq!(
+        read(unsafe { msime_client_keyboard_skin_design(&byte, 1024 * 1024 + 1) })["ok"],
+        false
+    );
+}

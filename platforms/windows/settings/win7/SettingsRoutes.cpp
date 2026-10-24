@@ -12,6 +12,7 @@ std::optional<int> settings_page_for_route(std::string_view route) {
   const auto category = route.substr(prefix.size());
   if (category == "vocabulary") return 14;
   if (category == "community") return 9;
+  if (category == "keyboard-skin") return 22;
   if (category == "mcp") return 21;
   if (category == "voice") return 19;
   if (category == "screen-keyboard" || category == "osk") return 20;
