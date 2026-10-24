@@ -34,8 +34,12 @@ using std::min;
 using WCHAR = wchar_t;
 using SHORT = short;
 using WPARAM = std::uintptr_t;
+#ifndef _In_
 #define _In_
+#endif
+#ifndef _In_opt_
 #define _In_opt_
+#endif
 constexpr WPARAM VK_PACKET = 0xe7, VK_LEFT = 0x25;
 using UINT = unsigned;
 // 生产按键类型
@@ -92,6 +96,7 @@ template<typename... Args> void DebugTsfIssue47(Args...) {}
 // 生产前缀规则
 struct CMetasequoiaIME {
     msime::tsf::WubiCommitOwner _wubiCommitOwner;
+    std::atomic<bool> _localSessionResetPending{false};
     Engine *_pCompositionProcessorEngine = nullptr;
     std::deque<DeferredKeyDown> _deferredAppliedPrefix;
     std::uint64_t _deferredKeyFocusGeneration = 7;

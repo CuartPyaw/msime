@@ -37,9 +37,15 @@ using DWORD = unsigned long;
 using ULONGLONG = std::uint64_t;
 using HWND = void *;
 using GUID = int;
+#ifndef _In_
 #define _In_
+#endif
+#ifndef _In_opt_
 #define _In_opt_
+#endif
+#ifndef _Out_
 #define _Out_
+#endif
 [[maybe_unused]] constexpr BOOL TRUE = 1, FALSE = 0;
 constexpr int S_OK = 0;
 constexpr int FANY_IME_NO_REQUEST_ID = 0;

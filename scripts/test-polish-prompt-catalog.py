@@ -49,10 +49,10 @@ int main(int argc, char **argv) {
         subprocess.run([compiler, "-std=c++17", "-I", str(ROOT), str(source), "-o", str(program)],
                        check=True, timeout=60)
         for identifier, prompt in expected.items():
-            result = subprocess.check_output([str(program), identifier], timeout=10).decode("utf-8")
+            result = subprocess.check_output([str(program), identifier], timeout=10, text=True, encoding="utf-8")
             assert result == prompt, f"C++ 润色正文不同：{identifier}"
         for preset in PRESETS:
-            title = subprocess.check_output([str(program), preset["id"], "title"], timeout=10).decode("utf-8")
+            title = subprocess.check_output([str(program), preset["id"], "title"], timeout=10, text=True, encoding="utf-8")
             assert title == preset["title"], f"C++ 润色名称不同：{preset['id']}"
         source.write_text('''#include "platforms/windows/settings/VoiceSettings.h"
 #include "shared/voice/PolishPromptWideCatalog.h"

@@ -22,6 +22,7 @@ def section(source, begin, end):
 unit = r'''
 #include "platforms/windows/tsf/WubiCommitOwner.h"
 #include <deque>
+#include <atomic>
 #include <map>
 #include <mutex>
 #include <string>
@@ -33,8 +34,12 @@ using TfEditCookie=int; using HWND=int;
 constexpr HRESULT S_OK=0, S_FALSE=1, TF_S_ASYNC=2, E_FAIL=-1;
 constexpr UINT WM_CommitCandidateAndContinue=29, FANY_IME_NO_REQUEST_ID=0;
 constexpr int TF_ES_ASYNCDONTCARE=1, TF_ES_READWRITE=2;
+#ifndef _Out_
 #define _Out_
+#endif
+#ifndef _In_opt_
 #define _In_opt_
+#endif
 #define STDMETHODIMP HRESULT
 bool SUCCEEDED(HRESULT value) { return value>=0; }
 bool FAILED(HRESULT value) { return value<0; }
@@ -45,6 +50,9 @@ bool postOk=true;
 bool PostMessage(HWND, UINT, WPARAM value, int) { if (postOk) posted.push_back(value); return postOk; }
 void ResetNamedpipeReplyState() {}
 template<class... T> void DebugTsfIssue47(T...) {}
+namespace Global { std::atomic_bool TsfDiagnosticLogEnabled{false}; }
+void QueueTsfDiagnosticLog(const std::wstring &) {}
+inline std::wstring BoolFlag(bool value) { return value ? L"1" : L"0"; }
 struct CMetasequoiaIME;
 class CCommitCandidateAndContinueEditSession;
 struct ITfContext {
@@ -79,6 +87,7 @@ struct CMetasequoiaIME {
     struct DeferredKeyDown { ITfContext *context=nullptr; WPARAM wParam=0; wchar_t translatedWch=0; uint64_t focusGeneration=0;
         struct { int Category=0,Function=0; } keyState; };
     msime::tsf::WubiCommitOwner _wubiCommitOwner;
+    std::atomic_bool _localSessionResetPending{false};
     std::deque<DeferredKeyDown> _deferredKeyDowns, _deferredAppliedPrefix;
     DeferredKeyDown _deferredKeyInFlight;
     bool _hasDeferredKeyInFlight=false;

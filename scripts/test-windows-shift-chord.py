@@ -18,7 +18,9 @@ HARNESS = r'''
 #include <stdexcept>
 
 #define CALLBACK
+#ifndef _Out_
 #define _Out_
+#endif
 using UINT = unsigned;
 using BYTE = uint8_t;
 using WPARAM = uintptr_t;

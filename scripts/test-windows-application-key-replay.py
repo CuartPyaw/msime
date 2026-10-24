@@ -24,7 +24,6 @@ namespace Global {
 std::atomic<int> InputModeScheme{msime::windows::scheme::Quanpin};
 bool g_connected = true;
 std::atomic_bool TsfDiagnosticLogEnabled{false};
-bool g_connected = true;
 }
 // 生产代码里的诊断日志在测试里关闭，记录进空实现即可。
 void QueueTsfDiagnosticLog(const std::wstring &) {}
@@ -34,8 +33,12 @@ using std::min;
 using WCHAR = wchar_t;
 using SHORT = short;
 using WPARAM = std::uintptr_t;
+#ifndef _In_
 #define _In_
+#endif
+#ifndef _In_opt_
 #define _In_opt_
+#endif
 constexpr WPARAM VK_PACKET = 0xe7, VK_LEFT = 0x25;
 using UINT = unsigned;
 // 生产按键类型
