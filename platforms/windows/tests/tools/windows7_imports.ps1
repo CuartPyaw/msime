@@ -42,6 +42,11 @@ forEach ($entry in @(@(2,'SysAllocString'),@(4,'SysAllocStringLen'),@(6,'SysFree
 }
 Check-Import 'oleaut32.dll' '                             Ordinal   999'
 Check-Import 'oleaut32.dll' '                             Ordinal   6' -Delayed
+foreach ($entry in @(@(410,'SetWindowSubclass'),@(412,'RemoveWindowSubclass'),@(413,'DefSubclassProc'))) {
+    Check-Import 'comctl32.dll' ('                             Ordinal   ' + $entry[0]) $entry[1]
+}
+Check-Import 'comctl32.dll' '                             Ordinal   411'
+Check-Import 'comctl32.dll' '                             Ordinal   410' -Delayed
 Check-Import 'd2d1.dll' '                             Ordinal   1' 'D2D1CreateFactory'
 Check-Import 'shlwapi.dll' '                             Ordinal   12' 'SHCreateMemStream'
 Check-Import 'd2d1.dll' '                             Ordinal   7'

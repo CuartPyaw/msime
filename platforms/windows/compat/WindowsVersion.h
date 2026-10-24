@@ -24,10 +24,12 @@ inline const std::optional<OSVERSIONINFOW> &kernel_version() {
 // Win7 会以 ERROR_INVALID_PARAMETER 拒绝这个 Win8 才引入的窗口样式。
 // 新系统保留原样式，Win7 继续使用已有的分层窗口绘制。
 inline DWORD no_redirection_bitmap_style() {
+  // 旧 MinGW 在目标设为 Win7 时不声明此常量，数值仍按 Windows SDK 的样式契约固定。
+  constexpr DWORD no_redirection_bitmap = 0x00200000;
   const auto &version = kernel_version();
   return version && (version->dwMajorVersion > 6 ||
                      (version->dwMajorVersion == 6 && version->dwMinorVersion >= 2))
-             ? WS_EX_NOREDIRECTIONBITMAP : 0;
+             ? no_redirection_bitmap : 0;
 }
 
 // 只供不支持 TokenIsAppContainer 的错误分支使用；未知版本不能降低对端校验。

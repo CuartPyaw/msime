@@ -47,6 +47,12 @@ foreach ($line in $lines) {
                 $imports.Add([pscustomobject]@{ Library = $library; Name = $automationOrdinals[$ordinal]; Delayed = $false; Ordinal = $ordinal })
                 continue
             }
+            # 在 Win7 SP1 的 x64 与 x86 上核对过具名导出和序号地址，只接受本产品实际使用的子类化接口。
+            $controlsOrdinals = @{ 410 = 'SetWindowSubclass'; 412 = 'RemoveWindowSubclass'; 413 = 'DefSubclassProc' }
+            if ($library -eq 'comctl32.dll' -and -not $delayed -and $controlsOrdinals.ContainsKey($ordinal)) {
+                $imports.Add([pscustomobject]@{ Library = $library; Name = $controlsOrdinals[$ordinal]; Delayed = $false; Ordinal = $ordinal })
+                continue
+            }
             $graphicsOrdinal = $library -eq 'd2d1.dll' -and $ordinal -eq 1
             $streamOrdinal = $library -eq 'shlwapi.dll' -and $ordinal -eq 12
             if (-not $delayed -and ($graphicsOrdinal -or $streamOrdinal)) {

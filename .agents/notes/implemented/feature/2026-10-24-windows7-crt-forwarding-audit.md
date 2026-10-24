@@ -16,7 +16,7 @@ Status: implemented
 
 `windows7-import-load <清单> <目录> <插件 DLL…>` 首先把静态 CRT 探针复制到独占空目录，对显式列出的 TSF 与核心 DLL 逐个启动全新进程，使用与注册器一致的 `LOAD_WITH_ALTERED_SEARCH_PATH` 装载；失败即中止，不先加载 UCRT 或其他产品 DLL。插件验收通过后才逐符号检查整包。普通 EXE 的语音和 CRT 依赖仍在应用本地布局中检查，不把插件目录规则错误套到仅由产品 EXE 使用的运行库。该区分针对微软明确的 Win7 UCRT 插件限制，不是容忍 TSF 装载失败。
 
-`windows7-import-load` 使用静态 CRT，在两个架构下按实际包目录或系统目录加载每个普通依赖，核对具名导出及固定序号的地址相等。系统固定序号只列产品实际使用的 Winsock、OLE Automation、Direct2D 工厂与内存流，未知序号继续拒绝。
+`windows7-import-load` 使用静态 CRT，在两个架构下按实际包目录或系统目录加载每个普通依赖，核对具名导出及固定序号的地址相等。系统固定序号只列产品实际使用的 Winsock、OLE Automation、原生设置标签使用的三个 Common Controls 子类化函数、Direct2D 工厂与内存流，未知序号继续拒绝。
 
 ### 既有笔记审计
 
@@ -30,6 +30,8 @@ Status: implemented
 - **继续拒绝全部零导入 DLL。** 规则简单且默认失败，但 SDK 正式 UCRT 包也无法检查，因此只为已确定的 CRT 桥接形态增加严格验证，未知零导入 DLL 仍拒绝。
 
 ## Testing
+
+`SetWindowSubclass`、`RemoveWindowSubclass` 与 `DefSubclassProc` 的 410、412、413 序号已在 Win7 SP1 的两个架构核对具名与序号地址相同；解析回归继续拒绝未使用的 411 与延迟序号导入。
 
 合成解析回归覆盖精确符号、大小写、缺失依赖、未知模块、序号目标、部分解析、普通导入与未被实际引用的新导出。实际完整产品的 x64 与 x86 Release 依赖闭包均在 Win7 Ultimate SP1 x64 的交互桌面验证：x64 为 3491 个导入、69 个模块与 46 个包内 DLL；x86 为 3355 个导入、67 个模块与 44 个包内 DLL，具名导出、固定序号与全部 DLL 实际装载全部通过。WOW64 不替代 32 位 Win7 系统。
 

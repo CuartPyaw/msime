@@ -26,6 +26,8 @@ Server、候选窗和 `msimeui` 直接导入 `GetDpiForWindow`、`SetThreadDpiAw
 
 ## Testing
 
+旧 MinGW 在 `_WIN32_WINNT=0x0601` 下不声明 `WS_EX_NOREDIRECTIONBITMAP`，版本适配使用 SDK 固定样式值并保留原来的运行时系统版本判断；两个目标版本的跨编译与静态导入检查通过。
+
 `windows-dpi-compat` 注册为 Windows CTest。测试使用真实 HWND 与 GDI DC 验证回退 DPI，注入缺失、新 API 成功及失败的导出表，验证线程作用域不改变进程状态、新 API 失败不触发旧进程 API，以及上下文退出时恢复。真实系统分支还解析本机导出并执行线程上下文往返。
 
 MSVC 的 x64 与 x86 DPI 测试在 Windows 11 通过，`dumpbin /imports` 确认两种产物均没有六个新 DPI API 的静态导入。MinGW 对适配头、测试和修改到的 `msimeui` 绘制源进行严格语法检查通过。`scripts/test-windows-dpi-compat.py` 由契约运行器自动发现，实际编译测试 PE 和 `DeviceResources` 对象，并用 `objdump`、`nm` 检查静态导入；缺少交叉工具链时明确跳过，Windows CTest 继续承担运行覆盖。
