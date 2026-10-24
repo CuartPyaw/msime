@@ -17,6 +17,11 @@ public static class MsimeDesktop9439Probe {
     [DllImport("user32.dll", SetLastError=true)] static extern IntPtr GetThreadDesktop(uint thread);
     [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
     [DllImport("user32.dll", SetLastError=true)] static extern uint GetWindowThreadProcessId(IntPtr window, out uint pid);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenThread(uint access, bool inherit, uint tid);
+    [DllImport("kernel32.dll", SetLastError=true)] static extern uint GetProcessIdOfThread(IntPtr thread);
+    [DllImport("kernelbase.dll", SetLastError=true)] static extern bool CompareObjectHandles(IntPtr first, IntPtr second);
+    [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
+    static extern IntPtr OpenDesktop(string name, uint flags, bool inherit, uint access);
     [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
     static extern bool GetUserObjectInformation(IntPtr handle, int index, StringBuilder info, uint bytes, out uint needed);
     [DllImport("user32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
@@ -43,6 +48,57 @@ public static class MsimeDesktop9439Probe {
         Check(EnumDesktopWindows(desktop, callback, IntPtr.Zero), "desktop window enumeration failed");
         GC.KeepAlive(callback);
         return result;
+    }
+    public static string RunCrossProcess(string executable) {
+        string token="MSIME9439Child"+Guid.NewGuid().ToString("N");
+        IntPtr desktop=CreateDesktop(token,IntPtr.Zero,IntPtr.Zero,0,0xC3,IntPtr.Zero);
+        Check(desktop!=IntPtr.Zero,"child desktop creation failed");
+        System.Diagnostics.Process child=null;
+        try {
+            System.Diagnostics.ProcessStartInfo start=new System.Diagnostics.ProcessStartInfo(executable,token);
+            start.UseShellExecute=false;
+            start.CreateNoWindow=true;
+            start.RedirectStandardInput=true;
+            start.RedirectStandardOutput=true;
+            start.RedirectStandardError=true;
+            child=System.Diagnostics.Process.Start(start);
+            Check(child!=null,"child process creation failed");
+            var line=System.Threading.Tasks.Task.Factory.StartNew(delegate {return child.StandardOutput.ReadLine();});
+            Check(line.Wait(10000),"child window readiness timeout");
+            string[] values=(line.Result??"").Split(':');
+            Check(values.Length==3,"child window descriptor unavailable");
+            uint claimedPid=UInt32.Parse(values[0]);
+            uint claimedThread=UInt32.Parse(values[1]);
+            IntPtr window=new IntPtr(Int64.Parse(values[2]));
+            // 另一个桌面的 HWND 在当前线程未必可查询，TID 归属必须从系统线程对象核对。
+            uint windowPid;
+            bool windowUsable=GetWindowThreadProcessId(window,out windowPid)!=0;
+            IntPtr thread=OpenThread(0x0800,false,claimedThread);
+            Check(thread!=IntPtr.Zero,"cross-process thread unavailable");
+            try {
+                uint actualPid=GetProcessIdOfThread(thread);
+                Check(actualPid==(uint)child.Id && actualPid==claimedPid,"cross-process thread identity mismatch");
+                IntPtr assigned=GetThreadDesktop(claimedThread);
+                Check(Name(assigned)==token,"cross-process desktop identity mismatch");
+                IntPtr opened=OpenDesktop(token,0,false,0xC3);
+                Check(opened!=IntPtr.Zero,"cross-process desktop reopening failed");
+                try {Check(CompareObjectHandles(assigned,opened),"desktop object identity mismatch");}
+                finally {CloseDesktop(opened);}
+            } finally {CloseHandle(thread);}
+            Check(Windows(desktop).Contains(window),"child window missing from its desktop");
+            child.StandardInput.WriteLine("stop");
+            child.StandardInput.Close();
+            Check(child.WaitForExit(10000),"child process shutdown timeout");
+            Check(child.ExitCode==0,"child window cleanup failed");
+            return "{\"crossProcessDesktopResolved\":true,\"threadProcessVerified\":true,\"desktopObjectVerified\":true,\"crossDesktopWindowUsable\":"+
+                (windowUsable ? "true" : "false")+",\"switchedInputDesktop\":false}";
+        } finally {
+            if(child!=null) {
+                if(!child.HasExited) {child.Kill();child.WaitForExit(5000);}
+                child.Dispose();
+            }
+            Check(CloseDesktop(desktop),"child desktop cleanup failed");
+        }
     }
     public static string Run() {
         string token = "MSIME9439Probe" + Guid.NewGuid().ToString("N");
@@ -124,3 +180,59 @@ public static class MsimeDesktop9439Probe {
 }
 '@
 [MsimeDesktop9439Probe]::Run()
+
+# 子进程独占自己的窗口线程，父进程仅依据系统返回的 PID、TID 和桌面归属核对。
+$childSource = @'
+using System;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+public static class MsimeDesktop9439Child {
+    [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    static extern IntPtr OpenDesktop(string name,uint flags,bool inherit,uint access);
+    [DllImport("user32.dll",SetLastError=true)] static extern bool CloseDesktop(IntPtr desktop);
+    [DllImport("user32.dll",SetLastError=true)] static extern bool SetThreadDesktop(IntPtr desktop);
+    [DllImport("user32.dll")] static extern IntPtr GetThreadDesktop(uint thread);
+    [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
+    [DllImport("user32.dll",CharSet=CharSet.Unicode,SetLastError=true)]
+    static extern IntPtr CreateWindowEx(uint ex,string cls,string title,uint style,int x,int y,int w,int h,
+        IntPtr parent,IntPtr menu,IntPtr instance,IntPtr parameter);
+    [DllImport("user32.dll",SetLastError=true)] static extern bool DestroyWindow(IntPtr window);
+    public static int Main(string[] arguments) {
+        if(arguments.Length!=1) return 2;
+        IntPtr original=GetThreadDesktop(GetCurrentThreadId());
+        IntPtr desktop=OpenDesktop(arguments[0],0,false,0xC3);
+        if(desktop==IntPtr.Zero) return 3;
+        IntPtr window=IntPtr.Zero;
+        try {
+            if(!SetThreadDesktop(desktop)) return 4;
+            window=CreateWindowEx(0,"STATIC","synthetic child",0x80000000,0,0,120,60,
+                IntPtr.Zero,IntPtr.Zero,IntPtr.Zero,IntPtr.Zero);
+            if(window==IntPtr.Zero) return 5;
+            Console.WriteLine(Process.GetCurrentProcess().Id+":"+GetCurrentThreadId()+":"+window.ToInt64());
+            Console.Out.Flush();
+            return Console.ReadLine()=="stop" ? 0 : 6;
+        } finally {
+            if(window!=IntPtr.Zero) DestroyWindow(window);
+            SetThreadDesktop(original);
+            CloseDesktop(desktop);
+        }
+    }
+}
+'@
+$scratch = Join-Path ([IO.Path]::GetTempPath()) ('msime9439-' + [Guid]::NewGuid().ToString('N'))
+[IO.Directory]::CreateDirectory($scratch) | Out-Null
+$compiler = New-Object Microsoft.CSharp.CSharpCodeProvider
+try {
+    $parameters = New-Object System.CodeDom.Compiler.CompilerParameters
+    $parameters.GenerateExecutable = $true
+    $parameters.GenerateInMemory = $false
+    $parameters.OutputAssembly = Join-Path $scratch 'desktop-child.exe'
+    $parameters.ReferencedAssemblies.Add('System.dll') | Out-Null
+    $parameters.ReferencedAssemblies.Add('System.Core.dll') | Out-Null
+    $result = $compiler.CompileAssemblyFromSource($parameters, $childSource)
+    if ($result.Errors.HasErrors) { throw '合成桌面子进程编译失败' }
+    [MsimeDesktop9439Probe]::RunCrossProcess($parameters.OutputAssembly)
+} finally {
+    $compiler.Dispose()
+    Remove-Item -LiteralPath $scratch -Recurse -Force
+}
