@@ -38,7 +38,11 @@ Status: implemented
 
 提交前完整 quick `20261020-202504` 以 0 退出，耗时 15 分 35 秒：共享 Rust、Android 目标与 Java、WASM、HarmonyOS 设置页、Linux 设置壳、Linux 原生 93 项及 macOS 宿主和 Apple 桥接编译通过。首次 quick 的 Android 目标缓存与宿主过程宏不配套；只清理本 worktree 的 Android 目标产物后，全新 Android 编译及完整门禁均通过。Windows 原生与交叉工具链、pipe 工程及 HarmonyOS HAP 依赖未配置，按现有规则跳过。本机格式、笔记与差异检查通过；构建在远端编译机完成。
 
-2026-10-24 的本次宿主验收改动另跑完整 `bash scripts/verify-local.sh --quick`，以 0 退出并打印 `quick check passed`。契约、笔记、Rust workspace、Android 目标与 Java、WASM、HarmonyOS 设置页、Linux 设置壳、Linux 原生 111 项、macOS 宿主和 Apple 桥接均通过；Windows 原生及交叉工具链、pipe 工程与 HarmonyOS HAP 依赖未配置，按既有规则跳过。Linux 原生主题用例在本机耗时较长但最终通过，未调整超时或断言。
+2026-10-24 的本次宿主验收改动首次完整 `bash scripts/verify-local.sh --quick` 以 0 退出并打印 `quick check passed`。契约、笔记、Rust workspace、Android 目标与 Java、WASM、HarmonyOS 设置页、Linux 设置壳、macOS 宿主和 Apple 桥接均通过；Linux 原生 JUnit 登记 111 项，其中 110 项通过、`linux-ibus-demand-activation` 按既有依赖条件跳过。Windows 原生及交叉工具链、pipe 工程与 HarmonyOS HAP 依赖未配置，按既有规则跳过。Linux 原生主题用例在本机耗时较长但最终通过，未调整超时或断言。
+
+正常推送时重复完整门禁，本机 Linux 原生阶段出现 9 项失败：3 项 X11 用例达到 CTest 超时，首次配置、语音和剪贴板等 5 项发生启动或操作等待失败，另 1 项悬浮工具栏用例未观察到退出全屏后的恢复。它们不覆盖本次新增的双拼编辑器路径，也不能用首次通过代替这次失败。后续 macOS 链接使系统盘可用空间低于 8 GiB，因此只停止这条已经失败的本机推送及其子进程，保留日志与 JUnit；回收其新增且无人引用的测试可执行文件，不修改等待时长、断言或失败基线。
+
+同一提交 `5658dbf` 随后在远端 Debian 容器复跑完整 quick，以 0 退出并打印 `quick check passed`。Windows 宿主可跨平台执行的 164 项测试、契约、笔记、Rust workspace、Android 目标与 Java、WASM、Linux 设置壳通过；Linux 原生 111 项均实际执行且通过，包括本机首次因缺依赖而跳过的 `linux-ibus-demand-activation`，没有扩大超时或放宽断言。原生宿主使用 GCC 12，Windows 宿主抽取测试使用 Clang 14，Android 与 WASM 使用既有 NDK 28 工具链；复用既有公开依赖缓存和工具链，没有复制相邻任务源码。此远端没有 Apple 宿主和 Windows 交叉工具链，对应阶段按既有规则明确跳过；Apple 编译仍只引用上述首次本机门禁，不能把远端 Linux 通过写成再次覆盖 macOS。
 
 ## Consequences
 
