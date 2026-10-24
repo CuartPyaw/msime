@@ -1836,6 +1836,8 @@ endif()
 set_tests_properties(windows-session PROPERTIES TIMEOUT 30)
 add_test(NAME windows-reply-codec COMMAND windows-reply-codec)
 add_test(NAME windows-reply-composer COMMAND windows-reply-composer)
+add_test(NAME windows-reply-composer-enter COMMAND windows-reply-composer --enter-route)
+set_tests_properties(windows-reply-composer-enter PROPERTIES TIMEOUT 30)
 
 add_executable(windows-voice-control-message
                src/voice/VoiceControlMessage.cpp tests/voice/voice_control_message.cpp)
