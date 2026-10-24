@@ -1634,10 +1634,18 @@ struct SettingsWindow::State {
     for (const auto& item : items) {
       const auto scheme_top = item.surface == Surface::scheme ? scheme_form.position(item.handle) :
           item.surface == Surface::translation ? translation_form.position(item.handle) : std::optional<int>(item.top);
-      ShowWindow(item.handle, surface == item.surface && scheme_top ? SW_SHOW : SW_HIDE);
-      if (surface != item.surface || !scheme_top) continue;
-      MoveWindow(item.handle, 0, reference ? 0 : dip(*scheme_top) - scroll,
-          std::max(client.right - dip(8), 1L), reference ? client.bottom : dip(item.height), TRUE);
+      const bool visible = surface == item.surface && scheme_top.has_value();
+      // 隐藏页面的控件很多；重复显隐和相同坐标移动仍会触发系统布局消息。
+      const bool was_visible = (GetWindowLongPtrW(item.handle, GWL_STYLE) & WS_VISIBLE) != 0;
+      if (visible != was_visible) ShowWindow(item.handle, visible ? SW_SHOW : SW_HIDE);
+      if (!visible) continue;
+      const int top = reference ? 0 : dip(*scheme_top) - scroll;
+      const int width = std::max(client.right - dip(8), 1L);
+      const int height = reference ? client.bottom : dip(item.height);
+      RECT previous{};
+      if (GetWindowRect(item.handle, &previous)) MapWindowPoints(nullptr, body, reinterpret_cast<POINT*>(&previous), 2);
+      if (previous.left != 0 || previous.top != top || previous.right != width || previous.bottom != top + height)
+        MoveWindow(item.handle, 0, top, width, height, TRUE);
     }
   }
 
