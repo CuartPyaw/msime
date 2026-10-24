@@ -603,6 +603,74 @@ function Select-ComboChoice($window, [string]$id, [string]$label) {
     $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
     $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
 }
+function Assert-SentenceModelSettings($window, [string]$theme) {
+    Open-Page $window 'typing'
+    Select-PageTab $window 'input-tab-candidates' '语法模型'
+    $models = @(
+        @{value = 'wanxiang'; label = '万象 LTS（约 380 MB，CC-BY-4.0）'; pack = 'grammar-model-wanxiang'},
+        @{value = 'baguwen_word'; label = '八股文·词级（约 197 MB，LGPL-3.0）'; pack = 'grammar-model-baguwen'},
+        @{value = 'baguwen_compact'; label = '八股文·词级紧凑（约 39 MB，LGPL-3.0）'; pack = 'grammar-model-baguwen-compact'},
+        @{value = 'none'; label = '不使用'; pack = ''}
+    )
+    $path = Join-Path $state 'preferences.json'
+    foreach ($width in @(1000, 800)) {
+        $handle = [IntPtr]$window.Current.NativeWindowHandle
+        if (-not [SettingsWindowProbe]::SetWindowPos($handle, [IntPtr]::Zero, 0, 0, $width, 780, 0x0040)) { throw 'Model fixture resize failed' }
+        foreach ($model in $models) {
+            # 模型设置在页面底部，必须滚到控件可见再操作和截图。
+            $content = Find-ById $window 'settings-content'
+            $content.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern).SetScrollPercent(-1, 100)
+            Start-Sleep -Milliseconds 250
+            $combo = Find-ById $window 'sentence-grammar-model'
+            if (-not $combo -or $combo.Current.IsOffscreen) { throw 'Grammar model selector is not visible' }
+            $combo.SetFocus()
+            $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Expand()
+            $deadline = [DateTime]::UtcNow.AddSeconds(10)
+            do {
+                Start-Sleep -Milliseconds 100
+                $item = Find-ByName $combo $model.label
+            } while (-not $item -and [DateTime]::UtcNow -lt $deadline)
+            if (-not $item) { throw "Missing grammar model option: $($model.value)" }
+            # 选择后页面会重建，不再调用旧下拉框的 Collapse。
+            $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
+            $ready = $false
+            $deadline = [DateTime]::UtcNow.AddSeconds(10)
+            do {
+                Start-Sleep -Milliseconds 150
+                try {
+                    $saved = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+                    $property = $saved.preferences.sentence_association.PSObject.Properties['grammar_model']
+                    $value = if ($property) { $property.Value } else { 'none' }
+                    $ready = $value -eq $model.value
+                    foreach ($choice in $models) {
+                        if (-not $choice.pack) { continue }
+                        $download = Find-ById $window "sentence-model-download-$($choice.pack)"
+                        if ($choice.pack -eq $model.pack) {
+                            $ready = $ready -and $null -ne $download -and $download.Current.IsEnabled
+                        } else {
+                            $ready = $ready -and $null -eq $download
+                        }
+                    }
+                } catch [System.Windows.Automation.ElementNotAvailableException] {
+                    $ready = $false
+                }
+            } while (-not $ready -and [DateTime]::UtcNow -lt $deadline)
+            if (-not $ready) { throw "Grammar model selection did not save and refresh its download action: $($model.value)" }
+            $content = Find-ById $window 'settings-content'
+            $content.GetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern).SetScrollPercent(-1, 100)
+            Start-Sleep -Milliseconds 250
+            Save-Window $window "$theme-$width-model-$($model.value).png"
+            # 导航后重新读取持久化值；整个专项不点击下载，不访问模型服务。
+            Open-Page $window 'toolbar'
+            Open-Page $window 'typing'
+            Select-PageTab $window 'input-tab-candidates' '语法模型'
+            $combo = Find-ById $window 'sentence-grammar-model'
+            $selection = @($combo.GetCurrentPattern([System.Windows.Automation.SelectionPattern]::Pattern).Current.GetSelection())
+            if ($selection.Count -ne 1 -or $selection[0].Current.Name -ne $model.label) { throw 'Grammar model selection was not retained after navigation' }
+        }
+    }
+    Write-Host "$theme grammar model choices, persisted values and immediate download actions passed"
+}
 function Start-SettingsWindow([string]$route) {
     # 进程先记进脚本作用域的 $process，窗口没打开时 finally 也能把它收掉。
     $script:process = Start-Process -FilePath $programPath -ArgumentList "--route=$route" -PassThru
@@ -1100,6 +1168,7 @@ try {
                 }
             }
         }
+        Assert-SentenceModelSettings $window $theme
         # 通过真实单选控件切换方案，再读合成偏好确认保存成功，避免只验证静态页面。方案卡片在「输入方案」标签里。
         Open-Page $window 'typing'
         Select-PageTab $window 'input-tab-scheme' '中文方案'

@@ -90,9 +90,12 @@
 #import <IOKit/hidsystem/IOHIDLib.h>
 #import <IOKit/hidsystem/IOLLEvent.h>
 #import <IOKit/hidsystem/IOHIDParameter.h>
+#import <IOKit/hid/IOHIDKeys.h>
+#import <IOKit/hid/IOHIDManager.h>
 #include <atomic>
 #include <memory>
 #include <optional>
+#include <unordered_map>
 
 // Implemented by the Swift backend dylib loaded by input_method_main.mm. The account provider
 // keeps credentials and transport on the Swift side; this process receives only bounded glosses.
@@ -1030,8 +1033,121 @@ static bool MSIMEReleaseSystemCapsLock() {
 }
 // 在原生查询边界替换合成状态，回归必须经过生产的实体按住判定。
 static CGEventFlags (*MSIMEPhysicalModifierFlagsState)(CGEventSourceStateID) = &CGEventSourceFlagsState;
+// 外接键盘有时不把实体按住状态送进 Quartz 的 stateless 位；先从 HID 输入值读取，失败再退回系统位。
+static std::unordered_map<IOHIDDeviceRef, bool> MSIMECapsLockHIDDevices;
+static std::atomic<bool> MSIMECapsLockHIDStateKnown{false};
+static std::atomic<bool> MSIMECapsLockHIDStateHeld{false};
+
+static bool MSIMECapsLockHIDUsage(uint32_t usage) {
+    return usage == kHIDUsage_KeyboardCapsLock || usage == kHIDUsage_KeyboardLockingCapsLock;
+}
+
+static void MSIMERecomputeCapsLockHIDState() {
+    bool held = false;
+    for (const auto &entry : MSIMECapsLockHIDDevices) held = held || entry.second;
+    MSIMECapsLockHIDStateKnown.store(!MSIMECapsLockHIDDevices.empty(), std::memory_order_release);
+    MSIMECapsLockHIDStateHeld.store(held, std::memory_order_release);
+}
+
+static void MSIMERecordCapsLockHIDValue(IOHIDValueRef value) {
+    if (!value) return;
+    IOHIDElementRef element = IOHIDValueGetElement(value);
+    if (!element || IOHIDElementGetUsagePage(element) != kHIDPage_KeyboardOrKeypad ||
+        !MSIMECapsLockHIDUsage(IOHIDElementGetUsage(element))) return;
+    IOHIDDeviceRef device = IOHIDElementGetDevice(element);
+    if (!device) return;
+    MSIMECapsLockHIDDevices[device] = IOHIDValueGetIntegerValue(value) != 0;
+    MSIMERecomputeCapsLockHIDState();
+}
+
+static void MSIMECapsLockHIDInputValue(void *, IOReturn result, void *, IOHIDValueRef value) {
+    if (result == kIOReturnSuccess) MSIMERecordCapsLockHIDValue(value);
+}
+
+static void MSIMECapsLockHIDDeviceRemoved(void *, IOReturn, void *, IOHIDDeviceRef device) {
+    if (!device) return;
+    MSIMECapsLockHIDDevices.erase(device);
+    MSIMERecomputeCapsLockHIDState();
+}
+
+static void MSIMECapsLockHIDDeviceMatched(void *, IOReturn result, void *, IOHIDDeviceRef device) {
+    if (result != kIOReturnSuccess || !device) return;
+    CFArrayRef elements = IOHIDDeviceCopyMatchingElements(device, nullptr, kIOHIDOptionsTypeNone);
+    if (!elements) return;
+    bool found = false;
+    bool held = false;
+    for (CFIndex index = 0; index < CFArrayGetCount(elements); ++index) {
+        IOHIDElementRef element = static_cast<IOHIDElementRef>(const_cast<void *>(CFArrayGetValueAtIndex(elements, index)));
+        if (!element || IOHIDElementGetUsagePage(element) != kHIDPage_KeyboardOrKeypad ||
+            !MSIMECapsLockHIDUsage(IOHIDElementGetUsage(element))) continue;
+        IOHIDValueRef value = nullptr;
+        if (IOHIDDeviceGetValue(device, element, &value) == kIOReturnSuccess && value) {
+            found = true;
+            held = held || IOHIDValueGetIntegerValue(value) != 0;
+        }
+    }
+    CFRelease(elements);
+    if (found) {
+        MSIMECapsLockHIDDevices[device] = held;
+        MSIMERecomputeCapsLockHIDState();
+    }
+}
+
+static CFMutableDictionaryRef MSIMECapsLockHIDMatching(uint32_t usage) {
+    CFMutableDictionaryRef matching = CFDictionaryCreateMutable(kCFAllocatorDefault, 2,
+                                                                  &kCFTypeDictionaryKeyCallBacks,
+                                                                  &kCFTypeDictionaryValueCallBacks);
+    int32_t pageValue = kHIDPage_KeyboardOrKeypad;
+    int32_t usageValue = static_cast<int32_t>(usage);
+    CFNumberRef page = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &pageValue);
+    CFNumberRef usageNumber = CFNumberCreate(kCFAllocatorDefault, kCFNumberSInt32Type, &usageValue);
+    CFDictionarySetValue(matching, CFSTR(kIOHIDElementUsagePageKey), page);
+    CFDictionarySetValue(matching, CFSTR(kIOHIDElementUsageKey), usageNumber);
+    CFRelease(page);
+    CFRelease(usageNumber);
+    return matching;
+}
+
+static void MSIMEEnsureCapsLockHIDTracking() {
+    static dispatch_once_t once;
+    dispatch_once(&once, ^{
+        IOHIDManagerRef manager = IOHIDManagerCreate(kCFAllocatorDefault, kIOHIDOptionsTypeNone);
+        if (!manager) return;
+        CFMutableDictionaryRef capsLock = MSIMECapsLockHIDMatching(kHIDUsage_KeyboardCapsLock);
+        CFMutableDictionaryRef lockingCapsLock = MSIMECapsLockHIDMatching(kHIDUsage_KeyboardLockingCapsLock);
+        const void *matches[] = {capsLock, lockingCapsLock};
+        CFArrayRef matching = CFArrayCreate(kCFAllocatorDefault, matches, 2, &kCFTypeArrayCallBacks);
+        IOHIDManagerSetInputValueMatchingMultiple(manager, matching);
+        CFRelease(matching);
+        CFRelease(capsLock);
+        CFRelease(lockingCapsLock);
+        IOHIDManagerRegisterDeviceMatchingCallback(manager, &MSIMECapsLockHIDDeviceMatched, nullptr);
+        IOHIDManagerRegisterDeviceRemovalCallback(manager, &MSIMECapsLockHIDDeviceRemoved, nullptr);
+        IOHIDManagerRegisterInputValueCallback(manager, &MSIMECapsLockHIDInputValue, nullptr);
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+        IOHIDManagerScheduleWithRunLoop(manager, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+        if (IOHIDManagerOpen(manager, kIOHIDOptionsTypeNone) != kIOReturnSuccess) {
+            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), kCFRunLoopDefaultMode);
+            IOHIDManagerUnscheduleFromRunLoop(manager, CFRunLoopGetMain(), kCFRunLoopCommonModes);
+            CFRelease(manager);
+            return;
+        }
+    });
+}
+
+static bool MSIMEReadCapsLockHIDState(bool *known) {
+    MSIMEEnsureCapsLockHIDTracking();
+    const bool stateKnown = MSIMECapsLockHIDStateKnown.load(std::memory_order_acquire);
+    if (known) *known = stateKnown;
+    return MSIMECapsLockHIDStateHeld.load(std::memory_order_acquire);
+}
+static bool (*MSIMECapsLockHIDState)(bool *known) = &MSIMEReadCapsLockHIDState;
+
 // 键码 0x39 的查询跟随大写锁定，松手后仍可能为真；只读 stateless 位区分实体按住与逻辑锁定。
 static bool MSIMECapsLockPhysicallyHeld() {
+    bool hidStateKnown = false;
+    if (MSIMECapsLockHIDState && MSIMECapsLockHIDState(&hidStateKnown) && hidStateKnown) return true;
+    if (hidStateKnown) return false;
     return (MSIMEPhysicalModifierFlagsState(kCGEventSourceStateHIDSystemState) & NX_ALPHASHIFT_STATELESS_MASK) != 0;
 }
 // 和 NSEvent.timestamp 同一个开机后时钟，单位毫秒。
@@ -1414,6 +1530,11 @@ static constexpr uint64_t MSIMESessionRecoveryNoticeInterval = 60 * NSEC_PER_SEC
 - (void)invalidateServiceSnapshots;
 - (void)showCandidatePanel;
 @end
+
+// 只在主线程记录最后实际提交账号等待页的控制器，不延长输入框的生命周期。
+static __weak MSIMEInputController *MSIMEAccountGlossQueueOwner;
+// 当前持有焦点客户端的控制器。每个控制器都观察同一份外观设置，改动由最先注册的那个保存，而它往往是早已失去焦点的控制器；所以保存之后，要把文档载入会话的是这一个。
+static __weak MSIMEInputController *MSIMEFocusedController;
 
 // The full-colour brand mark the floating toolbar and the mode HUD lead with, loaded once. Nil when the bundle has no icon, and the top row then carries no mark.
 static NSImage *MSIMECandidateLogoImage() {
@@ -2923,7 +3044,10 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
 }
 
 - (void)cancelQueuedAccountGlosses {
-    // weak_import, like the fetch: a process without the backend dylib binds this to null.
+    // 迟到的控制器不能删除别人的等待页；当前焦点退出时仍须清理尚未交接的旧页。
+    if (MSIMEAccountGlossQueueOwner != self && MSIMEFocusedController != self) return;
+    MSIMEAccountGlossQueueOwner = nil;
+    // 未加载后端 dylib 时，weak_import 入口为空。
     if (MSIMECancelAccountCandidateGlosses != nullptr) MSIMECancelAccountCandidateGlosses();
 }
 
@@ -3046,10 +3170,13 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
 
 - (void)fetchAccountGlosses:(NSArray<NSString *> *)words primary:(NSString *)primary secondary:(NSString *)secondary
                  generation:(uint64_t)generation {
+    // IMK 的旧输入框可能尚未收到失焦回调，迟到的计时器不能替换当前输入框的等待页。
+    if (MSIMEFocusedController != self) return;
     // weak_import: the Swift backend supplies this, and a process without the dylib binds it to null. Calling through that is a jump to address zero, which is what the settings window's three call sites have always guarded against and these two did not.
     if (MSIMEFetchAccountCandidateGlosses == nullptr) return;
     NSData *payload = [NSJSONSerialization dataWithJSONObject:words options:0 error:nil];
     if (!payload) return;
+    MSIMEAccountGlossQueueOwner = self;
     MSIMEFetchAccountCandidateGlosses([[NSString alloc] initWithData:payload encoding:NSUTF8StringEncoding].UTF8String,
                                       primary.UTF8String, secondary.UTF8String, generation);
 }
@@ -3965,8 +4092,6 @@ static const NSTimeInterval kSettledRerankPoll = 1.0 / 60.0;
 static MSIMEPreferenceSaveState MSIMESharedPreferenceSaveState;
 // The controller behind the queued save, which runs it when the one in flight finishes, whether or not the controller that started that one is still alive.
 static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
-// 当前持有焦点客户端的控制器。每个控制器都观察同一份外观设置，改动由最先注册的那个保存，而它往往是早已失去焦点的控制器；所以保存之后，要把文档载入会话的是这一个。
-static __weak MSIMEInputController *MSIMEFocusedController;
 // 方案只能经由共享偏好文档到达 Engine，而外观改动触发的保存在主线程之外进行，所以从 한 切到 中 之后紧接着敲的键仍按韩文组字，未完成的音节又会把新方案一直挡到它结束。因此切换时在这里、在下一个按键之前于主线程写入文档，并把写入的内容原样交给持有焦点的会话。切换方案前已经结束了组字，会话处于空闲状态，会立即应用新方案。外观改动另外触发的那次保存会再写一遍相同的偏好，会话视为没有变化。Fcitx5 切换方案时同样等待保存完成；这里保存失败时，切换交由那次后台保存完成。
 - (void)applyPreferencesToSessionNow {
     if (!_session || !_activeClient || !_preferencesDirectory || !_appearance) return;
@@ -7873,7 +7998,10 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     }
     NSMutableArray *items = [NSMutableArray arrayWithCapacity:missing.count];
     for (NSString *text in missing) [items addObject:@{@"text": text, @"language": @"en"}];
-    NSDictionary *request = @{@"generation": _view[@"generation"] ?: @0, @"items": items};
+    NSMutableDictionary *request = [@{@"generation": _view[@"generation"] ?: @0, @"items": items} mutableCopy];
+    // 旧配置的活动词库可能位于用户目录，音标表仍随输入法 bundle 分发。
+    NSString *supplementary = NSBundle.mainBundle.resourcePath;
+    if (supplementary.isAbsolutePath) request[@"supplementary_resources"] = supplementary;
     NSArray<NSString *> *asked = missing.array;
     __weak MSIMEInputController *weakSelf = self;
     [_pronunciationQueue addOperationWithBlock:^{

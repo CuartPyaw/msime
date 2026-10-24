@@ -215,9 +215,7 @@ impl Session {
 
     /// With the annotation rule of bridge.cpp:914-929.
     pub fn snapshot(&self) -> Result<EngineSnapshot> {
-        let value = self
-            .inner
-            .snapshot_with_helpcode_visibility(self.show_helpcode);
+        let value = self.inner.snapshot_for_host(self.show_helpcode);
         let helpcode_scheme = value.scheme.helpcode();
         let uppercase_all = value.scheme == SchemeType::Quanpin;
         // Rows the engine generated in the expression, command and mention modes are not spelled by pinyin; their annotations are the engine's own. 拆字行的注释是字的读音，没有读音的字也不补辅助码。
@@ -285,7 +283,7 @@ impl Session {
         for (index, candidate) in value.candidates.into_iter().enumerate() {
             let mut annotation = annotations
                 .next()
-                .unwrap_or_else(|| candidate.corrected_from.clone());
+                .unwrap_or_else(|| candidate.corrected_from.to_string());
             if let Some(keymap) = keymap {
                 if self.show_helpcode
                     && annotation.is_empty()
@@ -333,8 +331,8 @@ impl Session {
             output
                 .candidate_static_evidence
                 .push(candidate.static_evidence());
-            output.candidate_codes.push(candidate.pinyin);
-            output.candidates.push(candidate.word);
+            output.candidate_codes.push(candidate.pinyin.into_string());
+            output.candidates.push(candidate.word.into_string());
         }
         Ok(output)
     }

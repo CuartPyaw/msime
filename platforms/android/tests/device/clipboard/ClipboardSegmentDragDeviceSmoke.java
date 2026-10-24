@@ -43,7 +43,12 @@ public final class ClipboardSegmentDragDeviceSmoke extends DeviceSmoke {
         File local = new File(root, "bootstrap/state/android-settings.json");
         for (File f : new File[] {preferences, history, local})
             backups.put(f, f.isFile() ? Files.readAllBytes(f.toPath()) : null);
+        android.content.SharedPreferences onboarding = getTargetContext().getSharedPreferences("msime_onboarding_v1", 0);
+        boolean seenPresent = onboarding.contains("seen"), seen = onboarding.getBoolean("seen", false);
         try {
+            // 全新专用设备也能进入编辑页；首次引导不是本套件要测的操作。
+            if (!onboarding.edit().putBoolean("seen", true).commit())
+                throw new AssertionError("Synthetic onboarding preparation failed");
             JSONObject prefs = read(preferences);
             prefs.put("revision", prefs.getLong("revision") + 1);
             prefs.getJSONObject("preferences").put("clipboard_history", true)
@@ -131,6 +136,9 @@ public final class ClipboardSegmentDragDeviceSmoke extends DeviceSmoke {
                 if (entry.getValue() == null) Files.deleteIfExists(entry.getKey().toPath());
                 else publish(entry.getKey(), entry.getValue());
             }
+            android.content.SharedPreferences.Editor editor = onboarding.edit();
+            if (seenPresent) editor.putBoolean("seen", seen); else editor.remove("seen");
+            if (!editor.commit()) throw new AssertionError("Synthetic onboarding restore failed");
             restartIme();
         }
     }
@@ -402,6 +410,12 @@ public final class ClipboardSegmentDragDeviceSmoke extends DeviceSmoke {
         SystemClock.sleep(200);
         card.refresh();
         assertFixedCard(card);
+        stage = "vertical drag inside a fixed card does not insert it";
+        await(field("msime-test-plain").and(node -> node.isShowingHintText()
+            || node.getText() == null || node.getText().length() == 0));
+        card = await(node -> node.isLongClickable() && node.isVisibleToUser()
+            && node.getText() != null && node.getText().toString().startsWith(word(0)));
+        card.getBoundsInScreen(bounds);
         stage = "horizontal delete still works after vertical drag";
         // 纵向手势会交给外层列表；横滑前重新定位卡片，不能复用滚动前的坐标。
         card.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());

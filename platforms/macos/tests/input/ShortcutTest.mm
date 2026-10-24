@@ -6465,9 +6465,15 @@ static void TestInputModeStatusItem() {
 // 单按 Caps Lock 切换中英文。合成的时钟、按键状态和撤回大写锁定：单测不能动跑测试那台机器的真实大写锁定。
 static std::int64_t gCapsNow = 0;
 static bool gCapsHeld = false;
+static bool gCapsHIDKnown = false;
+static bool gCapsHIDHeld = false;
 static bool gCapsReleaseWorks = true;
 static NSUInteger gCapsReleases = 0;
 static std::int64_t SyntheticCapsNow() { return gCapsNow; }
+static bool SyntheticCapsHID(bool *known) {
+    if (known) *known = gCapsHIDKnown;
+    return gCapsHIDHeld;
+}
 static CGEventFlags SyntheticCapsFlags(CGEventSourceStateID state) {
     assert(state == kCGEventSourceStateHIDSystemState);
     // 松手后逻辑锁定位仍为真，只有实体按住位清除；不能把锁定当成长按。
@@ -6477,13 +6483,21 @@ static bool SyntheticCapsRelease() { ++gCapsReleases; return gCapsReleaseWorks; 
 
 static void TestCapsLockTap() {
     const auto realRelease = MSIMECapsLockRelease;
+    const auto realHID = MSIMECapsLockHIDState;
     const auto realFlags = MSIMEPhysicalModifierFlagsState;
     const auto realNow = MSIMECapsLockNow;
     MSIMECapsLockRelease = &SyntheticCapsRelease;
+    MSIMECapsLockHIDState = &SyntheticCapsHID;
     MSIMEPhysicalModifierFlagsState = &SyntheticCapsFlags;
     MSIMECapsLockNow = &SyntheticCapsNow;
     gCapsReleases = 0;
     gCapsReleaseWorks = true;
+    gCapsHIDKnown = true;
+    gCapsHIDHeld = true;
+    assert(MSIMECapsLockPhysicallyHeld());
+    gCapsHIDHeld = false;
+    assert(!MSIMECapsLockPhysicallyHeld());
+    gCapsHIDKnown = false;
 
     NSString *suite = [@"msime.caps-lock-tap." stringByAppendingString:NSUUID.UUID.UUIDString];
     NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
@@ -6659,6 +6673,7 @@ static void TestCapsLockTap() {
     assert(session.capsLock && !prefs.englishMode && gCapsReleases == releasesBefore);
 
     MSIMECapsLockRelease = realRelease;
+    MSIMECapsLockHIDState = realHID;
     MSIMEPhysicalModifierFlagsState = realFlags;
     MSIMECapsLockNow = realNow;
     MSIMERemoveTestPreferenceSuite(defaults, suite);
@@ -6846,6 +6861,132 @@ static void TestTemporaryJapaneseLongVowelThroughRealSession(BOOL paging) {
         MSIMERemoveTestPreferenceSuite(defaults, suite);
         assert([NSFileManager.defaultManager removeItemAtPath:root error:&error] && !error);
     }
+}
+
+// 用真实 NSEvent、控制器和 Rust 会话检查调频，客户端仅记录合成上屏。
+static void TestInitialLearningThroughRealKeys(BOOL numeric, BOOL priorContext) {
+    NSString *root = [NSTemporaryDirectory() stringByAppendingPathComponent:NSUUID.UUID.UUIDString];
+    NSError *error = nil;
+    NSDictionary *snapshot = [MSIMEClientSession loadPreferencesInDirectory:[root stringByAppendingPathComponent:@"preferences"] error:&error];
+    assert(snapshot && !error);
+    NSMutableDictionary *preferences = [snapshot[@"preferences"] mutableCopy];
+    preferences[@"scheme"] = @"shuangpin";
+    preferences[@"shuangpin_profile"] = @"xiaohe";
+    preferences[@"default_ime_mode"] = @"chinese";
+    preferences[@"learning"] = @YES;
+    preferences[@"cloud_candidates"] = @NO;
+    preferences[@"frequency"] = @{@"mode": @"promote", @"trigger_count": @1, @"linear_step": @1};
+    NSMutableDictionary *options = [@{@"api_version": @1, @"preferences": preferences,
+        @"quick_phrase_candidates": @YES, @"phrase_preedit": @YES} mutableCopy];
+    for (NSString *name in @[@"resources", @"user_data", @"cache", @"dictionaries"]) {
+        NSString *path = [root stringByAppendingPathComponent:name];
+        assert([NSFileManager.defaultManager createDirectoryAtPath:path withIntermediateDirectories:YES attributes:nil error:nil]);
+        options[name] = path;
+    }
+    for (NSString *name in @[@"resources", @"dictionaries"]) {
+        sqlite3 *database = nullptr;
+        NSString *path = [options[name] stringByAppendingPathComponent:@"msime-pinyin.db"];
+        assert(sqlite3_open(path.fileSystemRepresentation, &database) == SQLITE_OK);
+        assert(sqlite3_exec(database,
+            "CREATE TABLE tbl_1_l(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+            "INSERT INTO tbl_1_l VALUES('lai','l','甲',14837007),('li','l','丁',7329328),"
+            "('lao','l','戊',3762961),('la','l','己',3655999),('le','l','乙',3481243),"
+            "('liang','l','庚',3302466),('li','l','辛',3298612),('liao','l','乙',999);"
+            "CREATE TABLE tbl_2_l(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+            "CREATE TABLE tbl_1_w(key TEXT,jp TEXT,value TEXT,weight INTEGER);"
+            "INSERT INTO tbl_1_w VALUES('wan','w','丙',100);"
+            "CREATE TABLE quick_parases(key TEXT,value TEXT,weight INTEGER);", nullptr, nullptr, nullptr) == SQLITE_OK);
+        assert(sqlite3_close(database) == SQLITE_OK);
+    }
+    auto query = [&](NSString *path, const char *sql) -> sqlite3_int64 {
+        sqlite3 *database = nullptr;
+        assert(sqlite3_open_v2(path.fileSystemRepresentation, &database, SQLITE_OPEN_READONLY, nullptr) == SQLITE_OK);
+        sqlite3_stmt *statement = nullptr;
+        assert(sqlite3_prepare_v2(database, sql, -1, &statement, nullptr) == SQLITE_OK);
+        assert(sqlite3_step(statement) == SQLITE_ROW);
+        sqlite3_int64 result = sqlite3_column_int64(statement, 0);
+        assert(sqlite3_finalize(statement) == SQLITE_OK);
+        assert(sqlite3_close(database) == SQLITE_OK);
+        return result;
+    };
+    NSString *working = [options[@"dictionaries"] stringByAppendingPathComponent:@"msime-pinyin.db"];
+    NSString *journal = [options[@"user_data"] stringByAppendingPathComponent:@"msime_user.db"];
+    if (priorContext) {
+        // 首次创建真实会话前预置合成历史，检验旧上下文不能推翻全局调频首选。
+        sqlite3 *database = nullptr;
+        assert(sqlite3_open(journal.fileSystemRepresentation, &database) == SQLITE_OK);
+        assert(sqlite3_exec(database,
+            "CREATE TABLE personal_bigram(previous TEXT NOT NULL,word TEXT NOT NULL,count INTEGER NOT NULL CHECK(count>0),PRIMARY KEY(previous,word)) WITHOUT ROWID;"
+            "CREATE TABLE personal_trigram(earlier TEXT NOT NULL,previous TEXT NOT NULL,word TEXT NOT NULL,count INTEGER NOT NULL CHECK(count>0),PRIMARY KEY(earlier,previous,word)) WITHOUT ROWID;"
+            "INSERT INTO personal_bigram VALUES('丙','甲',10);", nullptr, nullptr, nullptr) == SQLITE_OK);
+        assert(sqlite3_close(database) == SQLITE_OK);
+    }
+    const char *weightSQL = "SELECT weight FROM tbl_1_l WHERE key='le' AND value='乙'";
+    MSIMEClientSession *session = [[MSIMEClientSession alloc] initWithOptions:options error:&error];
+    assert(session && !error);
+    NSDictionary *view = [session setFocused:YES error:&error][@"view"];
+    assert(view && !error);
+    NSString *suite = [@"msime.initial-learning." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults skinsRoot:[NSURL fileURLWithPath:root]];
+    [prefs applySharedInputPreferences:preferences];
+    prefs.englishMode = NO;
+    prefs.expandCandidates = NO;
+    ShortcutClient *client = [ShortcutClient new];
+    client.document = @"";
+    client.selection = NSMakeRange(0, 0);
+    client.caret = NSMakeRect(100, 100, 1, 16);
+    ModeController *controller = [ModeController alloc];
+    [controller setValue:prefs forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:client forKey:@"activeClient"];
+    [controller setValue:view forKey:@"view"];
+    [controller setValue:[[HiddenCandidatePanel alloc] init] forKey:@"panel"];
+    BOOL displayedBeforeGlobal = NO;
+    for (NSUInteger round = 0; round < 5; ++round) {
+        assert([controller handleEvent:KeypadKey(37, @"l", 0, NO) client:client]);
+        NSArray *rows = [controller valueForKey:@"view"][@"candidates"];
+        NSUInteger index = [rows indexOfObjectPassingTest:^BOOL(NSDictionary *row, NSUInteger offset, BOOL *stop) {
+            (void)offset; (void)stop;
+            return [row[@"text"] isEqual:@"乙"];
+        }];
+        assert(index != NSNotFound && index < 6);
+        sqlite3_int64 before = query(working, weightSQL);
+        if (index == 0 && before < 14837007) displayedBeforeGlobal = YES;
+        if (numeric) {
+            static const unsigned short codes[] = {18, 19, 20, 21, 23, 22};
+            NSString *digit = [NSString stringWithFormat:@"%lu", (unsigned long)index + 1];
+            assert([controller handleEvent:KeypadKey(codes[index], digit, 0, NO) client:client]);
+        } else {
+            // 双拼的左右键编辑音节，使用向下键逐项选择候选。
+            for (NSUInteger move = 0; move < index; ++move)
+                assert([controller handleEvent:ModeKey(125, 0, NO) client:client]);
+            NSArray *highlighted = [controller valueForKey:@"view"][@"candidates"];
+            assert([highlighted[index][@"highlighted"] boolValue]);
+            assert([controller handleEvent:ModeKey(49, 0, NO) client:client]);
+        }
+        assert([client.committed isEqual:@"乙"] && client.insertions.count == round + 1);
+        sqlite3_int64 after = query(working, weightSQL);
+        if (before < 14837007) assert(after > before);
+        assert(query(journal, "SELECT weight FROM user_dictionary_operations WHERE dictionary='pinyin' AND key='le' AND value='乙' AND operation='upsert'") == after);
+    }
+    assert(displayedBeforeGlobal && query(working, weightSQL) > 14837007);
+    assert([controller handleEvent:KeypadKey(13, @"w", 0, NO) client:client]);
+    assert([controller handleEvent:KeypadKey(38, @"j", 0, NO) client:client]);
+    assert([controller handleEvent:ModeKey(49, 0, NO) client:client]);
+    assert([client.committed isEqual:@"丙"]);
+    assert([controller handleEvent:KeypadKey(37, @"l", 0, NO) client:client]);
+    assert([[controller valueForKey:@"view"][@"candidates"][0][@"text"] isEqual:@"乙"]);
+    assert([session closeWithError:&error] && !error);
+    MSIMEClientSession *reopened = [[MSIMEClientSession alloc] initWithOptions:options error:&error];
+    assert(reopened && !error);
+    assert([reopened setFocused:YES error:&error] && !error);
+    NSDictionary *result = [reopened typeASCII:'l' shift:NO error:&error];
+    assert(result && !error && [result[@"view"][@"candidates"][0][@"text"] isEqual:@"乙"]);
+    assert([reopened closeWithError:&error] && !error);
+    assert(query([options[@"resources"] stringByAppendingPathComponent:@"msime-pinyin.db"], weightSQL) == 3481243);
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+    assert([NSFileManager.defaultManager removeItemAtPath:root error:&error] && !error);
 }
 
 // 只注入一次命令失败，其余按键、快照、偏好保存和方案切换均走真实引擎。
@@ -14058,6 +14199,10 @@ int main(int argc, char **argv) {
         @autoreleasepool { TestRealSessionComposition(); }
         @autoreleasepool { TestEnglishOnlineCandidatesThroughRealSession(); }
         @autoreleasepool { TestRealTrilingualCycle(); }
+        @autoreleasepool { TestInitialLearningThroughRealKeys(YES, NO); }
+        @autoreleasepool { TestInitialLearningThroughRealKeys(YES, YES); }
+        @autoreleasepool { TestInitialLearningThroughRealKeys(NO, NO); }
+        @autoreleasepool { TestInitialLearningThroughRealKeys(NO, YES); }
         @autoreleasepool { TestSmartPunctuationVersionNumberThroughRealSession(); }
         @autoreleasepool { TestModifierTaps(); }
         @autoreleasepool { TestShiftChordRecoversWithoutFlagsChanged(); }
