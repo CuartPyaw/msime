@@ -61,8 +61,9 @@ Android 三排字母键按 7、6、5 排列，第三排两侧保留分词和退�
 - Android 门禁通过 266 项 JVM 冒烟及 234 份设备源编译，JNI、清单与资源契约通过。共享 React 设置页类型检查及生产构建、统计页面 13 项、HarmonyOS 类型／键盘逻辑与 ArkWeb 单文件设置构建均通过。iOS 工程重新生成无差异，统计源与真实依赖在 `arm64-apple-ios17.0-simulator` 下类型检查通过。
 - 使用完整原生 APK，在本轮独占的 API 28 `emulator-5566`（`msime-client-test-api28`）和 API 35 `emulator-5580`（`msime-client-test`）通过全部十八键专项，包含小鹤、微软、自定义、分号、消歧、提交、英文／数字／重启／密码／URL，以及六种屏幕几何。十二张实际截图均已查看。APK 用本机既有签名重签，核对除签名条目外全部 ZIP 载荷一致，保留八份词书、日语和原生库，不传输签名凭据。
 - 完整 quick 首轮已以 0 退出，Rust workspace、Android Rust、WASM、Android Java、macOS 原生和共享 Apple bridge 编译通过；Windows portable host runner 179 项通过、2 项宿主差异、68 项需要 Windows、1 项非测试。Linux 容器、MinGW 和 HarmonyOS 真打包因依赖缺失跳过，不记作通过。
+- 后续通过正常 `rbuild` 的 PATH 发现已有 Docker，第二轮完整 quick 以 0 退出；Linux 设置壳及 IBus／Fcitx5 构建通过，原生测试注册 111 项、0 失败。macOS 原生、共享 Apple bridge、Rust／Android／WASM 和 179 项 portable Windows 测试继续通过。设备信息夹具同步后的最终输入另做 quick 与源哈希核对。
 - 完整 API 28 首轮在旧放大编辑断言失败：输入框已按全拼契约显示 `nhi'hao`，原断言仍期待原始串。断言现分别检查分节显示、原始放大串与光标，API 28、35 放大编辑专项均已通过。完整 API 28 第二轮通过上述编辑与剪贴板分词、提示及分页拖动，在设备信息夹具仍期待 `nihao` 处失败；同步为实际分节显示后，两版设备信息复制专项均通过。完整平台终态仍单独核对。
-- 完整 API 35 首轮在日语开关的读屏断言失败。确认 `#9482` 整合丢失 `#9459` 的三个键盘消费者，独立跟进修复 #9459；不把日语修复混入本 PR，也不将十八键专项结果冒充完整平台冒烟。
+- 完整 API 35 首轮在日语开关的读屏断言失败。确认 `#9482` 整合丢失 `#9459` 的三个键盘消费者，独立草稿 [#9566](https://github.com/metasequoiaime/msime/pull/9566) 跟进修复 #9459，修复产品已通过两版日语专项；不把日语修复混入本 PR，也不将十八键专项结果冒充完整平台冒烟。
 
 ### 原草稿历史
 
