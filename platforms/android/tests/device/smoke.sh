@@ -107,6 +107,10 @@ if [[ "$text_edit_layout" == true ]]; then
   [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Text edit layout acceptance failed" >&2; exit 1; }
   exit 0
 fi
+# 十八键复用已有入口，API 28 核心验收与 API 35 完整验收都覆盖组码、回落和实际几何。
+result=$(run_instrumentation app.msime.android.test/app.msime.android.test.FourteenKeyDeviceSmoke -e eighteen_key true)
+printf '%s\n' "$result"
+[[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "十八键全拼验收失败" >&2; exit 1; }
 if [[ "$core" != true ]]; then
   result=$(run_instrumentation app.msime.android.test/app.msime.android.test.ChineseLanguageReturnDeviceSmoke -e japanese-toggle true)
   printf '%s\n' "$result"

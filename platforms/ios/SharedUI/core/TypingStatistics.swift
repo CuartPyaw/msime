@@ -334,8 +334,8 @@ enum TypingKeyID {
     let numpad: [String] = ["NumpadDecimal", "NumpadEnter", "NumpadAdd", "NumpadSubtract", "NumpadMultiply", "NumpadDivide", "NumLock"]
     let nineKey: [String] = (0...9).map { "Nine\($0)" }
     // 全拼 14 键的各键，按键面上的字母命名，与 client-services 的 `KEY_IDS` 逐字一致。
-    let eighteenKey: [String] = ["Q", "WE", "RT", "Y", "U", "IO", "P", "A", "SD", "FG", "H", "JK", "L", "Z", "XC", "V", "BN", "M"].map { "Eighteen\($0)" }
     let fourteenKey: [String] = ["QW", "ER", "TY", "UI", "OP", "AS", "DF", "GH", "JK", "L", "ZX", "CV", "BN", "M"].map { "Fourteen\($0)" }
+    let eighteenKey: [String] = ["Q", "WE", "RT", "Y", "U", "IO", "P", "A", "SD", "FG", "H", "JK", "L", "Z", "XC", "V", "BN", "M"].map { "Eighteen\($0)" }
     let soft: [String] = ["SoftPunctuation", "SoftSymbol", "SoftLayer", "SoftLanguage", "SoftGlobe", "SoftEmoji", "SoftVoice"]
     var keys: [String] = letters
     for part in [digits, editing, functionKeys, numpadDigits, numpad, nineKey, soft, fourteenKey, eighteenKey] {
@@ -884,7 +884,7 @@ enum TypingSummaryText {
     ]
   }
 
-  /// 输入方式：26 键、14 键、9 键、语音和手写，只列有输入的部分。除九键和 14 键外的所有键盘方案都在 26 个字母键上输入；AI 润色、回复和未归类的输入不算输入方式，不计入。与共享界面的 `summaryMethods` 一致。
+  /// 输入方式按二十六、十八、十四、九键、语音和手写分别汇总，只列有输入的部分。AI 润色、回复和未归类的输入不计入，与共享界面的 `summaryMethods` 一致。
   static func methods(_ sources: [String: Int]) -> [Share] {
     let excluded = Set([TypingSource.nineKey, .fourteenKey, .eighteenKey, .voice, .handwriting, .unknown, .ai, .reply].map(\.rawValue))
     let full = sources.filter { !excluded.contains($0.key) }.values.reduce(0) { $0 + max(0, $1) }

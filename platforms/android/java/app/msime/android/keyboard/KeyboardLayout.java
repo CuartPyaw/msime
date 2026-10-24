@@ -28,7 +28,7 @@ public final class KeyboardLayout {
         return layout == FOURTEEN_KEY_LAYOUT || layout == EIGHTEEN_KEY_LAYOUT;
     }
 
-    /** 画着的是引擎组码网格的键面（拼音九键或 14 键）：读音取 `nine_key_reading`（九键写进输入框，14 键画在读音行上），展开候选是三栏面板。 */
+    /** 引擎组码网格的键面：读音取 `nine_key_reading`，九键写进输入框，十四／十八键画在读音行上；展开候选是三栏面板。 */
     public static boolean drawsKeyGrid(int layout) {
         return layout == QUANPIN_NINE_KEY_LAYOUT || drawsLetterGrid(layout);
     }

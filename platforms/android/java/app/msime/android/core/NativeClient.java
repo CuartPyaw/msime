@@ -379,7 +379,7 @@ public final class NativeClient {
     public static final int KEY_GRID_FOURTEEN_KEY = 2;
     /** 全拼十八键，与共享 C ABI 布局编号一致。 */
     public static final int KEY_GRID_EIGHTEEN_KEY = 4;
-    /** 14 键的一键：`letter` 是这一组里的一个小写字母，宿主送首字母；返回与 {@link #character} 相同的输入响应。 */
+    /** 字母组网格的一键：`letter` 是组内的小写字母，宿主送首字母；返回与 {@link #character} 相同的输入响应。 */
     public static String gridKey(long session, char letter) {
         if (letter < 'a' || letter > 'z') throw new IllegalArgumentException("Grid key must be a lowercase letter");
         return TextPolicy.utf8(gridKeyRaw(session, letter));
