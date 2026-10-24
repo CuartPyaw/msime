@@ -1,3 +1,4 @@
+#include "../../compat/WindowsVersion.h"
 #include "CandidateFlyoutWindow.h"
 #include "../../compat/WindowsDpi.h"
 
@@ -58,7 +59,7 @@ void CandidateFlyoutWindow::create(Panel &panel) {
   // No redirection bitmap: the card is composed with per-pixel alpha, which is
   // what gives it rounded corners instead of a rectangular window cut-out.
   panel.window = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW |
-                                     WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP,
+                                     WS_EX_TOPMOST | msime::windows::compat::no_redirection_bitmap_style(),
                                  class_name, L"", WS_POPUP, 0, 0, 1, 1, nullptr,
                                  nullptr, GetModuleHandleW(nullptr), this);
   if (!panel.window)

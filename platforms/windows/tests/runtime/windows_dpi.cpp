@@ -1,4 +1,5 @@
 #include "../../compat/WindowsDpi.h"
+#include "../../compat/WindowsVersion.h"
 
 #include <cassert>
 #include <cstdio>
@@ -53,7 +54,8 @@ int main() {
   using msime::windows::compat::DpiApi;
 
   // 真实 HWND 验证无新 API 的路径，包括无效窗口和 GDI 查询；查询结果不能把旧系统固定为 96 DPI。
-  const HWND window = CreateWindowExW(0, L"STATIC", L"dpi-fixture", WS_POPUP,
+  // 真实创建产品使用的窗口样式，防止 Win7 在 DPI 查询前就被新样式拒绝。
+  const HWND window = CreateWindowExW(msime::windows::compat::no_redirection_bitmap_style(), L"STATIC", L"dpi-fixture", WS_POPUP,
                                       0, 0, 64, 64, nullptr, nullptr,
                                       GetModuleHandleW(nullptr), nullptr);
   assert(window);

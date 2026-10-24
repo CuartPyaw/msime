@@ -1,3 +1,4 @@
+#include "../../compat/WindowsVersion.h"
 #include "ShuangpinKeymapWindow.h"
 #include "../../compat/WindowsDpi.h"
 #include "CandidateWindow.h"
@@ -57,7 +58,7 @@ ShuangpinKeymapWindow::ShuangpinKeymapWindow() {
     throw std::runtime_error("Shuangpin keymap class unavailable");
   // 不激活、不进任务栏和 Alt+Tab、置顶；WS_EX_TRANSPARENT 让鼠标点击穿过去，和 macOS 面板的 ignoresMouseEvents 一样只给人看。没有重定向位图：卡片按像素带透明度合成，圆角和阴影外面是透明的。
   window_ = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_TRANSPARENT |
-                                WS_EX_NOREDIRECTIONBITMAP,
+                                msime::windows::compat::no_redirection_bitmap_style(),
                             kClassName, L"MSIME shuangpin keymap", WS_POPUP, 0, 0, 1, 1, nullptr, nullptr,
                             type.hInstance, this);
   if (!window_)

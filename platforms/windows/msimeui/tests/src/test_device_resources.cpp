@@ -1,3 +1,4 @@
+#include "../../../compat/WindowsVersion.h"
 #include "tests/includes/test_framework.h"
 #include "../../../compat/WindowsDpi.h"
 
@@ -14,7 +15,7 @@ class HiddenWindow
     HiddenWindow()
     {
         REQUIRE(SUCCEEDED(CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED)));
-        hwnd = CreateWindowExW(WS_EX_NOREDIRECTIONBITMAP, L"STATIC", L"DPI resource test", WS_POPUP, 0, 0, 256, 128,
+        hwnd = CreateWindowExW(msime::windows::compat::no_redirection_bitmap_style(), L"STATIC", L"DPI resource test", WS_POPUP, 0, 0, 256, 128,
                                nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
         REQUIRE(hwnd != nullptr);
     }

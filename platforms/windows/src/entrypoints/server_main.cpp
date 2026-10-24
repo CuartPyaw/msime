@@ -911,6 +911,8 @@ int wmain(int argc, wchar_t **argv) {
   const bool production = launch.kind == ServerLaunchKind::Managed;
   if (launch.kind == ServerLaunchKind::Invalid)
     return 2;
+  // 只报告固定阶段，不把可能带路径、账号或凭据的异常内容写到日志。
+  const char* startup_stage = "configuration";
   try {
     const auto default_state = production_state_directory();
     std::unique_ptr<ProductionInstance> instance;
@@ -960,7 +962,9 @@ int wmain(int argc, wchar_t **argv) {
       std::cerr << line << "\n";
       diagnostic_log.server(line);
     };
+    startup_stage = "console_control";
     ConsoleControl console;
+    startup_stage = "host_prepare";
     auto bootstrap_document =
         nlohmann::json{{"resources", config.resources.u8string()},
                        {"state_root", config.state_root.u8string()}};
@@ -979,14 +983,17 @@ int wmain(int argc, wchar_t **argv) {
       throw std::runtime_error("Host preparation failed");
     if (stopping.load())
       return 0;
+    startup_stage = "services";
     apply_diagnostic_log(diagnostic_log, prepared.at("value").at("preferences"));
     // Usage reporting, on unless the user turned usage_reporting off: one session per Server process, kept in this Windows user's %LOCALAPPDATA%\MSIME. begin closes the previous session (session_crash only when it left a crash record) and queues today's active; it is file I/O only. Delivery runs on a thread that is never joined, so an unreachable endpoint cannot delay the Server and exiting mid-request only leaves the events queued for the next start.
+    startup_stage = "telemetry";
     const bool usage_reporting = msime::windows::usage_reporting_enabled(prepared.at("value").at("preferences"));
     if (const auto telemetry_directory = edition_telemetry_directory(); !telemetry_directory.empty()) {
       msime::telemetry::begin({"windows", MSIME_WINDOWS_VERSION, telemetry_directory, usage_reporting, {}});
       msime::telemetry::start_flushing();
     }
     // The user's anonymous MSIME account is registered on the first run after install, as on every other platform; once anonymous-session.json exists this is a file read. It runs off the main thread for the same reason as the telemetry event, and a failure (offline, rate limited) is simply retried on the next start.
+    startup_stage = "anonymous_account";
     if (const auto account = anonymous_account_directory(); production && !account.empty()) {
       // 选了「水杉账号」时候选释义用这个目录里的会话：设置应用登录的账号优先，没有登录时用这里注册的匿名账号。
       const auto utf8_directory = account.u8string();
@@ -1005,6 +1012,7 @@ int wmain(int argc, wchar_t **argv) {
     }
     diagnostic_log.server(std::string(production ? "Production" : "Preview") +
                           " Server starting");
+    startup_stage = "preferences";
     const auto language_dictionaries =
         installed_language_dictionaries(config.resources);
     auto traditional_output = std::make_shared<std::atomic<bool>>(
@@ -1065,6 +1073,7 @@ int wmain(int argc, wchar_t **argv) {
     // The TSF Ctrl+Shift+F route is delivered through the same bounded worker
     // as the toolbar button. It must exist before WindowsServer construction:
     // a newly connected client may dispatch its first key immediately.
+    startup_stage = "workers";
     CharacterSetClickWorker character_set_clicks(
         [traditional_output, directory = config.state_root](
             const CharacterSetClick &click) {
@@ -1281,6 +1290,7 @@ int wmain(int argc, wchar_t **argv) {
     auto session_options = prepared.at("value");
     name_builtin_sound_packs(session_options, config.state_root);
     name_official_plugin_packs(session_options, executable_directory());
+    startup_stage = "pipe_server";
     WindowsServer server(
         options, session_options.dump(),
         production
@@ -1295,6 +1305,7 @@ int wmain(int argc, wchar_t **argv) {
             : preview_key_handler(config),
         [](const FocusRoute &, const FanyImeNamedpipeData &) { return true; });
     // Its palette is applied once the theme is resolved, alongside the toolbar's.
+    startup_stage = "voice_overlay";
     WaveOverlay voice_overlay;
     VoiceInputSession *voice_session = nullptr;
     if (!voice_overlay.init(
@@ -1310,6 +1321,7 @@ int wmain(int argc, wchar_t **argv) {
                 voice_session->dismiss_processing();
             }))
       throw std::runtime_error("Voice overlay unavailable");
+    startup_stage = "voice_session";
     auto voice = std::make_unique<VoiceInputSession>(
         voice_overlay,
         [&] {
@@ -1453,6 +1465,7 @@ int wmain(int argc, wchar_t **argv) {
       notice("Typing effect overlay unavailable; continuing without it");
     }
     bool typing_overlay_failure_reported = false;
+    startup_stage = "candidate_window";
     CandidateWindow candidates(
         [&] {
           auto view = server.candidate_view();
@@ -1488,6 +1501,7 @@ int wmain(int argc, wchar_t **argv) {
         return typing_overlay->present(presentation);
       });
     // The global theme colours the card, the toolbar and the menus. Each surface resolves it in its own mode, and the answers are kept until the theme, the layout or the package on disk changes, so the shared layer's disk read never runs inside a draw.
+    startup_stage = "candidate_theme";
     auto current_candidate_theme = candidate_theme_values(
         prepared.at("value").at("preferences"));
     std::map<std::string, CandidateThemeResolution> resolved_themes;
@@ -1604,6 +1618,7 @@ int wmain(int argc, wchar_t **argv) {
           package_assets(theme.candidate_skin).toolbar, dark);
     };
     bool toolbar_visible = toolbar_enabled->load(std::memory_order_acquire);
+    startup_stage = "floating_toolbar";
     FloatingToolbarWindow toolbar(
         [&] { return server.mode_view(); },
         [&](const ModeClick &click) { (void)mode_clicks.submit(click); });
@@ -1883,6 +1898,7 @@ int wmain(int argc, wchar_t **argv) {
           state.themes = theme_rows;
           return state;
     };
+    startup_stage = "tray_menu";
     TrayMenuWindow tray(menu_capabilities, tray_command, tray_state);
     // 主题页的一行写存储的 global_theme；偏好监视器随后把新主题发布给候选窗、工具栏和这张卡片。只接受目录里有的主题。
     tray.set_theme_action([&](const std::string &theme) {
@@ -2150,6 +2166,7 @@ int wmain(int argc, wchar_t **argv) {
     bool window_band_logged = false;
     uint64_t tsf_config_applied_revision = 0;
     uint64_t caps_lock_applied_revision = 0;
+    startup_stage = "message_loop";
     while (!stopping.load() && server.failure() == ControllerFailure::None &&
            !candidates.failed() && !clicks.failed() && !pages.failed() &&
            !mode_clicks.failed() &&
@@ -2587,8 +2604,8 @@ int wmain(int argc, wchar_t **argv) {
     diagnostic_log.server(server_stop_line(failures));
     return failures.empty() ? 0 : 1;
   } catch (...) {
-    std::cerr << "Preview Server failed; verify configuration, resources, "
-                 "state ownership and pipe availability.\n";
+    std::cerr << "Server failed at stage=" << startup_stage
+              << "; verify configuration, resources, state ownership and pipe availability.\n";
     return 1;
   }
 }

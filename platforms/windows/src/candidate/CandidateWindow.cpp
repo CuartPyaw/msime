@@ -1,3 +1,4 @@
+#include "../../compat/WindowsVersion.h"
 #include "CandidateWindow.h"
 #include "../../compat/WindowsDpi.h"
 #include "CandidateCanvasDrawing.h"
@@ -399,7 +400,7 @@ CandidateWindow::CandidateWindow(Reader reader, Click click, unsigned font_size,
   // No redirection bitmap: the card is composed with per-pixel alpha, which is
   // what gives it rounded corners instead of a rectangular window cut-out.
   window_ = CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOOLWINDOW | WS_EX_TOPMOST |
-                                WS_EX_NOREDIRECTIONBITMAP,
+                                msime::windows::compat::no_redirection_bitmap_style(),
                             class_name, L"", WS_POPUP, 0, 0, 1, 1, nullptr,
                             nullptr, descriptor.hInstance, this);
   if (!window_)
