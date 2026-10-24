@@ -35,9 +35,11 @@ Status: implemented
 
 `EnglishLetterHoldPolicySmoke` 检查十个首排数字、字母上下标缺项和声调。`LetterHintPunctuationDeviceSmoke -e english-hold true` 逐个长按三排字母，并以真实触摸坐标选中，检查单次提交、屏幕边界、菜单靠近按键、英文状态、下滑角标和 O 的切换；它由普通 `smoke.sh` 执行。
 
-`LetterHintPunctuationDeviceSmoke -e english-symbol-drag true` 保持一次真实触摸，覆盖 A→`@`、V→`?`、取消不提交、连续两次符号与逗号长按的 ASCII 句号。修复前 API 28 在 A→`@` 的选中状态断言失败，弹窗选项已经可见，排除菜单本身缺失。本次修复的原生 full APK 与重建夹具在 API 28、35 均通过此专项，原始 instrumentation 返回通过标记和 `-1`。完整英文与中文长按专项在 API 28 通过。API 35 后续完整验收遭遇测试期间包被替换与 System UI 无响应，相关轮次作废，改用本任务独立 AVD 继续核对；不能沿用下述早期菜单验收。中文滑动专项在切换为上滑直接符号后仍打开选项，失败记录保留，该套件尚未作为本次通过证据。
+`LetterHintPunctuationDeviceSmoke -e english-symbol-drag true` 保持一次真实触摸，覆盖 A→`@`、V→`?`、取消不提交、连续两次符号与逗号长按的 ASCII 句号。修复前 API 28 在 A→`@` 的选中状态断言失败，弹窗选项已经可见，排除菜单本身缺失。本次修复的原生 full APK 与重建夹具在 API 28、35 均通过此专项，原始 instrumentation 返回通过标记和 `-1`。完整英文与中文长按专项在 API 28 通过。API 35 后续完整验收遭遇测试期间包被替换与 System UI 无响应，相关轮次作废，改用本任务独立 AVD 继续核对；不能沿用下述早期菜单验收。此前中文滑动专项在切换为上滑直接符号后仍打开选项，失败记录保留；最终 APK 的重跑结果另列如下。
 
 句号角标增量使用重编 Java 与资源的原生 full APK，在 API 28、35 通过英文拖选、取消、连续提交及逗号长按句号专项；两轮前后核对产品包与测试包哈希未变化。六项原生库与此前 APK 的打包字节相同，本轮没有重新构建 Rust 核心。API 28 在合成编辑器实看中文 `。` 和英文 `.` 角标，截图分别保留为 `period-hint-api28-chinese.png`、`period-hint-api28-english.png`，随后恢复中文。相同 APK 和最终夹具在 API 35 完整 `english-hold` 通过，覆盖逐键菜单、Unicode 18 下标、声调、O 切回中文和随后追加的拖选、取消及句号断言（`period-hint-api35-english-hold.log`）；前后包哈希一致。本轮完整 `scripts/verify-local.sh --quick` 退出 0（`period-hint-quick.log`），覆盖契约、笔记、Rust workspace、Android target、Android Java/JNI 与共享 Apple bridge；其余平台按改动范围跳过。
+
+最终 APK 与相同夹具在 API 28 的完整 `letter-swipe` 重跑通过，覆盖大小写拖选、引号交替、取消与滑出不提交、后续点选、ASCII 标点、上下方向、禁用后保留字母、成对标点及候选态普通点按（`period-hint-api28-letter-swipe.log`）。前后产品和夹具包哈希一致，未修改这轮的测试或产品。早先同一配置阶段失败的根因仍未定位，本次通过不证明竞态已被消除。
 
 本轮夹具只在未成功发送终止事件时补发取消，避免松手后重复 `ACTION_CANCEL` 被系统拒绝；这不改变选中、取消或精确正文断言。中文点选夹具先测 Q 长按与 W 上滑，最后测 A→`@`，因为邮箱候选出现时产品按设计禁用字母手势。完整 quick 与测试 APK 构建通过。
 
