@@ -50,7 +50,7 @@ final class MorePanelFoldTests: XCTestCase {
     var titles: [String] = ["全角", "中文标点", "模糊音", "繁体", "手写", "词库", "键盘高度", "设置", "按键音"]
     if haptics { titles.append("振动") }
     titles += ["单手模式", "隐私模式", "反馈", "关于", "AI 润色", "高情商回复", "本地输入"]
-    if !TouchToolbarLocalPreference.hidden && KeyboardLayoutPreference.voiceShortcutEnabled {
+    if TouchToolbarLocalPreference.hidden || !KeyboardLayoutPreference.voiceShortcutEnabled {
       titles.append("语音输入")
     }
     if (try? VoiceTextHandoffStore().read()) != nil {
