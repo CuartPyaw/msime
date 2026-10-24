@@ -33,8 +33,8 @@ Status: implemented
 - 两项直接调用 C ABI 的集成测试验证解码、旧三项保持、空值／非法值及试写冲突；Windows 上实际执行通过。
 - 共享语音录键与固定语音键两套前端测试共 17 项通过；macOS、Linux 入口、取消、冲突、桥失败与保留原值有覆盖，类型检查与生产构建通过。
 - macOS `live-voice-controller` 与 `live-voice-socket-route` 两项真实控制器测试通过。新增部分使用合成采集器，覆盖全局监视器与 IMK 入口、开始／结束、自动重复、改绑、解绑、禁用与失焦；不是系统安装或真实麦克风验收。
-- Windows 无系统依赖的语音热键策略测试通过，覆盖自定义修饰键精确匹配、物理键映射与按下／重复／松键锁存。Windows 上同源原生 WinUI 设置页编译通过，设置页运行、真实全局键盘钩子和编辑器入口仍待验收。
-- Linux 已构建 IBus 与 Fcitx5，完整原生门禁尚在运行。新增 IBus 合成服务场景需在有锁定词库与独立 D-Bus 的环境运行；不得把仅编译该测试当成运行通过。
+- Windows 无系统依赖的语音热键策略测试通过，覆盖自定义修饰键精确匹配、物理键映射与按下／重复／松键锁存。Windows 上同源原生 WinUI 设置页与 Server 均编译链接通过，原生 `windows-voice-hotkey-policy` CTest 通过。独立合成状态的 WinUI 录键专项接入 CI，覆盖保存、取消、固定键冲突、切页恢复和解绑；本机 SSH 会话启动 XAML 失败，已登录会话能开窗口但不能取得前台焦点，断言在发送快捷键前终止，不能计作界面通过。真实全局键盘钩子和编辑器入口仍待验收。
+- Linux 完整原生门禁终态通过：111 项中 110 项通过、1 项需求激活测试跳过，五笔版无测试构建、full/wubi 安装路径互斥与辅助码暂存检查通过。这轮早于最终 IBus 合成键锁存修正。随后用最终产品源码增量重建，两个新增资源专项 `ibus-custom-voice-hotkey` 和 `fcitx5-custom-voice-hotkey` 实际通过：前者走独立 D-Bus，后者走真实 Fcitx 输入上下文，均覆盖开始／结束、修饰键精确匹配、自动重复、先松修饰键与合成结果上屏；Fcitx 额外覆盖非美式布局的物理 Q。完整 IBus smoke 仍在到达语音场景前因 `Focus did not show the input mode` 失败，未做修复前对照，不能认定与本次无关。专项保留完整入口并纳入各自容器验收脚本。
 - macOS 上相关库与两个集成测试目标的严格 Clippy 通过。Windows 严格 Clippy 先后受已有 `host-windows::read_clipboard_text`、`host-api::windows_clipboard_text` 的 `Result<_, ()>` lint 阻塞，未放宽规则。
 - Windows quick 已实际执行并失败：基线的两处 `MixedInput` 字段缺失和一次移动后使用由独立 PR #9531 修复；另有缺少固定参考提交、发布夹具和三个旧 C++ 测试告警。该轮仅覆盖初始共享与 macOS 快照，后加 Linux／Windows 接入不能借用该结果。
 
@@ -44,4 +44,4 @@ Status: implemented
 
 Linux 真实事件按 evdev 位置匹配 DOM code；Fcitx5 的 X 键码先减八。没有硬件键码的合成事件才回退到规范化 keysym，Shift 和布局变换不改变真实物理键绑定。按键消费保持到松开，改绑或修饰键提前松开不能重复切换。
 
-系统或应用可能先占用用户录入的组合键，静态表不能证明全局可达。Windows 原生现场和 Linux 资源运行测试、最终完整 quick 仍是合并前缺口。原报告的豆包与 DeepSeek 测试问题没有可验证的请求／响应，现有自定义服务入口也尚未逐平台现场验收，本 PR 使用 `Refs #8990`，不自动关闭整项诉求。
+系统或应用可能先占用用户录入的组合键，静态表不能证明全局可达。Windows 原生录键与全局钩子现场、完整 IBus smoke 的聚焦失败和完整 quick 仍是合并前缺口。原报告的豆包与 DeepSeek 测试问题没有可验证的请求／响应，现有自定义服务入口也尚未逐平台现场验收，本 PR 使用 `Refs #8990`，不自动关闭整项诉求。

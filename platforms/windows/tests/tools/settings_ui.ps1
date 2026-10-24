@@ -2,7 +2,8 @@
 param(
     [Parameter(Mandatory = $true)][string]$Program,
     [Parameter(Mandatory = $true)][string]$OutputDirectory,
-    [switch]$InputOnly
+    [switch]$InputOnly,
+    [switch]$VoiceHotkeyOnly
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -603,6 +604,65 @@ function Select-ComboChoice($window, [string]$id, [string]$label) {
     $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern).Select()
     $combo.GetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern).Collapse()
 }
+# 仅操作独立合成窗口，验证录键经过原生事件、共享预检及真实偏好保存。
+function Assert-VoiceToggleRecorder($window, [IntPtr]$handle) {
+    function Read-VoiceBinding {
+        $saved = Get-Content -LiteralPath (Join-Path $state 'preferences.json') -Raw | ConvertFrom-Json
+        $field = $saved.preferences.keybindings.PSObject.Properties['toggle_voice_input']
+        if ($field) { return [string]$field.Value }
+        return ''
+    }
+    function Wait-VoiceBinding([string]$expected) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            if ((Read-VoiceBinding) -eq $expected) { return }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        throw "语音绑定保存值不符：期望 $expected，实际 $(Read-VoiceBinding)"
+    }
+    function Record-VoiceKeys([string]$keys) {
+        $deadline = [DateTime]::UtcNow.AddSeconds(10)
+        do {
+            $nameCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, '语音输入开始／结束')
+            $typeCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, [System.Windows.Automation.ControlType]::Button)
+            $condition = New-Object System.Windows.Automation.AndCondition($nameCondition, $typeCondition)
+            $button = $window.FindFirst([System.Windows.Automation.TreeScope]::Descendants, $condition)
+            if ($button -and $button.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $button.Current.IsEnabled) { break }
+            Start-Sleep -Milliseconds 100
+        } while ([DateTime]::UtcNow -lt $deadline)
+        if (-not $button) { throw '语音录键按钮缺失' }
+        [SettingsWindowProbe]::SetForegroundWindow($handle) | Out-Null
+        $button.SetFocus()
+        if ([SettingsWindowProbe]::GetForegroundWindow() -ne $handle) { throw '合成设置窗口未获得前台焦点' }
+        $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        [System.Windows.Forms.SendKeys]::SendWait($keys)
+    }
+    Open-Page $window 'voice'
+    Select-PageTab $window 'voice-tab-input' '服务配置'
+    Record-VoiceKeys '^%{F8}'
+    Wait-VoiceBinding 'Ctrl+Alt+F8'
+    Save-Window $window 'voice-hotkey-bound.png'
+    Record-VoiceKeys '{ESC}'
+    Wait-VoiceBinding 'Ctrl+Alt+F8'
+    Record-VoiceKeys '^{F9}'
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $conflict = Find-ByName $window '与现有快捷键冲突，请换一个组合键'
+        if ($conflict) { break }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    if (-not $conflict) { throw '原生录键没有显示固定语音键冲突' }
+    Wait-VoiceBinding 'Ctrl+Alt+F8'
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+    Open-Page $window 'about'
+    Open-Page $window 'voice'
+    Select-PageTab $window 'voice-tab-input' '服务配置'
+    if (-not (Find-ByName $window 'Ctrl+Alt+F8')) { throw '重新进入语音页未显示已保存绑定' }
+    Record-VoiceKeys '{BACKSPACE}'
+    Wait-VoiceBinding ''
+    Save-Window $window 'voice-hotkey-cleared.png'
+    Write-Host '语音原生录键、取消、固定键冲突、切页恢复与解绑通过'
+}
 function Start-SettingsWindow([string]$route) {
     # 进程先记进脚本作用域的 $process，窗口没打开时 finally 也能把它收掉。
     $script:process = Start-Process -FilePath $programPath -ArgumentList "--route=$route" -PassThru
@@ -723,6 +783,19 @@ function Save-Window($element, [string]$file) {
 try {
     New-Item -ItemType Directory -Force $state | Out-Null
     $env:MSIME_CLIENT_STATE_DIR = $state
+    if ($VoiceHotkeyOnly) {
+        if (-not [SettingsWindowProbe]::SetDllDirectory([IO.Path]::GetDirectoryName($programPath))) { throw 'Settings DLL path could not be set' }
+        $defaults = [SettingsWindowProbe]::DefaultPreferences() | ConvertFrom-Json
+        if (-not $defaults.ok) { throw 'Default preferences could not be loaded' }
+        $document = @{format_version = 1; revision = 1; preferences = $defaults.value}
+        [IO.File]::WriteAllText((Join-Path $state 'preferences.json'), ($document | ConvertTo-Json -Depth 64))
+        $window = Start-SettingsWindow 'settings:voice'
+        Assert-VoiceToggleRecorder $window $process.MainWindowHandle
+        $process.CloseMainWindow() | Out-Null
+        if (-not $process.WaitForExit(10000) -or $process.ExitCode -ne 0) { throw '语音录键验证窗口未正常退出' }
+        $process = $null
+        return
+    }
     New-CanvasPreviewFixture
     if (-not [SettingsWindowProbe]::SetDllDirectory([IO.Path]::GetDirectoryName($programPath))) { throw 'Settings DLL path could not be set' }
     $defaults = [SettingsWindowProbe]::DefaultPreferences() | ConvertFrom-Json
