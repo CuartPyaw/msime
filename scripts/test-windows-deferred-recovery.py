@@ -22,7 +22,6 @@ HARNESS = r'''
 #include <string>
 #include "InputSchemeTraits.h"
 #include "WubiCommitOwner.h"
-namespace Global { std::atomic<int> InputModeScheme{msime::windows::scheme::Quanpin}; }
 namespace Global {
 std::atomic<int> InputModeScheme{msime::windows::scheme::Quanpin};
 std::atomic_bool TsfDiagnosticLogEnabled{false};

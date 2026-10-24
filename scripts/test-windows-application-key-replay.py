@@ -20,11 +20,11 @@ HARNESS = r'''
 #include <string>
 #include "InputSchemeTraits.h"
 #include "WubiCommitOwner.h"
-namespace Global { std::atomic<int> InputModeScheme{msime::windows::scheme::Quanpin}; bool g_connected = true; }
 namespace Global {
 std::atomic<int> InputModeScheme{msime::windows::scheme::Quanpin};
 bool g_connected = true;
 std::atomic_bool TsfDiagnosticLogEnabled{false};
+bool g_connected = true;
 }
 // 生产代码里的诊断日志在测试里关闭，记录进空实现即可。
 void QueueTsfDiagnosticLog(const std::wstring &) {}
