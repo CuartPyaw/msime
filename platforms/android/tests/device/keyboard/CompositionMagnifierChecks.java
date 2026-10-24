@@ -78,10 +78,10 @@ final class CompositionMagnifierChecks {
                     throw new AssertionError("Handle is too small for a thumb");
                 if (handle.left <= text.left || handle.top - text.bottom < 28 * density)
                     throw new AssertionError("Handle is too close to the magnified spelling");
-                drag(s, handle, text.right - 4, 1400);
+                drag(s, handle, text.right - 4, true);
                 s.await(s.described("放大拼写").and(node -> node.getText() != null
                     && node.getTextSelectionStart() == node.getText().length()));
-                drag(s, bounds(s.await(s.described("拼写光标拖动手柄"))), text.left + 4, 1400);
+                drag(s, bounds(s.await(s.described("拼写光标拖动手柄"))), text.left + 4, false);
                 s.await(s.described("放大拼写").and(node -> node.getTextSelectionStart() == 0));
                 s.stage = "magnifier completion preserves candidates and the keyboard entry reopens it";
                 s.tap(s.described("完成拼写编辑"));
@@ -134,9 +134,9 @@ final class CompositionMagnifierChecks {
         select(text, 0);
         s.await(s.described("放大拼写").and(node -> node.getTextSelectionStart() == 0));
         Rect area = bounds(text);
-        drag(s, bounds(s.await(s.described("拼写光标拖动手柄"))), area.right - 4, 5000);
+        drag(s, bounds(s.await(s.described("拼写光标拖动手柄"))), area.right - 4, true);
         s.await(s.described("放大拼写").and(node -> node.getTextSelectionStart() == node.getText().length()));
-        drag(s, bounds(s.await(s.described("拼写光标拖动手柄"))), area.left + 4, 5000);
+        drag(s, bounds(s.await(s.described("拼写光标拖动手柄"))), area.left + 4, false);
         s.await(s.described("放大拼写").and(node -> node.getTextSelectionStart() == 0));
     }
 
@@ -154,16 +154,21 @@ final class CompositionMagnifierChecks {
         return bounds;
     }
 
-    private static void drag(DeviceSmoke s, Rect handle, int target, long hold) {
+    private static void drag(DeviceSmoke s, Rect handle, int target, boolean toEnd) {
         long start = SystemClock.uptimeMillis();
         inject(s, start, MotionEvent.ACTION_DOWN, handle.centerX(), handle.centerY());
-        for (int step = 1; step <= 12; step++) {
-            SystemClock.sleep(16);
-            inject(s, start, MotionEvent.ACTION_MOVE,
-                handle.centerX() + (target - handle.centerX()) * step / 12f, handle.centerY());
+        try {
+            for (int step = 1; step <= 12; step++) {
+                SystemClock.sleep(16);
+                inject(s, start, MotionEvent.ACTION_MOVE,
+                    handle.centerX() + (target - handle.centerX()) * step / 12f, handle.centerY());
+            }
+            // 边缘逐字移动会经过真实引擎和界面刷新，保持触摸到端点而非假定固定时长。
+            s.await(s.described("放大拼写").and(node -> node.getText() != null
+                && node.getTextSelectionStart() == (toEnd ? node.getText().length() : 0)));
+        } finally {
+            inject(s, start, MotionEvent.ACTION_UP, target, handle.centerY());
         }
-        SystemClock.sleep(hold);
-        inject(s, start, MotionEvent.ACTION_UP, target, handle.centerY());
     }
 
     private static void inject(DeviceSmoke s, long start, int action, float x, float y) {
