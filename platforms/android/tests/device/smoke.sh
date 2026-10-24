@@ -30,12 +30,13 @@ avd_name=$("$adb" -s "$serial" emu avd name | tr -d '\r' | head -1)
 [[ "$avd_name" == msime-client-test || "$avd_name" == msime-client-test-api* ]] || { echo "Refusing a non-test AVD" >&2; exit 1; }
 [[ $("$adb" -s "$serial" shell getprop sys.boot_completed | tr -d '\r') == 1 ]] || { echo "Test AVD has not booted" >&2; exit 1; }
 bash platforms/android/tests/device/build-editor.sh
-"$adb" -s "$serial" install --no-incremental -r target/android/msime-android.apk
-"$adb" -s "$serial" install --no-incremental -r target/android/editor-test.apk
-"$adb" -s "$serial" install --no-incremental -r target/android/first-frame-editor.apk
+# 先推送完整 APK 再交给包管理器，避免 API 28 的流式安装桥卡住而阻塞整套验收。
+"$adb" -s "$serial" install --no-streaming --no-incremental -r target/android/msime-android.apk
+"$adb" -s "$serial" install --no-streaming --no-incremental -r target/android/editor-test.apk
+"$adb" -s "$serial" install --no-streaming --no-incremental -r target/android/first-frame-editor.apk
 # 同包名搜索夹具只在专用兼容验收时安装，不进入默认设备测试。
 if [[ "${MSIME_ANDROID_APP_COMPOSITION:-0}" == 1 ]]; then
-  "$adb" -s "$serial" install --no-incremental -r target/android/composition-search-editor.apk
+  "$adb" -s "$serial" install --no-streaming --no-incremental -r target/android/composition-search-editor.apk
 fi
 mkdir -p target/android/device-test
 xml="$repo_root/target/android/device-test/window.xml"
@@ -107,6 +108,10 @@ if [[ "$text_edit_layout" == true ]]; then
   [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Text edit layout acceptance failed" >&2; exit 1; }
   exit 0
 fi
+# 十八键复用已有入口，API 28 核心验收与 API 35 完整验收都覆盖组码、回落和实际几何。
+result=$(run_instrumentation app.msime.android.test/app.msime.android.test.FourteenKeyDeviceSmoke -e eighteen_key true)
+printf '%s\n' "$result"
+[[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "十八键全拼验收失败" >&2; exit 1; }
 if [[ "$core" != true ]]; then
   result=$(run_instrumentation app.msime.android.test/app.msime.android.test.ChineseLanguageReturnDeviceSmoke -e japanese-toggle true)
   printf '%s\n' "$result"
@@ -165,6 +170,10 @@ printf '%s\n' "$result"
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.StaleCandidateDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Stale candidate callback acceptance failed" >&2; exit 1; }
+# 空闲联想只在点选时上屏，自己的选区回声保留候选，外部移动和隐私模式清除候选。
+result=$(run_instrumentation app.msime.android.test/app.msime.android.test.StaleCandidateDeviceSmoke -e next-word true)
+printf '%s\n' "$result"
+[[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Next word prediction acceptance failed" >&2; exit 1; }
 # 横向候选条不展开也能越过分页和分批边界，左右返回后按全局身份选词。
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.CandidatePanelDeviceSmoke -e continuous-strip true)
 printf '%s\n' "$result"
@@ -361,6 +370,10 @@ do
   printf '%s\n' "$result"
   [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "${entry#*|}" >&2; exit 1; }
 done
+# 18 键双拼复用字母组布局入口，避免超过 Android 35 的清单数量限制。
+result=$(run_instrumentation app.msime.android.test/app.msime.android.test.FourteenKeyDeviceSmoke -e eighteen_key true)
+printf '%s\n' "$result"
+[[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Eighteen-key acceptance failed" >&2; exit 1; }
 # 九键逐字选词复用原入口；真实触摸后必须自动刷新剩余组字，不能依靠手动返回解除旧面板。
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.NineKeyPanelDeviceSmoke -e partial-selection true)
 printf '%s\n' "$result"

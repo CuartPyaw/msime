@@ -36,6 +36,27 @@ namespace
 {
 thread_local std::wstring g_toggleImeFallbackBuffer;
 
+// 范围定位完整成功后才调用 SetSelection；定位未完成时不发布临时范围，引用仍由调用方释放。
+HRESULT SetCompositionCaret(ITfRange *range, ITfContext *context, TfEditCookie ec, std::size_t position)
+{
+    if (range == nullptr || context == nullptr || position > static_cast<std::size_t>((std::numeric_limits<LONG>::max)()))
+        return E_INVALIDARG;
+    HRESULT hr = range->Collapse(ec, TF_ANCHOR_START);
+    if (FAILED(hr)) return hr;
+    LONG shifted = 0;
+    const LONG requested = static_cast<LONG>(position);
+    hr = range->ShiftEnd(ec, requested, &shifted, nullptr);
+    if (FAILED(hr)) return hr;
+    if (shifted != requested) return E_FAIL;
+    hr = range->Collapse(ec, TF_ANCHOR_END);
+    if (FAILED(hr)) return hr;
+    TF_SELECTION selection = {};
+    selection.range = range;
+    selection.style.ase = TF_AE_NONE;
+    selection.style.fInterimChar = FALSE;
+    return context->SetSelection(ec, 1, &selection);
+}
+
 HRESULT ClearKeyboardRange(ITfRange *range, TfEditCookie ec)
 {
 #ifdef __MINGW32__
@@ -1063,7 +1084,7 @@ HRESULT CMetasequoiaIME::_HandleCancelVoiceComposition(TfEditCookie ec, _In_ ITf
 //----------------------------------------------------------------------------
 
 HRESULT CMetasequoiaIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContext, WCHAR wch,
-                                                 uint64_t requestId)
+                                                 uint64_t requestId, bool groupedPanelKey)
 {
     HRESULT workerResult = S_OK;
     ITfRange *pRangeComposition = nullptr;
@@ -1090,6 +1111,10 @@ HRESULT CMetasequoiaIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContex
     {
         _HandleCompositionFinalize(ec, pContext, FALSE);
     }
+
+    if (groupedPanelKey && (!SupportsGroupedPanelKeys() || _serverUnavailableFallbackActive ||
+        !pCompositionProcessorEngine->GetHostEngineAdapter() ||
+        !pCompositionProcessorEngine->GetHostEngineAdapter()->valid())) return E_FAIL;
 
     // A composition this key did not start may be showing a syllable the host has since let go of (see the Korean check below).
     const bool composingBeforeKey = _IsComposing() != FALSE;
@@ -1150,10 +1175,10 @@ HRESULT CMetasequoiaIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContex
                 current.view.editing_text.empty())
                 _HandleCompleteCommitFirst(ec, pContext);
         }
-        const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        const bool shift = !groupedPanelKey && (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         if (wch > 0x7f)
             workerResult = S_FALSE;
-        else if (!host->character(static_cast<uint8_t>(wch), shift, &raw, &error) ||
+        else if (!host->panel_character(static_cast<uint8_t>(wch), shift, groupedPanelKey, &raw, &error) ||
                  !msime::tsf::EngineSessionAdapter::parse_result(raw, &result, &error))
             workerResult = E_FAIL;
         else
@@ -1456,15 +1481,8 @@ HRESULT CMetasequoiaIME::_HandleCompositionInputWorker(_In_ CCompositionProcesso
             ITfRange *caretRange = nullptr;
             if (SUCCEEDED(_pComposition->GetRange(&caretRange)) && caretRange)
             {
-                caretRange->Collapse(ec, TF_ANCHOR_START);
-                LONG shifted = 0;
-                caretRange->ShiftEnd(ec, static_cast<LONG>(displayCaret), &shifted, nullptr);
-                caretRange->Collapse(ec, TF_ANCHOR_END);
-                TF_SELECTION caretSelection = {};
-                caretSelection.range = caretRange;
-                caretSelection.style.ase = TF_AE_NONE;
-                caretSelection.style.fInterimChar = FALSE;
-                pContext->SetSelection(ec, 1, &caretSelection);
+                // 文字已经写入；光标定位失败不把本次输入改为可重放的失败。
+                (void)SetCompositionCaret(caretRange, pContext, ec, displayCaret);
                 caretRange->Release();
             }
         }
@@ -1909,15 +1927,7 @@ HRESULT CMetasequoiaIME::_MoveCompositionCaretToHost(TfEditCookie ec, _In_ ITfCo
     ITfRange *caretRange = nullptr;
     if (FAILED(_pComposition->GetRange(&caretRange)) || caretRange == nullptr)
         return S_OK;
-    caretRange->Collapse(ec, TF_ANCHOR_START);
-    LONG shifted = 0;
-    caretRange->ShiftEnd(ec, static_cast<LONG>(displayCaret), &shifted, nullptr);
-    caretRange->Collapse(ec, TF_ANCHOR_END);
-    TF_SELECTION selection = {};
-    selection.range = caretRange;
-    selection.style.ase = TF_AE_NONE;
-    selection.style.fInterimChar = FALSE;
-    const HRESULT hr = pContext->SetSelection(ec, 1, &selection);
+    const HRESULT hr = SetCompositionCaret(caretRange, pContext, ec, displayCaret);
     caretRange->Release();
     return SUCCEEDED(hr) ? S_OK : hr;
 }
@@ -2086,16 +2096,7 @@ HRESULT CMetasequoiaIME::_HandleCompositionArrowKey(TfEditCookie ec, _In_ ITfCon
         {
             return S_OK;
         }
-        caretRange->Collapse(ec, TF_ANCHOR_START);
-        LONG shifted = 0;
-        caretRange->ShiftEnd(ec, static_cast<LONG>(displayCaret), &shifted,
-                             nullptr);
-        caretRange->Collapse(ec, TF_ANCHOR_END);
-        TF_SELECTION caretSelection = {};
-        caretSelection.range = caretRange;
-        caretSelection.style.ase = TF_AE_NONE;
-        caretSelection.style.fInterimChar = FALSE;
-        pContext->SetSelection(ec, 1, &caretSelection);
+        (void)SetCompositionCaret(caretRange, pContext, ec, displayCaret);
         caretRange->Release();
         if (!usedHost && Global::IsUiLessMode() && _pCandidateListUIPresenter)
         {

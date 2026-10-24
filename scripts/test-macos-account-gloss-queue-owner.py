@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""直接运行原生控制器的请求与取消方法，检查共享账号等待页的归属。"""
+"""直接运行原生控制器的请求与取消方法，检查账号与系统翻译等待页的归属。"""
 from pathlib import Path
 import re
 import shutil
@@ -11,7 +11,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parent.parent
 compiler = shutil.which("clang++")
 if sys.platform != "darwin" or not compiler:
-    print("skipped: macOS 账号释义队列归属回归需要 Apple 宿主和 Clang")
+    print("skipped: macOS 候选释义队列归属回归需要 Apple 宿主和 Clang")
     sys.exit(0)
 
 controller = (ROOT / "platforms/macos/src/input/InputController.mm").read_text(encoding="utf-8")
@@ -42,16 +42,23 @@ program = '''#import <Foundation/Foundation.h>
 extern "C" void MSIMEFetchAccountCandidateGlosses(const char *, const char *, const char *, uint64_t)
     __attribute__((weak_import));
 extern "C" void MSIMECancelAccountCandidateGlosses(void) __attribute__((weak_import));
+extern "C" void MSIMEFetchOnDeviceCandidateGlosses(const char *, const char *)
+    __attribute__((weak_import));
 extern "C" uint64_t fixturePending(void);
 extern "C" void fixtureOnCancel(void (^)(void));
+extern "C" NSArray *fixtureDeviceWords(void);
+extern "C" NSArray *fixtureDeviceTargets(void);
 @interface MSIMEInputController : NSObject
 - (void)fetchAccountGlosses:(NSArray<NSString *> *)words primary:(NSString *)primary
                 secondary:(NSString *)secondary generation:(uint64_t)generation;
 - (void)cancelQueuedAccountGlosses;
+- (void)fetchOnDeviceGlosses:(NSArray<NSString *> *)words targets:(NSArray<NSString *> *)targets;
 @end
 ''' + declaration + '\n@implementation MSIMEInputController\n' + method(
     "- (void)fetchAccountGlosses:"
-) + '\n' + method("- (void)cancelQueuedAccountGlosses") + '''
+) + '\n' + method("- (void)cancelQueuedAccountGlosses") + '\n' + method(
+    "- (void)fetchOnDeviceGlosses:"
+) + '''
 @end
 int main() {
     @autoreleasepool {
@@ -67,6 +74,7 @@ int main() {
         [bystander cancelQueuedAccountGlosses];
         assert(fixturePending() == 2 && "没有发出请求的控制器不能取消等待页");
         [current cancelQueuedAccountGlosses];
+
         assert(fixturePending() == 0 && "所有者关闭翻译时仍须取消自己的等待页");
         MSIMEFocusedController = previous;
         [previous fetchAccountGlosses:@[@"synthetic-c"] primary:@"en" secondary:@"" generation:3];
@@ -90,6 +98,22 @@ int main() {
         [previous fetchAccountGlosses:@[@"synthetic-h"] primary:@"en" secondary:@"" generation:8];
         assert(fixturePending() == 7 && "旧计时器不能在失焦后替换当前控制器的等待页");
         [current cancelQueuedAccountGlosses];
+
+        [current fetchOnDeviceGlosses:@[@"synthetic-current"] targets:@[@"en", @"ja"]];
+        assert(([fixtureDeviceWords() isEqual:@[@"synthetic-current"]]
+               && [fixtureDeviceTargets() isEqual:@[@"en", @"ja"]]
+               && "焦点控制器的系统翻译页和目标语言须完整交给后端"));
+        [previous fetchOnDeviceGlosses:@[@"synthetic-stale"] targets:@[@"en"]];
+        assert([fixtureDeviceWords() isEqual:@[@"synthetic-current"]]
+               && "旧词典回调不能替换当前控制器的系统翻译等待页");
+        MSIMEFocusedController = nil;
+        [current fetchOnDeviceGlosses:@[@"synthetic-unfocused"] targets:@[@"en"]];
+        assert([fixtureDeviceWords() isEqual:@[@"synthetic-current"]]
+               && "失焦后的系统翻译回调不能提交新页");
+        MSIMEFocusedController = previous;
+        [previous fetchOnDeviceGlosses:@[@"synthetic-refocused"] targets:@[@"en"]];
+        assert([fixtureDeviceWords() isEqual:@[@"synthetic-refocused"]]
+               && "重新取得焦点的控制器仍能替换系统翻译等待页");
     }
 }
 '''
@@ -98,6 +122,16 @@ backend = '''#import <Foundation/Foundation.h>
 #include <cstdint>
 static uint64_t pending;
 static void (^onCancel)(void);
+static NSArray *deviceWords;
+static NSArray *deviceTargets;
+extern "C" void MSIMEFetchOnDeviceCandidateGlosses(const char *words, const char *targets) {
+    deviceWords = [NSJSONSerialization JSONObjectWithData:[@(words) dataUsingEncoding:NSUTF8StringEncoding]
+                                                 options:0 error:nil];
+    deviceTargets = [NSJSONSerialization JSONObjectWithData:[@(targets) dataUsingEncoding:NSUTF8StringEncoding]
+                                                   options:0 error:nil];
+}
+extern "C" NSArray *fixtureDeviceWords(void) { return deviceWords; }
+extern "C" NSArray *fixtureDeviceTargets(void) { return deviceTargets; }
 extern "C" void MSIMEFetchAccountCandidateGlosses(const char *, const char *, const char *, uint64_t generation) {
     pending = generation;
 }
@@ -125,4 +159,4 @@ with tempfile.TemporaryDirectory(prefix="msime-account-gloss-owner-") as directo
     )
     subprocess.run([str(executable)], check=True, timeout=10)
 
-print("macOS 账号释义队列：实际控制器方法的八项归属回归通过")
+print("macOS 候选释义队列：实际控制器方法的八项账号、四项系统翻译归属回归通过")

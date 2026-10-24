@@ -1,3 +1,4 @@
+mod account_name;
 #[cfg(any(
     target_os = "macos",
     target_os = "windows",
@@ -4037,6 +4038,12 @@ async fn send_key(
     state: tauri::State<'_, PanelInputState>,
     request: KeyboardInputRequest,
 ) -> Result<(), HostActionError> {
+    #[cfg(not(target_os = "windows"))]
+    if request.grouped_letter.is_some() {
+        return Err(HostActionError {
+            code: "invalid_key",
+        });
+    }
     // Linux routes through the display server, Windows injects directly, so the
     // app handle belongs to only one of them.
     let _ = (&app, &window, &state);
@@ -5752,6 +5759,7 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            account_name::account_name,
             host_capabilities,
             app_release_date,
             notices::notices_list,

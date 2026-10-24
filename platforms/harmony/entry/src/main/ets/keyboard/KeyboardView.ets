@@ -3756,7 +3756,7 @@ struct KeyboardView {
         ForEach(this.candidates, (candidate: CandidateEntry, index: number) => {
           this.candidateCell(candidate, index)
         }, (candidate: CandidateEntry, index: number) =>
-          `${index}:${candidate.text}:${candidate.highlighted}`)
+          `${index}:${JSON.stringify(candidate)}`)
       }
       .width('100%')
       // One row per candidate here and exactly one there. The two used to share a ternary applied to
@@ -3782,7 +3782,7 @@ struct KeyboardView {
           ForEach(this.candidates, (candidate: CandidateEntry, index: number) => {
             this.candidateCell(candidate, index)
           }, (candidate: CandidateEntry, index: number) =>
-            `${index}:${candidate.text}:${candidate.highlighted}`)
+            `${index}:${JSON.stringify(candidate)}`)
         }
         .height(this.candidateRowHeight())
       }
@@ -4198,7 +4198,7 @@ struct KeyboardView {
               ForEach(this.candidates, (candidate: CandidateEntry, index: number) => {
                 this.candidateChip(candidate, index)
               }, (candidate: CandidateEntry, index: number) =>
-                `${index}:${candidate.text}:${candidate.highlighted}`)
+                `${index}:${JSON.stringify(candidate)}`)
             }
             .height(CHIP_HEIGHT_VP)
           }
@@ -7222,10 +7222,10 @@ struct KeyboardView {
         accent: this.skin.toggleForeground,
         ringColor: this.skin.background,
         checkPath: KeyboardIconPaths.CHECK,
-        // 语言随词库一起提供，所以该磁贴打开「词库」（`dc.html` 的添加项打开的是词库页），而不是设置首页。
+        // 语言在「输入」页的「语言与方案」中管理，词库页只管理词条。
         onTap: (): void => {
           this.show(SURFACE_NONE);
-          KeyboardSession.shared.openSettings('dictionary');
+          KeyboardSession.shared.openSettings('input');
         }
       })
     } else if (entry.kind === PICKER_SCHEME) {
