@@ -63,7 +63,7 @@ Android 三排字母键按 7、6、5 排列，第三排两侧保留分词和退�
 - API 28、35 均通过完整 18 键专项：原生设置选择、小鹤、微软及合法自定义表、读音消歧、分号、实际提交、英文／数字往返、重启、密码和 URL 回落，以及窄屏、横屏、竖屏、浮动与左右单手几何断言。两端各六张截图均已实际查看；第二行等宽及窄屏字母组单行展示正常。
 - API 35 几何专项首次在横屏切换后找不到 IME，原因是 `am start` 异步返回；改为 `am start -W` 后，同一几何断言全部通过。未放宽等宽、居中或触控范围检查。
 - 完整回归中的长拼写拖动在 API 35 暴露固定五秒手势的时序假设。诊断证明继续保持触摸会到端点，改为等待真实选区到达后松手；API 28、35 的完整放大编辑专项均通过。原因与取舍补入[原放大编辑笔记](2026-10-21-android-composition-magnifier.md)，临时采样代码不提交。
-- API 28 的完整 core 冒烟在剪贴板导出选择器定位处失败，单独重跑 select 阶段通过；跨进程 verify 阶段及完整重跑尚待终态，不以此宣称整套通过。API 35 的完整冒烟在手势等待修正后正在重跑。
-- 首轮完整 quick 的 Rust、Android、WASM、Java 和 Linux 设置壳通过；为 Windows host runner 选择的旧 Clang 14 在 Linux 原生编译暴露语言能力差异。Linux CMake 在同一个标准产物目录改用固定 NDK 的 Clang 19，Windows host runner 保持系统 Clang 14，完整 quick 正在重跑。没有复制相邻分支的未提交 runner 修复，也没有新增失败豁免。
+- API 28 的完整 14 键全拼／双拼与九键双拼设备回归通过。完整 core 冒烟首轮在剪贴板导出选择器定位处失败，未改产品或定位断言，单独重跑 select 及强停产品后的 verify 两阶段均通过；API 28 的完整 core 与 API 35 的完整冒烟在手势等待修正后继续重跑，不以专项替代整套通过。
+- 最终完整 `scripts/verify-local.sh --quick` 以 0 退出，Rust workspace、Android Rust、WASM、Android Java/JNI、Linux 设置壳和 Linux 原生构建及测试通过；Windows host runner 为 164 项通过、2 项宿主差异、76 项需要 Windows 构建、1 项非测试。Linux CMake 使用镜像内 GCC 12，Windows host runner 使用系统 Clang 14，WASM 使用固定 NDK Clang 19。首轮旧 Clang 14 的原生构建受语言能力限制，直接换 NDK Clang 19 又遇到主机 libstdc++ 的弃用诊断被 `-Werror` 拒绝，最终回到原生工程常用的 GCC，在同一标准目录重配并完整重跑。没有复制相邻分支的未提交 runner 修复，也没有新增失败豁免。macOS、Apple bridge、Windows MinGW／pipe 和 HarmonyOS 真打包因前置条件缺失跳过，不能记为对应平台通过。
 
-完整平台冒烟、14 键与九键设备回归及最终 quick 的结果继续补在本节；通过前 PR 保持草稿。
+完整 API 28、35 平台冒烟的最终结果继续补在本节；通过前 PR 保持草稿。
