@@ -2958,7 +2958,6 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
             symbols: true,
             quick_phrase: true,
             quick_phrase_frequency: true,
-            ..MixedInputPreferences::default()
         }
     );
     fs::write(store.path(), &bytes).unwrap();
@@ -2974,7 +2973,6 @@ fn mixed_input_legacy_roundtrip_and_bounds() {
                 quick_phrase: true,
                 quick_phrase_frequency: true,
                 minimum_prefix: mask % 8 + 1,
-||||||| 4c4571f879
                 first_page_count: 1,
             },
             ..Preferences::default()

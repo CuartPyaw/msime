@@ -21,6 +21,7 @@ def section(source, begin, end):
 
 unit = r'''
 #include "platforms/windows/tsf/WubiCommitOwner.h"
+#include <atomic>
 #include <deque>
 #include <map>
 #include <mutex>
@@ -33,8 +34,12 @@ using TfEditCookie=int; using HWND=int;
 constexpr HRESULT S_OK=0, S_FALSE=1, TF_S_ASYNC=2, E_FAIL=-1;
 constexpr UINT WM_CommitCandidateAndContinue=29, FANY_IME_NO_REQUEST_ID=0;
 constexpr int TF_ES_ASYNCDONTCARE=1, TF_ES_READWRITE=2;
+#ifndef _Out_
 #define _Out_
+#endif
+#ifndef _In_opt_
 #define _In_opt_
+#endif
 #define STDMETHODIMP HRESULT
 bool SUCCEEDED(HRESULT value) { return value>=0; }
 bool FAILED(HRESULT value) { return value<0; }
@@ -44,6 +49,10 @@ std::deque<UINT> posted;
 bool postOk=true;
 bool PostMessage(HWND, UINT, WPARAM value, int) { if (postOk) posted.push_back(value); return postOk; }
 void ResetNamedpipeReplyState() {}
+// 日志是隔离边界：补齐生产取消路径新增的诊断成员，不删改被提取的方法。
+namespace Global { std::atomic<bool> TsfDiagnosticLogEnabled{false}; }
+std::wstring BoolFlag(bool value) { return value ? L"1" : L"0"; }
+void QueueTsfDiagnosticLog(const std::wstring &) {}
 template<class... T> void DebugTsfIssue47(T...) {}
 struct CMetasequoiaIME;
 class CCommitCandidateAndContinueEditSession;
@@ -78,6 +87,7 @@ struct CMetasequoiaIME {
     struct WorkerCandidateCommit { std::wstring text; uint64_t focusToken=0,compositionEpoch=0; };
     struct DeferredKeyDown { ITfContext *context=nullptr; WPARAM wParam=0; wchar_t translatedWch=0; uint64_t focusGeneration=0;
         struct { int Category=0,Function=0; } keyState; };
+    std::atomic<bool> _localSessionResetPending{false};
     msime::tsf::WubiCommitOwner _wubiCommitOwner;
     std::deque<DeferredKeyDown> _deferredKeyDowns, _deferredAppliedPrefix;
     DeferredKeyDown _deferredKeyInFlight;
