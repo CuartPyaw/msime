@@ -72,6 +72,7 @@ final class ImeFunctionPanel {
             if (s.toolbarClipboard) hiddenItems.add(FunctionPanelModel.Id.CLIPBOARD);
             if (s.toolbarFloating) hiddenItems.add(FunctionPanelModel.Id.FLOATING);
             if (s.toolbarTextEdit) hiddenItems.add(FunctionPanelModel.Id.TEXT_EDIT);
+            if (ViewPolicy.isVisible(s.voiceShortcutButton)) hiddenItems.add(FunctionPanelModel.Id.VOICE_INPUT);
         }
         if (!s.hasPendingVoiceResult()) hiddenItems.add(FunctionPanelModel.Id.VOICE_RESULT);
         List<FunctionPanelModel.Item> visibleItems = FunctionPanelModel.itemsExcept(hiddenItems);
@@ -198,6 +199,12 @@ final class ImeFunctionPanel {
                     item.description(), KeyboardIconPaths.Icon.VIBRATION_STRENGTH,
                     played(s::cycleHapticStrength), null),
                 FunctionPanelView.State.NONE, s.hapticsEnabled);
+            case VOICE_INPUT -> add(entries, states, enabled,
+                icon(item, KeyboardIconPaths.Icon.VOICE_RESULT, () -> {
+                    s.closeMoreTools();
+                    s.startVoiceRecognition();
+                }, null),
+                FunctionPanelView.State.NONE, s.voiceInsertionReady());
             case VOICE_RESULT -> add(entries, states, enabled,
                 icon(item, KeyboardIconPaths.Icon.VOICE_RESULT, () -> {
                     s.closeMoreTools();
