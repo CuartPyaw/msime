@@ -1254,7 +1254,7 @@ pub struct Preferences {
     /// Android 大屏竖屏也使用分离键盘；还需宿主的分离主开关开启，默认关闭。其他宿主原样保留。
     #[serde(default)]
     pub touch_keyboard_split_portrait: bool,
-    /// Android 双拼键盘的 26 / 14 键选择；默认 26 键，其他宿主保留该字段。
+    /// Android 和 iOS 双拼键盘的 26 / 14 键选择；默认 26 键，其他宿主保留该字段。
     #[serde(default, skip_serializing_if = "TouchShuangpinLayout::is_default")]
     pub touch_shuangpin_layout: TouchShuangpinLayout,
     /// 触屏键盘列出哪些方案、选中哪一个；桌面宿主原样保留、不使用。
@@ -2714,6 +2714,9 @@ pub struct KeybindingPreferences {
         skip_serializing_if = "is_default_toggle_punctuation"
     )]
     pub toggle_punctuation: String,
+    /// 额外的语音开始／结束热键；空串表示不绑定，不改变既有固定语音快捷键。
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub toggle_voice_input: String,
 }
 
 /// 三个切换热键的出厂值，沿用旧版 Windows v0.11.1 `engine/contracts/input_state_shortcuts.h` 的 `defaultBinding`。
@@ -2736,6 +2739,11 @@ impl KeybindingPreferences {
     pub fn punctuation_chord(&self) -> Option<crate::key_chord::KeyChord> {
         toggle_chord(&self.toggle_punctuation)
     }
+
+    /// 自定义语音切换键；空串或非法写法为 `None`。
+    pub fn voice_input_chord(&self) -> Option<crate::key_chord::KeyChord> {
+        toggle_chord(&self.toggle_voice_input)
+    }
 }
 
 /// 「不绑定」在文档里存成空串而不是缺键：缺键读回出厂值，空串才留在「不绑定」。
@@ -2748,7 +2756,7 @@ fn toggle_chord(text: &str) -> Option<crate::key_chord::KeyChord> {
     }
 }
 
-/// 三个可重绑切换热键之一。
+/// 可重绑切换热键之一。
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ToggleHotkeySlot {
     /// `keybindings.toggle_english_candidates`。
@@ -2760,6 +2768,9 @@ pub enum ToggleHotkeySlot {
     /// `keybindings.toggle_punctuation`。
     #[serde(rename = "toggle_punctuation")]
     Punctuation,
+    /// `keybindings.toggle_voice_input`。
+    #[serde(rename = "toggle_voice_input")]
+    VoiceInput,
 }
 
 /// 一个组合键已被谁占用：另一个切换热键，或某个开关随附的快捷键 / macOS 维护键。
@@ -2768,6 +2779,7 @@ pub enum ToggleChordOwner {
     EnglishCandidates,
     FullWidth,
     Punctuation,
+    VoiceInput,
     /// `keybindings.switch_language_shift` 打开时 macOS 同时启用 `Shift+Space`。
     SwitchLanguageShift,
     /// `keybindings.switch_language_ctrl_space` 打开时的 `Ctrl+Space`。
@@ -2795,6 +2807,7 @@ impl ToggleChordOwner {
             Self::EnglishCandidates => "toggle_english_candidates",
             Self::FullWidth => "toggle_full_width",
             Self::Punctuation => "toggle_punctuation",
+            Self::VoiceInput => "toggle_voice_input",
             Self::SwitchLanguageShift => "switch_language_shift",
             Self::SwitchLanguageCtrlSpace => "switch_language_ctrl_space",
             Self::SwitchLanguageCtrlAltSpace => "switch_language_ctrl_alt_space",
@@ -2823,8 +2836,8 @@ pub enum ToggleHotkeyRejection {
 }
 
 impl KeybindingPreferences {
-    /// 三个切换热键的槽位与当前 chord：空串或非法写法为 `None`（不绑定）。
-    fn toggle_chords(&self) -> [(ToggleHotkeySlot, Option<crate::key_chord::KeyChord>); 3] {
+    /// 切换热键的槽位与当前 chord：空串或非法写法为 `None`（不绑定）。
+    fn toggle_chords(&self) -> [(ToggleHotkeySlot, Option<crate::key_chord::KeyChord>); 4] {
         [
             (
                 ToggleHotkeySlot::EnglishCandidates,
@@ -2832,6 +2845,7 @@ impl KeybindingPreferences {
             ),
             (ToggleHotkeySlot::FullWidth, self.full_width_chord()),
             (ToggleHotkeySlot::Punctuation, self.punctuation_chord()),
+            (ToggleHotkeySlot::VoiceInput, self.voice_input_chord()),
         ]
     }
 
@@ -2937,6 +2951,7 @@ impl KeybindingPreferences {
                         ToggleHotkeySlot::EnglishCandidates => ToggleChordOwner::EnglishCandidates,
                         ToggleHotkeySlot::FullWidth => ToggleChordOwner::FullWidth,
                         ToggleHotkeySlot::Punctuation => ToggleChordOwner::Punctuation,
+                        ToggleHotkeySlot::VoiceInput => ToggleChordOwner::VoiceInput,
                     },
                     chord,
                 });
@@ -2950,12 +2965,13 @@ impl KeybindingPreferences {
         Ok(chord.to_string())
     }
 
-    /// 三个切换热键的写法归一成规范形；不是 chord 的原样留下，交给 `Preferences::validate` 拒绝。
+    /// 切换热键的写法归一成规范形；不是 chord 的原样留下，交给 `Preferences::validate` 拒绝。
     pub fn normalize_toggle_hotkeys(&mut self) {
         for text in [
             &mut self.toggle_english_candidates,
             &mut self.toggle_full_width,
             &mut self.toggle_punctuation,
+            &mut self.toggle_voice_input,
         ] {
             if let Ok(chord) = text.trim().parse::<crate::key_chord::KeyChord>() {
                 *text = chord.to_string();
@@ -2980,6 +2996,7 @@ impl Default for KeybindingPreferences {
             toggle_english_candidates: default_toggle_english_candidates(),
             toggle_full_width: default_toggle_full_width(),
             toggle_punctuation: default_toggle_punctuation(),
+            toggle_voice_input: String::new(),
         }
     }
 }
@@ -4176,7 +4193,7 @@ impl Preferences {
         if self.word_character.enabled && paging {
             return Err(PreferencesError::ConflictingKeyBindings);
         }
-        // 三个切换热键两两不同，且不占已被其他开关认走的组合键。保留表随各开关开合：开关关掉时组合键已经还给应用，绑给它不冲突。占用表的完整说明见 `KeybindingPreferences::occupied_toggle_chords`，设置页的录键试写走同一个表。
+        // 切换热键两两不同，且不占已被其他开关认走的组合键。保留表随各开关开合：开关关掉时组合键已经还给应用，绑给它不冲突。占用表的完整说明见 `KeybindingPreferences::occupied_toggle_chords`，设置页的录键试写走同一个表。
         let keybindings = &self.keybindings;
         let occupied: Vec<crate::key_chord::KeyChord> = keybindings
             .occupied_toggle_chords(self.voice_input.hotkey_ctrl_f9)
@@ -4188,6 +4205,7 @@ impl Preferences {
             &keybindings.toggle_english_candidates,
             &keybindings.toggle_full_width,
             &keybindings.toggle_punctuation,
+            &keybindings.toggle_voice_input,
         ] {
             if text.trim().is_empty() {
                 continue;

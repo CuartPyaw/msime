@@ -3333,7 +3333,7 @@ fn check_fourteen_key_selection_retreat(shuangpin: bool) {
 }
 
 #[test]
-fn fourteen_key_shuangpin_preference_is_only_applied_by_android() {
+fn fourteen_key_shuangpin_preference_is_applied_by_touch_hosts() {
     let preferences = Preferences {
         scheme: InputScheme::Shuangpin,
         touch_shuangpin_layout: TouchShuangpinLayout::FourteenKey,
@@ -3350,7 +3350,7 @@ fn fourteen_key_shuangpin_preference_is_only_applied_by_android() {
         let grid = layout_key_grid_for(platform, Some(SchemeType::Shuangpin), &preferences);
         assert_eq!(
             grid.is_some(),
-            platform == HostPlatform::Android,
+            matches!(platform, HostPlatform::Android | HostPlatform::Ios),
             "{platform:?}"
         );
     }
@@ -3367,7 +3367,10 @@ fn fourteen_key_shuangpin_layout_tracks_profile_changes_and_preserves_hardware_i
     };
     let handle = test_host_with_pinyin_fixture(dir.path(), preferences.clone());
     read(msime_client_focus(handle, true));
-    let automatic_grid = if ffi::host::compiled_platform() == HostPlatform::Android {
+    let automatic_grid = if matches!(
+        ffi::host::compiled_platform(),
+        HostPlatform::Android | HostPlatform::Ios
+    ) {
         "fourteen_key"
     } else {
         "none"

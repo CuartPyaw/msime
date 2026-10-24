@@ -523,6 +523,12 @@ jobs:
         run: |
           & platforms/windows/tests/tools/settings_ui.ps1 -Program target/windows-full/x64/settings/msime-client-settings.exe -OutputDirectory target/windows-full/x64/settings-screenshots
           if ($LASTEXITCODE -ne 0) { throw 'Settings UI smoke failed' }
+      - name: Inspect custom voice recorder
+        if: ${{ needs.changes.outputs.windows == 'true' }}
+        shell: powershell
+        run: |
+          & platforms/windows/tests/tools/settings_ui.ps1 -Program target/windows-full/x64/settings/msime-client-settings.exe -OutputDirectory target/windows-full/x64/settings-screenshots/voice-hotkey -VoiceHotkeyOnly
+          if ($LASTEXITCODE -ne 0) { throw 'Voice hotkey UI smoke failed' }
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: ${{ always() && needs.changes.outputs.windows == 'true' }}
         with:

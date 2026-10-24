@@ -1,3 +1,5 @@
+#include "../../../common/ToggleHotkeyChord.h"
+#include "../input/ToggleHotkeyChord.h"
 #include "../../../shared/contracts/windows_ipc.h"
 #include "../../../common/HostApiString.h"
 #include "AuxListener.h"
@@ -1215,6 +1217,9 @@ int wmain(int argc, wchar_t **argv) {
           next.mute_system_audio = input.value("mute_system_audio", false);
           next.hotkey_ralt = input.value("hotkey_ralt", true);
           next.hotkey_ctrl_f9 = input.value("hotkey_ctrl_f9", true);
+          const auto voice_chord = msime::host_api::decode_toggle_hotkey(preferences, "voice_input");
+          next.toggle_hotkey = {toggle_key_code(voice_chord.key), voice_chord.ctrl,
+                               voice_chord.alt, voice_chord.shift, voice_chord.meta};
           next.hotkey_ctrl_win = input.value("hotkey_ctrl_win", false);
           next.hotkey_rctrl_ralt = input.value("hotkey_rctrl_ralt", false);
           // 空格锁定固定为开（hotkey_hold_space_lock 保持默认的 true）：空格只在按住录音组合键期间才被拦下，平常打字不受影响，设置页也不再给这个开关（`voice_space_lock_switch`）。

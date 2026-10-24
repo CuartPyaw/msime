@@ -53,6 +53,8 @@ HOST_DIFFERENCES = {
 
 # Sources whose `main` takes an argument the build system supplies.
 ARGUMENTS = {
+    "input/wubi_auto_commit.cpp": ["platforms/windows/tests/input/fixtures/msime-wubi-commit.db"],
+    "input/wubi_commit_owner.cpp": ["platforms/windows/tests/input/fixtures/msime-wubi-commit-owner.db"],
     "input/backspace_selected_phrase.cpp": ["platforms/windows/tests/input/fixtures/msime-phrase-backspace.db"],
     "input/host_online_candidates.cpp": ["platforms/windows/tests/input/fixtures/msime-pinyin-online.db"],
     "core/installer_launch.cpp": ["platforms/windows/installer/msime_setup.iss"],
@@ -69,6 +71,17 @@ ARGUMENTS = {
 # other source that needs more than itself.
 # Values are (sources relative to platforms/windows, whether they need the shared host library).
 COMPANIONS: dict[str, tuple[list[str], bool]] = {
+    # 两份真实会话共同验证五笔自动上屏的文档写入归属。
+    "input/wubi_auto_commit.cpp": (
+        ["src/ipc/ReplyComposer.cpp", "src/ipc/ReplyCodec.cpp", "src/ipc/ServerSession.cpp",
+         "src/input/ChineseTextConversion.cpp", "tsf/EngineSessionAdapter.cpp", "tsf/EngineResponse.cpp"],
+        True,
+    ),
+    "input/wubi_commit_owner.cpp": (
+        ["src/ipc/ReplyComposer.cpp", "src/ipc/ReplyCodec.cpp", "src/ipc/ServerSession.cpp",
+         "src/input/ChineseTextConversion.cpp", "tsf/EngineSessionAdapter.cpp", "tsf/EngineResponse.cpp"],
+        True,
+    ),
     # Windows 的两份真实会话共同验证部分选词、普通退格与实时设置。
     "input/backspace_selected_phrase.cpp": (
         ["src/ipc/ReplyComposer.cpp", "src/ipc/ReplyCodec.cpp", "src/ipc/ServerSession.cpp",
@@ -345,6 +358,7 @@ def build(
         "No such file or directory",
         "Undefined symbols",
         "undefined reference",
+        "undefined symbol:",  # LLD 与 GNU ld 对同一种缺失链接依赖使用不同诊断。
         # MSVC 的同类诊断：这个原生源文件仍需由 Windows CMake 目标链接系统库。
         "unresolved external symbol",
     )

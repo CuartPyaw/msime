@@ -3983,14 +3983,24 @@ static const NSTimeInterval kSettledRerankPoll = 1.0 / 60.0;
 - (void (^)(NSEvent *))globalVoiceHotkeyHandler {
     __weak MSIMEInputController *weakSelf = self;
     return ^(NSEvent *event) {
-        if (event.keyCode != 101 || event.isARepeat || (event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagCommand)) != NSEventModifierFlagControl) return;
         MSIMEInputController *controller = weakSelf;
-        if (!controller || !controller->_activeClient || !MSIMEVoiceInputEnabled(NSUserDefaults.standardUserDefaults) || ([NSUserDefaults.standardUserDefaults objectForKey:@"MSIMEClientVoiceHotkeyCtrlF9"] != nil && ![NSUserDefaults.standardUserDefaults boolForKey:@"MSIMEClientVoiceHotkeyCtrlF9"])) return;
+        if (!controller || !controller->_activeClient || event.isARepeat ||
+            !MSIMEVoiceInputEnabled(NSUserDefaults.standardUserDefaults) ||
+            ![controller matchesVoiceToggleHotkey:event]) return;
         // AppKit delivers event-monitor handlers on the main thread. Handle
         // this gesture now: another main-queue hop could toggle a new client
         // or recording after focus or voice state has changed.
         [controller toggleVoiceInput:nil];
     };
+}
+- (BOOL)matchesVoiceToggleHotkey:(NSEvent *)event {
+    if (MSIMEToggleChordMatches(_appearance.voiceInputToggleChord, event)) return YES;
+    NSUserDefaults *defaults = NSUserDefaults.standardUserDefaults;
+    const BOOL fixedEnabled = [defaults objectForKey:@"MSIMEClientVoiceHotkeyCtrlF9"] == nil ||
+        [defaults boolForKey:@"MSIMEClientVoiceHotkeyCtrlF9"];
+    return fixedEnabled && event.keyCode == 101 &&
+        (event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagShift |
+            NSEventModifierFlagOption | NSEventModifierFlagCommand)) == NSEventModifierFlagControl;
 }
 - (void)resetCandidateAnchor {
     _candidateAnchorCaret = NSZeroRect;
@@ -7126,9 +7136,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
                [event.characters characterAtIndex:0] != _lastSmartPunctuation) {
         [self resetSmartPunctuationState];
     }
-    if (voiceEnabled && !event.isARepeat && event.keyCode == 101 &&
-        (event.modifierFlags & (NSEventModifierFlagControl | NSEventModifierFlagShift | NSEventModifierFlagOption | NSEventModifierFlagCommand)) == NSEventModifierFlagControl &&
-        ([NSUserDefaults.standardUserDefaults objectForKey:@"MSIMEClientVoiceHotkeyCtrlF9"] == nil || [NSUserDefaults.standardUserDefaults boolForKey:@"MSIMEClientVoiceHotkeyCtrlF9"])) {
+    if (voiceEnabled && !event.isARepeat && [self matchesVoiceToggleHotkey:event]) {
         [self toggleVoiceInput:nil];
         return YES;
     }

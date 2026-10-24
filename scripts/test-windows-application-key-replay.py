@@ -19,6 +19,7 @@ HARNESS = r'''
 #include <vector>
 #include <string>
 #include "InputSchemeTraits.h"
+#include "WubiCommitOwner.h"
 namespace Global {
 std::atomic<int> InputModeScheme{msime::windows::scheme::Quanpin};
 bool g_connected = true;
@@ -27,6 +28,7 @@ std::atomic_bool TsfDiagnosticLogEnabled{false};
 // 生产代码里的诊断日志在测试里关闭，记录进空实现即可。
 void QueueTsfDiagnosticLog(const std::wstring &) {}
 inline std::wstring BoolFlag(bool value) { return value ? L"1" : L"0"; }
+
 using std::min;
 using WCHAR = wchar_t;
 using SHORT = short;
@@ -172,6 +174,7 @@ using CCompositionProcessorEngine = Engine;
 template<typename... Args> void DebugTsfIssue47(Args...) {}
 // 生产前缀规则
 struct CMetasequoiaIME {
+    msime::tsf::WubiCommitOwner _wubiCommitOwner;
     Engine *_pCompositionProcessorEngine = nullptr;
     std::deque<DeferredKeyDown> _deferredAppliedPrefix;
     std::uint64_t _deferredKeyFocusGeneration = 7;
@@ -287,6 +290,30 @@ struct Fixture {
     }
 };
 int main() {
+    {
+        Fixture f;
+        f.ime._wubiCommitOwner.begin(42, 1);
+        const auto refs = f.context.refs;
+        f.complete();
+        check(f.ime._hasDeferredKeyInFlight && f.ime._deferredKeyReplayToken == 42 &&
+              f.context.refs == refs && f.ime._deferredAppliedPrefix.empty() && posted.empty(),
+              "current Wubi owner retains the in-flight slot until worker completion");
+        f.ime._wubiCommitOwner.clear();
+        f.complete();
+        check(!f.ime._hasDeferredKeyInFlight && posted.size() == 1,
+              "clearing the Wubi owner releases completion and schedules the next key once");
+    }
+    {
+        Fixture f;
+        f.ime._wubiCommitOwner.begin(41, 1);
+        f.complete();
+        check(!f.ime._hasDeferredKeyInFlight && f.ime._wubiCommitOwner.current(41) && posted.empty(),
+              "a different Wubi token cannot block completion but still blocks the next drain");
+        f.ime._wubiCommitOwner.clear();
+        f.ime._ScheduleDeferredKeyDownDrain();
+        f.ime._ScheduleDeferredKeyDownDrain();
+        check(posted.size() == 1, "clearing an active Wubi owner schedules only one pending drain");
+    }
     for (int mode = 0; mode != 3; ++mode) {
         Fixture f; f.queue(); f.complete();
         check(!f.ime._hasDeferredKeyInFlight, "committed syllable retires before application ack");
@@ -524,7 +551,9 @@ def main() -> int:
         unit, binary = pathlib.Path(directory) / "order.cpp", pathlib.Path(directory) / "order"
         unit.write_text(harness + body + TESTS)
         subprocess.run([compiler, "-std=c++17", "-Wall", "-Wextra", "-Werror", "-DMSIME_EDITION_FULL",
-                        "-I" + str(ROOT / "platforms/windows/common"), str(unit), "-o", str(binary)], check=True)
+                        "-I" + str(ROOT / "platforms/windows/common"),
+                        "-I" + str(ROOT / "platforms/windows/tsf"),
+                        "-I" + str(ROOT / "crates/host-api/include"), str(unit), "-o", str(binary)], check=True)
         return subprocess.run([str(binary)], check=False).returncode
 if __name__ == "__main__":
     raise SystemExit(main())

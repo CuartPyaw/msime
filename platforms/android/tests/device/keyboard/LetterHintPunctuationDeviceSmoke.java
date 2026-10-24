@@ -289,8 +289,15 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
 
     private void gestureOption(String letter, boolean hold, String direction, String choice,
             boolean cancel, boolean outside) throws Exception {
+        String upper = letter.toUpperCase(java.util.Locale.ROOT);
+        gestureOption(described("字母 " + upper), hold, direction, choice,
+            described("输入 " + (choice.equals(upper) ? letter : upper)), cancel, outside);
+    }
+
+    private void gestureOption(Predicate<AccessibilityNodeInfo> anchor, boolean hold, String direction,
+            String choice, Predicate<AccessibilityNodeInfo> alternate, boolean cancel, boolean outside) throws Exception {
         String originalStage = stage;
-        Rect keyBounds = bounds(awaitStableBounds(described("字母 " + letter.toUpperCase(java.util.Locale.ROOT))));
+        Rect keyBounds = bounds(awaitStableBounds(anchor));
         long started = SystemClock.uptimeMillis();
         inject(started, MotionEvent.ACTION_DOWN, keyBounds.centerX(), keyBounds.centerY());
         if (hold) SystemClock.sleep(ViewConfiguration.getLongPressTimeout() + 100);
@@ -300,10 +307,8 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
                 keyBounds.centerY() + ("up".equals(direction) ? -dy : dy));
         }
         stage = originalStage + " open options";
-        Predicate<AccessibilityNodeInfo> option = described("输入 " + choice);
+        Predicate<AccessibilityNodeInfo> option = described("⮕".equals(choice) ? "切换到拼音键盘" : "输入 " + choice);
         Rect choiceBounds = bounds(awaitStableBounds(option));
-        String upper = letter.toUpperCase(java.util.Locale.ROOT);
-        Predicate<AccessibilityNodeInfo> alternate = described("输入 " + (choice.equals(upper) ? letter : upper));
         Rect alternateBounds = bounds(awaitStableBounds(alternate));
         stage = originalStage + " hover alternate";
         inject(started, MotionEvent.ACTION_MOVE, alternateBounds.centerX(), alternateBounds.centerY());
@@ -386,6 +391,7 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
             await(described("切换到所选输入方案"));
         }
         runUnicode18SubscriptHolds(expected);
+        runEnglishDragChecks(expected);
         stage = "English hold tone on last row";
         holdLetter("e");
         touch(bounds(await(described("输入 è"))));
@@ -396,8 +402,7 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
         expected.append("2");
         await(field(PLAIN).and(node -> equalsText(expected.toString(), node.getText())));
         stage = "O retains Chinese keyboard entry";
-        holdLetter("o");
-        touch(bounds(await(described("切换到拼音键盘"))));
+        gestureOption(key("o"), true, "down", "⮕", described("输入 O"), false, false);
         await(described("切换到英文输入"));
         // 回到中文后的候选提交仍留在中文，延续 O 键入口的既有规则。
         for (String letter : new String[] {"n", "i", "h", "a", "o"}) tap(key(letter));
@@ -405,6 +410,26 @@ public final class LetterHintPunctuationDeviceSmoke extends DeviceSmoke {
         expected.append("你好");
         await(field(PLAIN).and(node -> equalsText(expected.toString(), node.getText())));
         await(described("切换到英文输入"));
+    }
+
+    /** 同一次按压覆盖同行左右切换、多行末项、取消与滑出，不用第二次点击代替拖选。 */
+    private void runEnglishDragChecks(StringBuilder expected) throws Exception {
+        for (String[] entry : new String[][] {{"g", "&", "G"}, {"g", "G", "&"},
+                {"e", "è", "E"}, {"q", "Q", "1"}, {"m", "ḿ", "M"}}) {
+            stage = "English hold drag " + entry[0] + " to " + entry[1];
+            gestureOption(key(entry[0]), true, "down", entry[1], described("输入 " + entry[2]), false, false);
+            expected.append(entry[1]);
+            expect(expected.toString());
+            await(described("切换到所选输入方案"));
+        }
+        stage = "English hold drag cancel";
+        gestureOption(key("g"), true, "down", "&", described("输入 G"), true, false);
+        expect(expected.toString());
+        assertNoOptions();
+        stage = "English hold drag outside";
+        gestureOption(key("g"), true, "down", "&", described("输入 G"), false, true);
+        expect(expected.toString());
+        assertNoOptions();
     }
 
     /** 专项可独立跑，也保留在完整英文长按套件内，验证原始码位通过真实触摸上屏。 */

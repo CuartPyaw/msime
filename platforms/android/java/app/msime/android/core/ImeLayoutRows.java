@@ -896,7 +896,7 @@ final class ImeLayoutRows {
         trackLetterOptions(anchor, options);
     }
 
-    /** 中文与英文弹窗共用原按键的拖选、松手提交和取消状态。 */
+    /** 中英文字母菜单共用原按键的连续手势，保留松手后再点选。 */
     private void trackLetterOptions(Button anchor, LinearLayout options) {
         if (options == null) return;
         letterOptionsAnchor = anchor;
@@ -1102,21 +1102,20 @@ final class ImeLayoutRows {
         }
     }
 
-    // ---- 连点切换假名（トグル入力） ----
+    // ---- toggle input (トグル入力) ----
     private JapaneseNineKeyLayout.Key toggleKey;
     private int toggleDirection;
     private long toggleAt;
     private String toggleEditing = "";
     private String toggleLiteral = "";
 
-    /** 结束当前连点序列，下一次轻点从键面假名开始。 */
     void resetJapaneseToggle() {
         toggleKey = null;
     }
 
     /** 上一次连点留下的假名还原样在那里：组字没被别的输入改过，或标点仍是光标前那一个字。中间打过别的字、删过、选过候选，都从新的一个假名开始。时间窗只管「再点同一个键算不算接着切换」（`withinWindow`）；→ 是明确的意图，不受它限制。 */
     private boolean japaneseToggleCurrent(boolean withinWindow) {
-        if (!s.japaneseToggleInputEnabled || toggleKey == null || s.connection == null || s.view == null) return false;
+        if (toggleKey == null || s.connection == null || s.view == null) return false;
         if (withinWindow && !JapaneseNineKeyLayout.withinToggleWindow(
                 android.os.SystemClock.uptimeMillis() - toggleAt)) return false;
         String editing = InputViewValuePolicy.editingText(s.view);
@@ -1137,9 +1136,9 @@ final class ImeLayoutRows {
         }
     }
 
-    /** 开启连点切换时，同一个键在 {@link JapaneseNineKeyLayout#TOGGLE_WINDOW_MS} 内再点会把刚打的假名换成下一个（あ→い→う…）。关闭时和数字符号层一样，每次都追加键面字符。 */
+    /** 轻点假名键：同一个键在 {@link JapaneseNineKeyLayout#TOGGLE_WINDOW_MS} 内再点，就把刚打的假名换成下一个（あ→い→う…），否则照常打键面上的假名。数字符号层没有连点切换。 */
     void tapJapaneseKey(JapaneseNineKeyLayout.Key key) {
-        if (s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS || !s.japaneseToggleInputEnabled) {
+        if (s.keyboardLayer == KeyboardLayout.Layer.SYMBOLS) {
             resetJapaneseToggle();
             selectJapaneseKey(key, 0);
             return;
@@ -1319,8 +1318,7 @@ final class ImeLayoutRows {
         ViewPolicy.setSingleLine(button);
         KeyboardTypographyPolicy.setKeyTextSize(button, 22);
         button.setContentDescription("轻点输入" + key.kana().get(0)
-            + (s.japaneseToggleInputEnabled ? "，连续轻点依次切换" : "")
-            + "；左、上、右、下滑动选择其他假名");
+            + "，连续轻点依次切换；左、上、右、下滑动选择其他假名");
         bindJapaneseFlick(button, key);
         if (button instanceof KeyboardPressButton press) press.setKeyboardRole(KeyboardKeyRole.KEY);
         return button;
@@ -1449,8 +1447,7 @@ final class ImeLayoutRows {
 
     void commitNineKeyLiteral(String text) {
         if (s.connection == null) return;
-        // 英文纠错入口只接收 ASCII；非 ASCII 角标与其他符号一样按字面提交。
-        if (s.dedicatedEnglish && text.length() == 1 && text.charAt(0) < 128) {
+        if (s.dedicatedEnglish && text.length() == 1) {
             s.commitEnglishLiteral(text.charAt(0));
             return;
         }
