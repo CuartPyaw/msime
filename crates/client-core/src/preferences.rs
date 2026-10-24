@@ -80,6 +80,21 @@ pub enum TouchKeyboardLayout {
     NineKeyShuangpin,
 }
 
+/// 触屏双拼的字母键布局；与全拼的布局独立保存，切换方案后仍保留选择。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum TouchShuangpinLayout {
+    #[default]
+    TwentySixKey,
+    FourteenKey,
+}
+
+impl TouchShuangpinLayout {
+    fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+}
+
 /// 触屏九宫格数字层的排列。桌面宿主原样保留、不使用。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -89,6 +104,25 @@ pub enum NumberKeypadOrder {
     Phone,
     /// 计算器：7 8 9 在最上面，1 2 3 在最下面。
     Calculator,
+}
+
+/// 文本编辑面板可排序的侧边动作；方向、选择、文档边界与换行固定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextEditButton {
+    Copy,
+    Paste,
+    SelectAll,
+    Cut,
+    Space,
+    NumberPad,
+    Delete,
+}
+
+/// 从左列上到下，再到右列前三格；换行固定在右下角。
+pub fn default_text_edit_button_order() -> Vec<TextEditButton> {
+    use TextEditButton::*;
+    vec![Copy, Paste, SelectAll, Cut, Space, NumberPad, Delete]
 }
 
 /// 触屏 26 键按「123」切到的数字层。桌面宿主原样保留、不使用。
@@ -111,6 +145,47 @@ pub enum TouchSpellingPosition {
     Editor,
     /// 只画在候选栏上，不写进输入框。
     CandidateBar,
+}
+
+/// Android 文本编辑触控板的本机偏好；默认值、步长范围和恢复设置归共享层，不参与账号同步。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TextTrackpadPreferences {
+    pub enabled: bool,
+    pub hold_to_open: bool,
+    pub horizontal_dp: u16,
+    pub vertical_dp: u16,
+    pub tap_selection: bool,
+    pub haptics: bool,
+    pub trail: bool,
+    pub magnifier: bool,
+}
+
+impl Default for TextTrackpadPreferences {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            hold_to_open: false,
+            horizontal_dp: 12,
+            vertical_dp: 28,
+            tap_selection: true,
+            haptics: true,
+            trail: true,
+            magnifier: true,
+        }
+    }
+}
+
+impl TextTrackpadPreferences {
+    pub const HORIZONTAL_MIN_DP: u16 = 4;
+    pub const HORIZONTAL_MAX_DP: u16 = 48;
+    pub const VERTICAL_MIN_DP: u16 = 8;
+    pub const VERTICAL_MAX_DP: u16 = 96;
+
+    pub fn validate(&self) -> bool {
+        (Self::HORIZONTAL_MIN_DP..=Self::HORIZONTAL_MAX_DP).contains(&self.horizontal_dp)
+            && (Self::VERTICAL_MIN_DP..=Self::VERTICAL_MAX_DP).contains(&self.vertical_dp)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1129,6 +1204,9 @@ pub struct Preferences {
     /// Linux 聚焦输入框时显示当前中英文状态，与切换提示独立。新装与缺字段的旧文档默认关闭；其他宿主保留但不使用。
     #[serde(default)]
     pub input_mode_focus_hud: bool,
+    /// Linux 允许屏幕角落的附加模式提示；关闭后保留光标旁提示和其他位置的产品标志。缺省开启以兼容旧配置。
+    #[serde(default = "enabled_by_default")]
+    pub input_mode_corner_hud: bool,
     /// 在 macOS 菜单栏放一个状态项，常驻显示当前输入模式（中/双/五/日……，英文时为「英」），不需要把「英」加成系统输入源。默认关闭；只有 macOS 宿主画它（见 `HostCapabilities::input_mode_status_item`），其他宿主保留这个偏好但不画。
     #[serde(default)]
     pub input_mode_status_item: bool,
@@ -1173,6 +1251,9 @@ pub struct Preferences {
     /// Android 大屏竖屏也使用分离键盘；还需宿主的分离主开关开启，默认关闭。其他宿主原样保留。
     #[serde(default)]
     pub touch_keyboard_split_portrait: bool,
+    /// Android 双拼键盘的 26 / 14 键选择；默认 26 键，其他宿主保留该字段。
+    #[serde(default, skip_serializing_if = "TouchShuangpinLayout::is_default")]
+    pub touch_shuangpin_layout: TouchShuangpinLayout,
     /// 触屏键盘列出哪些方案、选中哪一个；桌面宿主原样保留、不使用。
     ///
     /// 总是写进文档，哪怕等于默认值：以前的版本在等于默认值时省略它，于是文档里没有它只能说明是以前的版本写的，按以前的默认列表读（[`TouchKeyboardScheme::LEGACY_DEFAULT_ENABLED`]）。新装的默认值已经不同，再省略就分不出这两种文档。
@@ -1193,15 +1274,24 @@ pub struct Preferences {
     /// 九宫格数字层按电话还是计算器排列；字母层不受影响。
     #[serde(default)]
     pub touch_number_keypad_order: NumberKeypadOrder,
+    /// Android 文本编辑面板七个侧边动作的完整排列；其他宿主保留但不使用。
+    #[serde(default = "default_text_edit_button_order")]
+    pub touch_text_edit_button_order: Vec<TextEditButton>,
     /// 26 键按「123」时出一行 1 到 0 的数字符号页，还是九宫格那样的 3×3 数字层。
     #[serde(default)]
     pub touch_twenty_six_key_number_layout: TwentySixKeyNumberLayout,
     /// 触屏 26 键双拼时在字母键底部画当前方案的声母/韵母提示，读屏也读它。默认关；全拼、独立英文和本地模式本来就不画，不受它影响。桌面宿主原样保留、不使用。
     #[serde(default = "disabled_by_default")]
     pub touch_shuangpin_key_hints: bool,
+    /// Android 日语九键连点同一键时循环假名；关闭后每次轻点都追加键面假名，四向滑动不变。默认开，保留旧文档的输入习惯；其他宿主原样保留。
+    #[serde(default = "enabled_by_default", skip_serializing_if = "is_true")]
+    pub touch_japanese_toggle_input: bool,
     /// 触屏键盘的拼写写进输入框还是只画在候选栏；缺这个键的旧文档读作输入框。
     #[serde(default)]
     pub touch_spelling_position: TouchSpellingPosition,
+    /// 仅 Android 使用，其他宿主原样保留。
+    #[serde(default)]
+    pub android_text_trackpad: TextTrackpadPreferences,
     /// 中文触屏键盘的快捷符号，单个字素、去重，最多十二项；宿主只负责显示与提交。
     #[serde(default = "default_touch_quick_symbols")]
     pub touch_quick_punctuation_symbols: Vec<String>,
@@ -2579,6 +2669,9 @@ impl Default for NavigationPreferences {
 pub struct KeybindingPreferences {
     #[serde(default = "enabled_by_default")]
     pub switch_language_shift: bool,
+    /// macOS 单按 Shift 只在可确认的可编辑焦点生效；依赖辅助功能权限，默认关闭。
+    #[serde(default)]
+    pub switch_language_shift_requires_editable: bool,
     #[serde(default)]
     pub switch_language_ctrl: bool,
     /// Linux 已默认处理这个组合键；关闭时交还应用，不改输入法框架的全局绑定。
@@ -2872,6 +2965,7 @@ impl Default for KeybindingPreferences {
     fn default() -> Self {
         Self {
             switch_language_shift: true,
+            switch_language_shift_requires_editable: false,
             switch_language_ctrl: false,
             switch_language_ctrl_space: true,
             switch_language_ctrl_alt_space: true,
@@ -3112,6 +3206,7 @@ impl Default for Preferences {
             candidate_follow_cursor: true,
             input_mode_hud: true,
             input_mode_focus_hud: false,
+            input_mode_corner_hud: true,
             input_mode_status_item: false,
             show_app_logo: false,
             expand_candidates: false,
@@ -3125,14 +3220,18 @@ impl Default for Preferences {
             wubi_profile: WubiProfile::default(),
             touch_keyboard_layout: TouchKeyboardLayout::default(),
             touch_keyboard_split_portrait: false,
+            touch_shuangpin_layout: TouchShuangpinLayout::default(),
             touch_keyboard_schemes: TouchKeyboardSchemePreferences::default(),
             touch_key_spacing_tenths: default_touch_key_spacing_tenths(),
+            android_text_trackpad: TextTrackpadPreferences::default(),
             touch_row_spacing_tenths: default_touch_row_spacing_tenths(),
             touch_keyboard_height_adjustment: 0,
             touch_voice_shortcut: false,
             touch_number_keypad_order: NumberKeypadOrder::default(),
+            touch_text_edit_button_order: default_text_edit_button_order(),
             touch_twenty_six_key_number_layout: TwentySixKeyNumberLayout::default(),
             touch_shuangpin_key_hints: false,
+            touch_japanese_toggle_input: true,
             touch_spelling_position: TouchSpellingPosition::default(),
             touch_quick_punctuation_symbols: default_touch_quick_symbols(),
             touch_toolbar: TouchToolbarPreferences::default(),
@@ -3496,6 +3595,8 @@ impl Default for HelpcodePreferences {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct ShuangpinHelpcodeModes {
+    /// 只在 Tab 后输入辅助码；保留其它触发方式的设置，关闭后恢复。
+    pub manual_tab: bool,
     /// 末尾直接（`shuangpin_helpcode_direct`）：完整音节基座后直接接辅码，`ulpbx` 是单码、`ulpbxY` 是双码；关闭后末尾裸字母不再当辅助码，只有触发键开启的段才认。
     pub direct: bool,
     /// 末尾间接触发键：反引号段（`shuangpin_helpcode_trigger_backtick`）。
@@ -3524,6 +3625,7 @@ pub struct ShuangpinHelpcodeModes {
 impl Default for ShuangpinHelpcodeModes {
     fn default() -> Self {
         Self {
+            manual_tab: false,
             direct: true,
             trigger_backtick: false,
             trigger_semicolon: true,
@@ -3860,6 +3962,14 @@ impl Preferences {
     }
 
     pub fn validate(&self) -> Result<(), PreferencesError> {
+        let expected = default_text_edit_button_order();
+        if self.touch_text_edit_button_order.len() != expected.len()
+            || !expected
+                .iter()
+                .all(|button| self.touch_text_edit_button_order.contains(button))
+        {
+            return Err(PreferencesError::InvalidTextEditButtonOrder);
+        }
         for helpcode in [&self.quanpin_helpcode, &self.shuangpin_helpcode] {
             if !matches!(
                 helpcode.trigger_key.as_str(),
@@ -3976,6 +4086,9 @@ impl Preferences {
         }
         if !(1..=MAX_CANDIDATE_PAGE_SIZE).contains(&self.candidate_page_size) {
             return Err(PreferencesError::InvalidPageSize);
+        }
+        if !self.android_text_trackpad.validate() {
+            return Err(PreferencesError::InvalidTextTrackpad);
         }
         if !(30..=60).contains(&self.touch_key_spacing_tenths)
             || !(40..=100).contains(&self.touch_row_spacing_tenths)
@@ -4117,6 +4230,8 @@ impl PreferencesSnapshot {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PreferencesError {
+    #[error("text edit button order must contain each of the seven side actions once")]
+    InvalidTextEditButtonOrder,
     #[error("辅助码触发键必须为空或 ; / \\ ` = 中的一个标点")]
     InvalidHelpcodeTriggerKey,
     #[error("五笔二三候选键必须是两个不同的单个 ASCII 标点")]
@@ -4139,6 +4254,8 @@ pub enum PreferencesError {
     InvalidPageSize,
     #[error("touch keyboard key spacing must be 3.0-6.0 and row spacing must be 4.0-10.0")]
     InvalidTouchKeyboardSpacing,
+    #[error("触控板水平步长须为 4–48 dp，垂直步长须为 8–96 dp")]
+    InvalidTextTrackpad,
     #[error("快捷符号必须是去重的单字素列表，最多十二项且不含空白或控制字符")]
     InvalidTouchQuickSymbols,
     #[error(

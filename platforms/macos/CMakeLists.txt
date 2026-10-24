@@ -119,7 +119,7 @@ target_sources(MSIMEClientInputMethod PRIVATE src/voice/DoubaoVoiceRequest.mm sr
 target_sources(MSIMEClientInputMethod PRIVATE src/core/DesktopInputSession.mm)
 target_sources(MSIMEClientInputMethod PRIVATE src/core/UsageReporting.mm)
 target_sources(MSIMEClientInputMethod PRIVATE src/core/DesktopCloudClipboard.mm)
-target_link_libraries(MSIMEClientInputMethod PRIVATE "-framework CoreGraphics" "-framework CoreText" "-framework UniformTypeIdentifiers")
+target_link_libraries(MSIMEClientInputMethod PRIVATE "-framework ApplicationServices" "-framework CoreGraphics" "-framework CoreText" "-framework UniformTypeIdentifiers")
 file(GLOB_RECURSE MSIME_BACKEND_SWIFT CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/backend/account/*.swift"
   "${CMAKE_CURRENT_SOURCE_DIR}/../../shared/backend/clients/*.swift"
@@ -272,6 +272,7 @@ configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/rime-wanxia
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/Unicode-License-V3.txt" "${MSIME_LEGAL_DIRECTORY}/Unicode-License-V3.txt" COPYONLY)
 # 简繁转换内嵌 OpenCC 词表，Apache-2.0 原文随宿主分发。
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/OpenCC-Apache-2.0.txt" "${MSIME_LEGAL_DIRECTORY}/OpenCC-Apache-2.0.txt" COPYONLY)
+configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/world-clock-NOTICE.txt" "${MSIME_LEGAL_DIRECTORY}/world-clock-NOTICE.txt" COPYONLY)
 # The Cantonese and Zhuyin schemes, whose syllables and words come from the dictionaries in language-dictionaries/ (when installed), built from rime-cantonese (CC BY 4.0, which requires attribution) and libchewing-data (LGPL-2.1-or-later, which requires the licence text and a source pointer).
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/rime-cantonese-CC-BY-4.0.txt" "${MSIME_LEGAL_DIRECTORY}/rime-cantonese-CC-BY-4.0.txt" COPYONLY)
 configure_file("${CMAKE_CURRENT_SOURCE_DIR}/../../resources/licenses/libchewing-data-LGPL-2.1.txt" "${MSIME_LEGAL_DIRECTORY}/libchewing-data-LGPL-2.1.txt" COPYONLY)
@@ -915,6 +916,11 @@ add_executable(text-client-test tests/core/TextClientTest.mm)
 target_compile_options(text-client-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(text-client-test PRIVATE apple-client)
 add_test(NAME text-client COMMAND text-client-test)
+add_executable(text-client-reentrancy-test tests/core/TextClientReentrancyTest.mm ../../shared/apple/TextClient.mm)
+target_include_directories(text-client-reentrancy-test PRIVATE ../../shared/apple)
+target_compile_options(text-client-reentrancy-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
+target_link_libraries(text-client-reentrancy-test PRIVATE "-framework Foundation" "-framework AppKit")
+add_test(NAME text-client-reentrancy COMMAND text-client-reentrancy-test)
 add_executable(cloud-candidate-request-test tests/candidate/CloudCandidateRequestTest.mm src/cloud/CloudCandidateRequest.mm)
 target_compile_options(cloud-candidate-request-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
 target_link_libraries(cloud-candidate-request-test PRIVATE apple-client "-framework Foundation")
@@ -979,7 +985,7 @@ target_link_libraries(voice-session-delivery-test PRIVATE apple-client "-framewo
 add_test(NAME voice-session-delivery COMMAND voice-session-delivery-test)
 add_executable(shortcut-test tests/input/ShortcutTest.mm src/core/DiagnosticLog.cpp src/core/BoundedFileReader.mm src/core/UpdateController.mm src/settings/AppearancePreferences.mm src/candidate/CandidateSkin.cpp src/candidate/CandidateSkinPreviewView.mm src/candidate/SkinSettingsView.mm src/core/ChineseTextConversion.mm src/settings/ShuangpinKeymapPanel.mm src/input/InputSourceRegistration.mm src/core/FloatingToolbarPanel.mm src/dictionary/DictionaryWindowController.mm src/core/ClientDictionaryRuntime.mm)
 target_compile_options(shortcut-test PRIVATE -fobjc-arc -Wall -Wextra -Werror -UNDEBUG)
-target_link_libraries(shortcut-test PRIVATE apple-client "-framework AppKit" "-framework InputMethodKit" "-framework Carbon")
+target_link_libraries(shortcut-test PRIVATE apple-client "-framework AppKit" "-framework InputMethodKit" "-framework Carbon" "-framework ApplicationServices")
 # 控制器撤回大写锁定用的 IOKit；别的控制器测试经 MSIME_CONTROLLER_TEST_LIBS 一并拿到。
 target_link_libraries(shortcut-test PRIVATE "-framework IOKit")
 target_compile_options(shortcut-test PRIVATE "-F${MSIME_SPARKLE_ROOT}")
@@ -992,18 +998,22 @@ target_link_libraries(shortcut-test PRIVATE "-framework AudioToolbox")
 target_link_libraries(MSIMEClientInputMethod PRIVATE "-framework AudioToolbox")
 target_link_libraries(shortcut-test PRIVATE "-framework AVFoundation" "-framework Speech" "-framework CoreGraphics" "-framework CoreText" "-framework CoreAudio" "-framework UniformTypeIdentifiers")
 add_test(NAME shortcut COMMAND shortcut-test)
+add_test(NAME shortcut-expanded-scroll COMMAND shortcut-test --expanded-scroll)
 add_test(NAME shortcut-vim-mode COMMAND shortcut-test --vim-mode)
+add_test(NAME shortcut-nested-commit COMMAND shortcut-test --nested-commit)
 add_test(NAME shortcut-english-punctuation COMMAND shortcut-test --english-punctuation)
 # Around 25 s locally: several cases wait on real input-source and run-loop round trips, which is past the 20 s CI default.
 # The controllers under test read runtime-options.json from Application Support, so each run gets an empty home of its own: an installed or demo profile on the developer's Mac must not reach into these cases.
 set(MSIME_SHORTCUT_TEST_HOME "${CMAKE_CURRENT_BINARY_DIR}/shortcut-test-home")
 file(MAKE_DIRECTORY "${MSIME_SHORTCUT_TEST_HOME}")
+set_tests_properties(shortcut-nested-commit PROPERTIES ENVIRONMENT "CFFIXED_USER_HOME=${MSIME_SHORTCUT_TEST_HOME}")
 # The ceiling is for the sanitizer leg, where the same binary takes several times as long: measured
 # at about 16 s unsanitized and about 120 s under AddressSanitizer on one machine. A ceiling that
 # only fits the unsanitized run turns the slow leg into a timeout that says nothing about the code,
 # which is the opposite of what this number is here to do. It is still an order below the leg's own
 # 300 s ctest ceiling, so a genuinely stuck run is still this test's failure rather than the job's.
 set_tests_properties(shortcut PROPERTIES TIMEOUT 240 ENVIRONMENT "CFFIXED_USER_HOME=${MSIME_SHORTCUT_TEST_HOME}")
+set_tests_properties(shortcut-expanded-scroll PROPERTIES TIMEOUT 60 ENVIRONMENT "CFFIXED_USER_HOME=${MSIME_SHORTCUT_TEST_HOME}")
 add_test(NAME shortcut-translations COMMAND shortcut-test --translations)
 set_tests_properties(shortcut-translations PROPERTIES ENVIRONMENT "CFFIXED_USER_HOME=${MSIME_SHORTCUT_TEST_HOME}")
 add_test(NAME shortcut-translation-font-size COMMAND shortcut-test --translation-font-size)
@@ -1027,6 +1037,12 @@ target_link_libraries(toggle-hotkey-event-test PRIVATE "-framework AppKit")
 add_test(NAME toggle-hotkey-event COMMAND toggle-hotkey-event-test)
 # 重绑路径（改键后新键命中、旧键不命中）单独可跑：全量 shortcut suite 在无图形会话的机器上先倒在皮肤颜色断言。
 add_test(NAME shortcut-toggle-hotkeys COMMAND shortcut-test --toggle-hotkeys)
+add_executable(editable-shift-focus-test tests/input/EditableShiftFocusTest.mm)
+target_compile_options(editable-shift-focus-test PRIVATE -Wall -Wextra -Werror -UNDEBUG -fobjc-arc)
+target_link_libraries(editable-shift-focus-test PRIVATE "-framework AppKit" "-framework ApplicationServices")
+add_test(NAME editable-shift-focus COMMAND editable-shift-focus-test)
+add_test(NAME shortcut-editable-shift COMMAND shortcut-test --editable-shift)
+set_tests_properties(shortcut-editable-shift PROPERTIES ENVIRONMENT "CFFIXED_USER_HOME=${MSIME_SHORTCUT_TEST_HOME}")
 get_target_property(MSIME_CONTROLLER_TEST_SOURCES shortcut-test SOURCES)
 list(REMOVE_ITEM MSIME_CONTROLLER_TEST_SOURCES tests/input/ShortcutTest.mm)
 add_executable(http-voice-controller-test tests/voice/HTTPVoiceControllerTest.mm ${MSIME_CONTROLLER_TEST_SOURCES})

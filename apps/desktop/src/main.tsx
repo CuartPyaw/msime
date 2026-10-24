@@ -182,6 +182,7 @@ async function withLinuxSetupEvents(
   }
 }
 const linuxSetupClient: LinuxSetupClient = {
+  downloads: () => invoke("linux_dictionary_downloads"),
   run: ({ download, cloudCandidates }, onLine, onStage) =>
     withLinuxSetupEvents(onLine, onStage, () =>
       invoke<LinuxSetupStatus>("run_linux_setup", { download, cloudCandidates }),

@@ -134,10 +134,47 @@ final class CompositionMagnifierChecks {
         select(text, 0);
         s.await(s.described("放大拼写").and(node -> node.getTextSelectionStart() == 0));
         Rect area = bounds(text);
-        drag(s, bounds(s.await(s.described("拼写光标拖动手柄"))), area.right - 4, 5000);
-        s.await(s.described("放大拼写").and(node -> node.getTextSelectionStart() == node.getText().length()));
-        drag(s, bounds(s.await(s.described("拼写光标拖动手柄"))), area.left + 4, 5000);
-        s.await(s.described("放大拼写").and(node -> node.getTextSelectionStart() == 0));
+        s.stage = "long spelling right edge reaches the end before release";
+        dragToEdge(s, area, true);
+        s.stage = "long spelling left edge reaches the start before release";
+        dragToEdge(s, area, false);
+    }
+
+    private static void dragToEdge(DeviceSmoke s, Rect area, boolean end) {
+        // 手柄随光标平移；短拼写留下的缓存坐标不能用作下一次拖动的落点。
+        s.dropStaleNodes();
+        Rect handle = bounds(s.await(s.described("拼写光标拖动手柄").and(node ->
+            node.refresh() && node.isVisibleToUser())));
+        int target = end ? area.right - 4 : area.left + 4;
+        long start = SystemClock.uptimeMillis();
+        // 沿用原来拖住 5 秒与随后等待 15 秒的总预算，在真正到达边缘后再松手。
+        long deadline = start + 20_000;
+        inject(s, start, MotionEvent.ACTION_DOWN, handle.centerX(), handle.centerY());
+        try {
+            for (int step = 1; step <= 12; step++) {
+                SystemClock.sleep(16);
+                inject(s, start, MotionEvent.ACTION_MOVE,
+                    handle.centerX() + (target - handle.centerX()) * step / 12f, handle.centerY());
+            }
+            awaitEdge(s, end, deadline);
+        } finally {
+            inject(s, start, MotionEvent.ACTION_UP, target, handle.centerY());
+        }
+        // 松手后的断言共用同一个截止时间，不能重新取得一份等待预算。
+        awaitEdge(s, end, deadline);
+    }
+
+    private static void awaitEdge(DeviceSmoke s, boolean end, long deadline) {
+        do {
+            for (var window : s.automation.getWindows()) {
+                AccessibilityNodeInfo found = s.find(window.getRoot(), s.described("放大拼写").and(node ->
+                    node.refresh() && node.getText() != null
+                    && node.getTextSelectionStart() == (end ? node.getText().length() : 0)));
+                if (found != null) return;
+            }
+            SystemClock.sleep(100);
+        } while (SystemClock.uptimeMillis() < deadline);
+        throw new AssertionError(end ? "Long spelling did not reach the end" : "Long spelling did not reach the start");
     }
 
     private static void select(AccessibilityNodeInfo node, int position) {

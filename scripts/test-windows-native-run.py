@@ -242,6 +242,8 @@ def include_flags() -> list[str]:
     # The DLL/Server contract headers, which the Windows build puts on the global include path. Ahead of the TIP's directories, so the forwarding tsf/IPC/KeyEventSendResult.h does not shadow the definition it forwards to.
     directories += [ROOT / "platforms/windows/common"]
     directories += [TESTS / "core", ROOT / "shared/contracts", ROOT / "crates/host-api/include"]
+    # Windows 宿主会继续解析到公共绘制头文件；与 CMake 的公开 include 路径一致。
+    directories += [ROOT / "platforms/windows/msimeui/include"]
     # The TIP's own headers, for its own tests: its root and each of its source directories, which its CMakeLists hands to individual tests (`IPC` for passthrough statistics, `Global` for the smart punctuation fingerprint). Last, so a header both trees have still resolves to the host's copy as before.
     tsf = ROOT / "platforms/windows/tsf"
     directories += [tsf]
@@ -250,7 +252,7 @@ def include_flags() -> list[str]:
     flags = [f"-I{path}" for path in directories if path.exists()]
     flags += [f"-I{path}" for path in EXTRA_INCLUDES if pathlib.Path(path).exists()]
     # shared/contracts/msime_edition.h 要求构建选定一个版本；Windows 的 CMake 缺省编 full，这里照做。
-    flags += ["-DMSIME_EDITION_FULL"]
+    flags += ["-DMSIME_EDITION_FULL", "-DNOMINMAX"]
     return flags
 
 
@@ -343,18 +345,24 @@ def build(
         "No such file or directory",
         "Undefined symbols",
         "undefined reference",
+        # MSVC 的同类诊断：这个原生源文件仍需由 Windows CMake 目标链接系统库。
+        "unresolved external symbol",
     )
-    missing = MISSING_HEADER.search(compiled.stderr)
+    # MSVC 链接器也会把诊断写到 stdout；错误码不受系统显示语言影响。
+    diagnostic = compiled.stdout + compiled.stderr
+    missing = MISSING_HEADER.search(diagnostic)
     if missing:
         found = repository_header(missing.group(1))
         if found:
             return None, f"cannot find {missing.group(1)}, which this repository has at {found}: the include path here is missing its directory"
-    if any(marker in compiled.stderr for marker in ordinary):
+    if any(marker in diagnostic for marker in ordinary) or re.search(
+        r"\berror LNK(?:2001|2019|1120):", diagnostic
+    ):
         return None, ""
     if relative in HOST_DIFFERENCES:
         return None, ""
     first = next(
-        (line for line in compiled.stderr.splitlines() if "error" in line),
+        (line for line in diagnostic.splitlines() if "error" in line),
         "did not compile",
     )
     return None, first[:200]
