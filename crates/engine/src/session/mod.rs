@@ -522,10 +522,18 @@ impl Session {
     }
 
     pub fn snapshot(&self) -> SessionSnapshot {
-        self.snapshot_with_helpcode_visibility(true)
+        self.snapshot_with_display_options(true, false)
     }
 
-    pub(crate) fn snapshot_with_helpcode_visibility(&self, show_helpcode: bool) -> SessionSnapshot {
+    pub(crate) fn snapshot_for_host(&self, show_helpcode: bool) -> SessionSnapshot {
+        self.snapshot_with_display_options(show_helpcode, true)
+    }
+
+    fn snapshot_with_display_options(
+        &self,
+        show_helpcode: bool,
+        segmented_quanpin: bool,
+    ) -> SessionSnapshot {
         if self.nine_key.active() {
             return self.nine_key.snapshot();
         }
@@ -537,8 +545,10 @@ impl Session {
         for item in &mut candidates {
             input.apply_english_word_case(item.source, &mut item.word);
         }
-        let preedit = if !self.shuangpin_preedit_uses_raw
-            && input.scheme() == SchemeType::Shuangpin
+        // 宿主显示全拼分词；参考回放的底层快照仍保留原文。
+        let segmented_preedit = (segmented_quanpin && input.scheme() == SchemeType::Quanpin)
+            || (!self.shuangpin_preedit_uses_raw && input.scheme() == SchemeType::Shuangpin);
+        let preedit = if segmented_preedit
             && input.local_mode == LocalInputMode::None
             && !input.dedicated_english
         {

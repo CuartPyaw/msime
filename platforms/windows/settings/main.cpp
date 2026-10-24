@@ -13636,6 +13636,174 @@ private:
     append_row_frame(group, save).Padding(Thickness{row_inset, 10, row_inset, 10});
   }
 
+  // Windows 原生设置页也提供共享设置页中的神经联想和 octagram 语法模型管理。
+  void build_sentence_model_settings(StackPanel const &group) {
+    if (!indexing_ && sentence_pack_statuses_.empty() && !sentence_packs_requested_) {
+      sentence_packs_requested_ = true;
+      refresh_sentence_packs();
+    }
+    const std::wstring model = document_.String(L"sentence_association.grammar_model", L"none");
+    std::vector<Option> choices = {
+        {L"none", L"不使用"},
+        {L"wanxiang", L"万象 LTS（约 380 MB，CC-BY-4.0）"},
+        {L"baguwen_word", L"八股文·词级（约 197 MB，LGPL-3.0）"},
+        {L"baguwen_compact", L"八股文·词级紧凑（约 39 MB，LGPL-3.0）"},
+    };
+    auto selector = select_control(L"语法模型", choices, model, [this](std::wstring const &value) {
+      change([&](PreferencesDocument &doc) {
+        doc.SetString(L"sentence_association.grammar_model", value);
+      }, true);
+    });
+    A11y::SetAutomationId(selector, L"sentence-grammar-model");
+    add_row(group, 0xE8C1, L"语法模型",
+            L"octagram 语法模型给整句候选加分；模型按需下载，不随安装包。选择后切换一次输入框生效。",
+            selector);
+    const auto pack = grammar_pack_for_model(model);
+    if (pack.empty())
+      return;
+    const auto status = sentence_pack_status(pack);
+    const bool installing = sentence_pack_installing_.count(pack) > 0;
+    const bool removing = sentence_pack_removing_.count(pack) > 0;
+    std::wstring subtitle;
+    if (installing)
+      subtitle = L"正在下载和校验模型…";
+    else if (removing)
+      subtitle = L"正在删除模型…";
+    else if (status == L"installed")
+      subtitle = L"已安装；切换一次输入框后生效。";
+    else if (status == L"outdated")
+      subtitle = L"已安装的文件需要更新。";
+    else
+      subtitle = L"模型尚未安装。";
+    StackPanel actions;
+    actions.Orientation(Orientation::Horizontal);
+    actions.Spacing(8);
+    if (status != L"installed" && !installing && !removing) {
+      auto download = button_control(status == L"outdated" ? L"更新" : L"下载",
+                                     [this, pack] { install_sentence_pack(pack); }, loaded_);
+      A11y::SetAutomationId(download, L"sentence-model-download-" + pack);
+      actions.Children().Append(download);
+    }
+    if (status == L"installed" && !installing && !removing)
+      actions.Children().Append(button_control(L"删除", [this, pack] { remove_sentence_pack(pack); },
+                                                loaded_));
+    if (installing)
+      actions.Children().Append(button_control(L"取消", [this, pack] { cancel_sentence_pack(pack); }, true));
+    add_row(group, 0xE8C1, L"模型文件", subtitle, actions);
+  }
+
+  static std::wstring grammar_pack_for_model(std::wstring const &model) {
+    if (model == L"wanxiang") return L"grammar-model-wanxiang";
+    if (model == L"baguwen_word") return L"grammar-model-baguwen";
+    if (model == L"baguwen_compact") return L"grammar-model-baguwen-compact";
+    return {};
+  }
+
+  std::wstring sentence_pack_status(std::wstring const &id) const {
+    for (auto const &status : sentence_pack_statuses_)
+      if (status.first == id)
+        return status.second;
+    return L"missing";
+  }
+
+  void refresh_sentence_packs() {
+    const auto root = state_directory();
+    if (root.empty() || !root.is_absolute())
+      return;
+    JsonObject request;
+    request.SetNamedValue(L"state_root", JsonValue::CreateStringValue(hstring(root.wstring())));
+    run_host(
+        [body = utf8(request.Stringify())] {
+          return take_response(msime_client_resource_packs(
+              reinterpret_cast<const uint8_t *>(body.data()), body.size()));
+        },
+        [this](Response const &response) {
+          if (!response.ok)
+            return;
+          try {
+            auto values = JsonObject::Parse(text(response.text)).GetNamedArray(L"value");
+            sentence_pack_statuses_.clear();
+            for (auto const &item : values) {
+              if (item.ValueType() != JsonValueType::Object)
+                continue;
+              const auto object = item.GetObject();
+              const auto id = named_string(object, L"id");
+              if (id == L"grammar-model-wanxiang" || id == L"grammar-model-baguwen" ||
+                  id == L"grammar-model-baguwen-compact")
+                sentence_pack_statuses_.push_back({id, named_string(object, L"state")});
+            }
+            redraw_input();
+          } catch (...) {
+          }
+        });
+  }
+
+  void redraw_input() {
+    if (!closed_ && current_page_ == "input")
+      render_page(true);
+  }
+
+  static void sentence_pack_progress(void *, const char *, uint64_t, uint64_t) noexcept {
+  }
+
+  void install_sentence_pack(std::wstring const &id) {
+    const auto root = state_directory();
+    if (root.empty() || !root.is_absolute()) return;
+    sentence_pack_installing_.insert(id);
+    redraw_input();
+    JsonObject request;
+    request.SetNamedValue(L"state_root", JsonValue::CreateStringValue(hstring(root.wstring())));
+    request.SetNamedValue(L"pack", JsonValue::CreateStringValue(hstring(id)));
+    const auto mirror = document_.String(L"voice_input.asr_model_mirror", L"");
+    if (!mirror.empty()) {
+      JsonArray sources;
+      sources.Append(JsonValue::CreateStringValue(hstring(mirror)));
+      request.SetNamedValue(L"sources", sources);
+    }
+    run_host(
+        [body = utf8(request.Stringify())] {
+          return take_response(msime_client_resource_pack_install(
+              reinterpret_cast<const uint8_t *>(body.data()), body.size(),
+              &MainWindow::sentence_pack_progress, nullptr));
+        },
+        [this, id](Response const &response) {
+          sentence_pack_installing_.erase(id);
+          if (!response.ok)
+            show_notice(L"模型下载失败，请检查网络或稍后重试。", InfoBarSeverity::Error);
+          refresh_sentence_packs();
+          redraw_input();
+        });
+  }
+
+  void cancel_sentence_pack(std::wstring const &id) {
+    const auto bytes = utf8(hstring(id));
+    msime_client_resource_pack_cancel(reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size());
+  }
+
+  fire_and_forget remove_sentence_pack(std::wstring const &id) {
+    if (!co_await confirm(L"删除语法模型", L"删除后切换输入框即可退回无语法模型的候选行为。确定删除？", L"删除"))
+      co_return;
+    const auto root = state_directory();
+    if (root.empty() || !root.is_absolute()) co_return;
+    sentence_pack_removing_.insert(id);
+    redraw_input();
+    JsonObject request;
+    request.SetNamedValue(L"state_root", JsonValue::CreateStringValue(hstring(root.wstring())));
+    request.SetNamedValue(L"pack", JsonValue::CreateStringValue(hstring(id)));
+    run_host(
+        [body = utf8(request.Stringify())] {
+          return take_response(msime_client_resource_pack_remove(
+              reinterpret_cast<const uint8_t *>(body.data()), body.size()));
+        },
+        [this, id](Response const &response) {
+          sentence_pack_removing_.erase(id);
+          if (!response.ok)
+            show_notice(L"模型正在使用或无法删除，请先切换输入框后重试。", InfoBarSeverity::Error);
+          refresh_sentence_packs();
+          redraw_input();
+        });
+  }
+
   // 「候选与联想」「输出设置」「高级选项」三个标签的内容，与共享页 InputSharedSettingsSection 的 candidates、output、advanced 三块相同。
   void build_input_habits(StackPanel const &page, std::wstring const &tab) {
     if (in_tab(tab, L"candidates")) {
@@ -13683,6 +13851,13 @@ private:
       bool_row(candidates_more, 0xE8C1, L"本地整句联想",
                L"把词库组合出的整句加入候选；关闭后仍保留单词候选",
                L"sentence_association.word_lattice", true);
+      bool_row(candidates, 0xE8C1, L"桌面神经联想",
+               L"使用神经模型重排整句候选；没有模型时保持现有候选",
+               L"sentence_association.neural_desktop", false, true);
+      bool_row(candidates, 0xE8C1, L"去重后补充次选",
+               L"某个模型的首选与已有候选重复时，显示该模型排名最高的下一条不同结果",
+               L"sentence_association.show_next_on_duplicate", false);
+      build_sentence_model_settings(candidates);
     }
 
     if (in_tab(tab, L"output")) {
@@ -24408,6 +24583,11 @@ private:
   bool candidates_more_open_ = false;
   bool local_modes_more_open_ = false;
   bool helpcode_more_open_ = false;
+  // Windows 原生设置页的神经联想与 octagram 语法模型资源包状态。
+  bool sentence_packs_requested_ = false;
+  std::vector<std::pair<std::wstring, std::wstring>> sentence_pack_statuses_;
+  std::set<std::wstring> sentence_pack_installing_;
+  std::set<std::wstring> sentence_pack_removing_;
   // 「输入 › 候选与联想」云候选服务的草稿（共享页 CloudCandidatesSection 的组件状态）和它出自的那份文档配置（序列化后的文字）；文档里的配置变了草稿作废。
   std::optional<JsonObject> cloud_provider_draft_;
   std::wstring cloud_provider_base_;
