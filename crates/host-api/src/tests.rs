@@ -15873,6 +15873,71 @@ fn pronunciation_request_reads_the_table_beside_resources() {
 }
 
 #[test]
+fn pronunciation_request_falls_back_to_explicit_bundled_table() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("state/generation");
+    let supplementary = root.path().join("bundle/Contents/Resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    let install = |directory: &std::path::Path, reading: &str| {
+        std::fs::create_dir_all(directory).unwrap();
+        let database = rusqlite::Connection::open(directory.join("en-phonetic.db")).unwrap();
+        database
+            .execute_batch(
+                "CREATE TABLE en_phonetics(word TEXT PRIMARY KEY, phonetic TEXT NOT NULL) WITHOUT ROWID;
+                 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+                 INSERT INTO meta VALUES('kind', 'en_phonetic');
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        database
+            .execute("INSERT INTO en_phonetics VALUES('sky', ?1)", [reading])
+            .unwrap();
+    };
+    install(&supplementary.join("pronunciations"), "skaɪ");
+    let call = |request: Value| {
+        let request = serde_json::to_vec(&request).unwrap();
+        let resources = resources.to_str().unwrap();
+        read(unsafe {
+            msime_client_pronunciation_request(
+                request.as_ptr(),
+                request.len(),
+                resources.as_ptr(),
+                resources.len(),
+            )
+        })
+    };
+    let base = json!({"generation": 9, "items": [{"text": "sky", "language": "en"}]});
+    assert_eq!(call(base.clone())["value"]["pronunciations"], json!([]));
+    let mut request = base.clone();
+    request["supplementary_resources"] = json!(supplementary);
+    let result = call(request.clone());
+    assert_eq!(
+        result["ok"], true,
+        "包内音标表必须能作为旧资源目录的显式回退：{result}"
+    );
+    assert_eq!(
+        result["value"],
+        json!({"generation": 9, "pronunciations": [
+            {"text": "sky", "language": "en", "pronunciation": "/skaɪ/"}
+        ]})
+    );
+    // 活动资源旁的表优先，显式补充目录不能覆盖它。
+    install(&root.path().join("state/pronunciations"), "skaɪ primary");
+    assert_eq!(
+        call(request.clone())["value"]["pronunciations"][0]["pronunciation"],
+        "/skaɪ primary/"
+    );
+    for invalid in [
+        "relative/resources".to_string(),
+        String::new(),
+        "/".repeat(4097),
+    ] {
+        request["supplementary_resources"] = json!(invalid);
+        assert_eq!(call(request.clone())["ok"], false);
+    }
+}
+
+#[test]
 fn english_glosses_fill_single_characters_from_the_character_table() {
     let root = tempfile::tempdir().unwrap();
     let resources = root.path().join("generation");
