@@ -743,6 +743,15 @@ IRawElementProviderSimple *simple(RootProvider *root) {
 IRawElementProviderSimple *simple(ElementProvider *element) {
   return static_cast<IRawElementProviderSimple *>(element);
 }
+void disconnect_provider(IRawElementProviderSimple *provider) {
+  using Disconnect = HRESULT(WINAPI *)(IRawElementProviderSimple *);
+  static const auto disconnect = [] {
+    const auto module = GetModuleHandleW(L"uiautomationcore.dll");
+    return module ? reinterpret_cast<Disconnect>(reinterpret_cast<void *>(GetProcAddress(module,"UiaDisconnectProvider"))) : nullptr;
+  }();
+  // Win7 通过窗口注销与已断开的共享状态处理旧引用；此模块属于 Server EXE，不会在旧提供者仍被引用时卸载。
+  if (disconnect) disconnect(provider);
+}
 } // namespace
 
 AccessibleWindow::AccessibleWindow(HWND window)
@@ -857,11 +866,11 @@ void AccessibleWindow::disconnect() noexcept {
   }
   // 先断开交出去的每个提供者，再告诉 UI Automation 这个窗口的提供者全部作废。
   for (auto &entry : elements) {
-    UiaDisconnectProvider(simple(entry.second));
+    disconnect_provider(simple(entry.second));
     entry.second->Release();
   }
   if (root) {
-    UiaDisconnectProvider(simple(root));
+    disconnect_provider(simple(root));
     root->Release();
   }
   if (window_ && IsWindow(window_))
