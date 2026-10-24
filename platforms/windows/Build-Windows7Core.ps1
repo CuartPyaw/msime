@@ -61,15 +61,13 @@ try {
         Copy-Item -LiteralPath (Join-Path $release $name) -Destination $output
     }
     Invoke-CoreCommand (Join-Path $nativeBuild 'Release/windows7-core-load.exe') @((Join-Path $output 'msime_host_api.dll'))
-    if ($Architecture -eq 'x64') {
-        Invoke-CoreCommand cargo ($cargo + @('-p', 'msime-mcp-server', '--bin', 'msime-mcp') + $link)
-        & (Join-Path $PSScriptRoot 'Test-PortableExecutable.ps1') -LiteralPath (Join-Path $release 'msime-mcp.exe') -Architecture $Architecture -Kind exe
-        $audit += & (Join-Path $PSScriptRoot 'Test-Windows7CoreImports.ps1') -LiteralPath (Join-Path $release 'msime-mcp.exe')
-        Copy-Item -LiteralPath (Join-Path $release 'msime-mcp.exe') -Destination $output
-        $mcpPdbs = @('msime_mcp.pdb', 'msime-mcp.pdb' | ForEach-Object { Join-Path $release $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
-        if ($mcpPdbs.Count -ne 1) { throw 'Expected one MCP server PDB output' }
-        Copy-Item -LiteralPath $mcpPdbs[0] -Destination (Join-Path $output 'msime-mcp.pdb')
-    }
+    Invoke-CoreCommand cargo ($cargo + @('-p', 'msime-mcp-server', '--bin', 'msime-mcp') + $link)
+    & (Join-Path $PSScriptRoot 'Test-PortableExecutable.ps1') -LiteralPath (Join-Path $release 'msime-mcp.exe') -Architecture $Architecture -Kind exe
+    $audit += & (Join-Path $PSScriptRoot 'Test-Windows7CoreImports.ps1') -LiteralPath (Join-Path $release 'msime-mcp.exe')
+    Copy-Item -LiteralPath (Join-Path $release 'msime-mcp.exe') -Destination $output
+    $mcpPdbs = @('msime_mcp.pdb', 'msime-mcp.pdb' | ForEach-Object { Join-Path $release $_ } | Where-Object { Test-Path -LiteralPath $_ -PathType Leaf })
+    if ($mcpPdbs.Count -ne 1) { throw 'Expected one MCP server PDB output' }
+    Copy-Item -LiteralPath $mcpPdbs[0] -Destination (Join-Path $output 'msime-mcp.pdb')
     # 清单在全部构建完成后写入；核心产物不接入普通完整产品的发布流程。
     $audit | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'windows7-core-imports.json') -Encoding UTF8
 } finally {

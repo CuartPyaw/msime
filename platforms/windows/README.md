@@ -49,6 +49,14 @@ powershell -NoProfile -ExecutionPolicy Bypass -File platforms/windows/tests/tool
 
 工具栏预览复用正式宿主的按钮、尺寸和配色模型，按当前设置显示大小与按钮，跟随顶层颜色模式。空间不足时等比缩小并显示自然 DIP 尺寸；Win7 缺少图标字体时使用正式宿主的文字回退。颜色与明暗按钮在同一窗口打开主题页。
 
+`--route=settings:mcp` 打开独立的「连接 AI 助手」页，提供 Claude Code、Codex、命令行说明、Claude Desktop／Cursor 配置写入和通用 JSON。命令和权限规则复用现代设置；后台读写助手配置，已连接助手显示实际权限并保留各自草稿，带权限写入和冲突替换分别确认。读取失败或尚未初始化时禁止写入。权限选择只存在本机 edition 注册表，不改共享偏好。
+
+最终收集的 MCP 可以用合成目录验收 CLI 与协议，不读取测试机的输入法数据：
+
+```powershell
+python platforms/windows/tests/tools/windows7_mcp.py target/windows7-core/x64/msime-mcp.exe target/windows7-core/x86/msime-mcp.exe
+```
+
 ## Windows 7 原生面板（开发中）
 
 `panels/win7` 是不依赖 WebView 的原生面板宿主，提供 `--route=handwriting`（默认）、`--route=clipboard`、`--route=cloud-clipboard` 、`--route=vocabulary`、`--route=cloud-dictionary` 和 `--route=emoji`，也读取 Server 的 `MSIME_CLIENT_ROUTE`；显式命令行优先，未知路由返回错误。画布支持自动识别、撤销、清空与候选上屏，识别在工作线程执行；清空或继续书写后丢弃旧结果。窗口不激活，只向打开时仍在前台的原编辑器上屏，切换到其他窗口时拒绝输入。成功上屏通过共享接口按手写来源记录聚合统计，使用 TSF 面板标记避免重复计数。
@@ -84,7 +92,7 @@ Windows 平台的实现源码在 `src/` 下；`tsf/`、`msimeui/`、`tests/`、`
 
 ## Windows 7 核心构建（开发中）
 
-完整 Windows 7 支持尚未完成：设置窗口、共享面板、安装升级和 Win7 SP1 实机验收仍在适配。`Build-Windows7Core.ps1` 只产出核心 DLL 与 x64 MCP，不产出可安装的完整产品，也不替代 `Build-Client.ps1` 的普通构建。
+完整 Windows 7 支持尚未完成：设置窗口、共享面板、安装升级和 Win7 SP1 实机验收仍在适配。`Build-Windows7Core.ps1` 产出 x64／x86 对应架构的核心 DLL 与 MCP，不产出可安装的完整产品，也不替代 `Build-Client.ps1` 的普通构建。
 
 在对应架构的 VS 2022 MSVC 开发环境中，先为仓库固定的 Rust 工具链安装标准库源码，再运行：
 

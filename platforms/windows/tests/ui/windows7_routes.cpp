@@ -23,6 +23,7 @@ int main() {
   assert(settings_page_for_route("settings:appearance") == 5 && settings_page_for_route("settings:skin") == 8);
   assert(settings_page_for_route("settings:dictionary") == 13 && settings_page_for_route("settings:vocabulary") == 14);
   assert(settings_page_for_route("settings:plugins") == 15);
+  assert(settings_page_for_route("settings:mcp") == 21);
   assert(settings_page_for_route("settings:screen-keyboard") == 20 && settings_page_for_route("settings:osk") == 20);
   assert(settings_page_for_route("settings:handwriting") == (MSIME_EDITION_HANDWRITING != 0 ? 20 : 3));
   wchar_t root[MAX_PATH]{}, file[MAX_PATH]{};
@@ -35,7 +36,10 @@ int main() {
   {
     { std::ofstream edition(state / L"edition", std::ios::binary); edition << MSIME_EDITION_ID; assert(edition.good()); }
     PreferencesStore store(state.u8string()); const auto before = store.load(); assert(before.snapshot);
-    SettingsWindow window; assert(window.open_route("settings:plugins"));
+    McpPage::Services mcp;
+    mcp.load_flags = [] { return 0u; }; mcp.save_flags = [](uint32_t) { assert(false); };
+    mcp.status = [](const std::string&) { return R"({"ok":true,"value":{"command":"C:\\Synthetic\\msime-mcp.exe","installed":false,"options":null,"config":null,"clients":[]}})"; };
+    SettingsWindow window({}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, std::move(mcp)); assert(window.open_route("settings:plugins"));
     assert(window.create(GetModuleHandleW(nullptr)));
     const auto selector = GetDlgItem(window.handle(), page_selector);
     const auto body = GetDlgItem(window.handle(), page_body); const auto deadline = GetTickCount64() + 10000;
@@ -46,6 +50,23 @@ int main() {
     }
     assert(window.open_route("settings:input") && SendMessageW(selector, CB_GETCURSEL, 0, 0) == 3);
     assert(!window.open_route("settings:unknown") && SendMessageW(selector, CB_GETCURSEL, 0, 0) == 3);
+    assert(window.open_route("settings:mcp"));
+    // 输入页可能正在后台读取辅助码目录，路由在这次读取完成后应用。
+    const auto route_deadline = GetTickCount64() + 5000;
+    while (SendMessageW(selector,CB_GETCURSEL,0,0) != 21) {
+      MSG message{}; while (PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) { assert(message.message != WM_QUIT); TranslateMessage(&message); DispatchMessageW(&message); }
+      assert(GetTickCount64() < route_deadline); MsgWaitForMultipleObjects(0,nullptr,FALSE,20,QS_ALLINPUT);
+    }
+    HWND mcp_page = nullptr;
+    for (HWND child = GetWindow(body,GW_CHILD); child; child = GetWindow(child,GW_HWNDNEXT))
+      if (GetDlgItem(child,McpPage::refresh)) { mcp_page = child; break; }
+    assert(mcp_page);
+    const auto mcp_deadline = GetTickCount64() + 5000;
+    while (!IsWindowEnabled(GetDlgItem(mcp_page,McpPage::refresh))) {
+      MSG message{}; while (PeekMessageW(&message,nullptr,0,0,PM_REMOVE)) { assert(message.message != WM_QUIT); TranslateMessage(&message); DispatchMessageW(&message); }
+      assert(GetTickCount64() < mcp_deadline); MsgWaitForMultipleObjects(0,nullptr,FALSE,20,QS_ALLINPUT);
+    }
+    assert(!IsWindowEnabled(GetDlgItem(mcp_page,McpPage::copy_primary)));
     assert(store.load().snapshot->revision() == before.snapshot->revision());
     DestroyWindow(window.handle());
   }
