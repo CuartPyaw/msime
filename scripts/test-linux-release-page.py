@@ -145,7 +145,7 @@ def source_names(version: str) -> list[str]:
 
 def write_sums(directory: Path, names: list[str], sums: str) -> None:
     lines = [f"{hashlib.sha256((directory / name).read_bytes()).hexdigest()}  {name}" for name in names]
-    (directory / sums).write_text("\n".join(lines) + "\n", encoding="utf-8")
+    (directory / sums).write_text("\n".join(lines) + "\n", encoding="utf-8", newline="\n")
 
 
 class Harness(unittest.TestCase):
@@ -166,9 +166,17 @@ class Harness(unittest.TestCase):
         self.env = {**os.environ, "PATH": f"{self.bin}{os.pathsep}{os.environ['PATH']}", "MSIME_TEST_RELEASES": str(self.state)}
         self.env.pop("MSIME_RELEASE_DIR", None)
         self.env.pop("MSIME_DEFINITIONS", None)
+        # Bash 脚本仍需把 POSIX 路径交给原生 git，不继承父门禁的 CMake 参数规则。
+        self.env.pop("MSYS_NO_PATHCONV", None)
+        self.env.pop("MSYS2_ARG_CONV_EXCL", None)
 
     def run_script(self, *args: str, env: dict | None = None, cwd: Path | None = None) -> subprocess.CompletedProcess:
-        return subprocess.run(["bash", *args], capture_output=True, text=True, errors="replace", env={**self.env, **(env or {})}, cwd=cwd or self.directory)
+        environment = {**self.env, **(env or {})}
+        if os.name == "nt":
+            args = tuple(Path(arg).as_posix() if Path(arg).is_absolute() else arg for arg in args)
+            if "MSIME_RELEASE_DIR" in environment:
+                environment["MSIME_RELEASE_DIR"] = Path(environment["MSIME_RELEASE_DIR"]).as_posix()
+        return subprocess.run(["bash", *args], capture_output=True, text=True, errors="replace", env=environment, cwd=cwd or self.directory)
 
     def release(self, tag: str) -> Path:
         return self.state / "releases" / tag

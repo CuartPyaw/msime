@@ -574,9 +574,10 @@ function splashSeen(native: NativeBridge): boolean {
 }
 
 /**
- * 键盘直接打开的页面：功能面板的「词库」「反馈」「关于」、皮肤选择器的「更多皮肤」，以及长按工具栏按钮打开的「屏幕键盘」（工具栏的显示方式和工具开关在这一页）。与 `EntryAbility` 从 Want 中接受的列表（`SettingsPageLink.PAGES`）相同，scripts/test-harmony-settings-links.py 核对两份一致；其他值都不是本页承诺过的链接，而改为打开「输入」（未知页面 id 就会解析到它）比停在原处更让人摸不着头脑。
+ * 键盘直接打开的页面：功能面板的「词库」「反馈」「关于」、皮肤选择器的「更多皮肤」，「添加语言」打开的「输入」，以及长按工具栏按钮打开的「屏幕键盘」（工具栏的显示方式和工具开关在这一页）。与 `EntryAbility` 从 Want 中接受的列表（`SettingsPageLink.PAGES`）相同，scripts/test-harmony-settings-links.py 核对两份一致；其他值都不是本页承诺过的链接，而改为打开「输入」（未知页面 id 就会解析到它）比停在原处更让人摸不着头脑。
  */
 const LINKED_PAGES: readonly string[] = [
+  "input",
   "dictionary",
   "feedback",
   "about",
@@ -1714,35 +1715,46 @@ function HarmonySettings({
   }
   return (
     <>
-      <SettingsPage
-        client={client}
-        initialPage={initialPage}
-        route={route}
-        onReplayOnboarding={() => {
-          setFlowTheme(savedFlowTheme(native));
-          // 重放与首次运行在同一处结束，而不是停在之前链接的页面上。
-          setInitialPage(undefined);
-          setReplayed(true);
-          // 重放的流程同样不应被宿主的通知卡片压在下面；离开流程时 leaveFlow 会让它恢复。
-          if (typeof native.onboardingStarted === "function") native.onboardingStarted();
-          setBootstrapRequired(true);
-        }}
-      />
-      {cloudClipboardOpen && <CloudClipboardPanel client={cloudClipboard} />}
-      {cloudDictionaryOpen && cloudDictionaryPage === "main" && (
-        <CloudDictionaryPanel client={dictionaryClient} />
-      )}
-      {cloudDictionaryOpen && cloudDictionaryPage === "catalog" && (
-        <CloudDictionaryCatalogPanel client={dictionaryClient} />
-      )}
-      {cloudDictionaryOpen && cloudDictionaryPage === "candidates" && (
-        <CloudCandidatesPanel client={dictionaryClient} />
-      )}
-      {cloudDictionaryOpen && cloudDictionaryPage === "files" && (
-        <CloudDictionaryFilesPanel client={filesClient} />
-      )}
-      {cloudDictionaryOpen && cloudDictionaryPage === "apply" && (
-        <CloudDictionaryApplyPanel client={dictionaryClient} />
+      <div className="contents" inert={cloudClipboardOpen || cloudDictionaryOpen}>
+        <SettingsPage
+          client={client}
+          initialPage={initialPage}
+          route={route}
+          onReplayOnboarding={() => {
+            setFlowTheme(savedFlowTheme(native));
+            // 重放与首次运行在同一处结束，而不是停在之前链接的页面上。
+            setInitialPage(undefined);
+            setReplayed(true);
+            // 重放的流程同样不应被宿主的通知卡片压在下面；离开流程时 leaveFlow 会让它恢复。
+            if (typeof native.onboardingStarted === "function") native.onboardingStarted();
+            setBootstrapRequired(true);
+          }}
+        />
+      </div>
+      {(cloudClipboardOpen || cloudDictionaryOpen) && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={cloudClipboardOpen ? "云剪贴板" : "云词库"}
+          className="fixed inset-0 z-[500] overflow-y-auto bg-chrome"
+        >
+          {cloudClipboardOpen && <CloudClipboardPanel client={cloudClipboard} />}
+          {cloudDictionaryOpen && cloudDictionaryPage === "main" && (
+            <CloudDictionaryPanel client={dictionaryClient} />
+          )}
+          {cloudDictionaryOpen && cloudDictionaryPage === "catalog" && (
+            <CloudDictionaryCatalogPanel client={dictionaryClient} />
+          )}
+          {cloudDictionaryOpen && cloudDictionaryPage === "candidates" && (
+            <CloudCandidatesPanel client={dictionaryClient} />
+          )}
+          {cloudDictionaryOpen && cloudDictionaryPage === "files" && (
+            <CloudDictionaryFilesPanel client={filesClient} />
+          )}
+          {cloudDictionaryOpen && cloudDictionaryPage === "apply" && (
+            <CloudDictionaryApplyPanel client={dictionaryClient} />
+          )}
+        </div>
       )}
     </>
   );

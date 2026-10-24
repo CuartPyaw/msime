@@ -732,6 +732,8 @@ impl HostSession {
         options.shuangpin_preedit_uses_raw = preferences.shuangpin_preedit_uses_raw;
         options.single_character_only = preferences.single_character_only;
         options.learning = preferences.learning;
+        options.next_word_prediction =
+            preferences.next_word_prediction && cfg!(target_os = "android");
         options.learn_english_on_enter = preferences.enter_learns_english_word;
         options.autocorrect_transposition = preferences.quanpin.autocorrect_transposition;
         options.autocorrect_neighbor = preferences.quanpin.autocorrect_neighbor;
@@ -811,6 +813,7 @@ impl HostSession {
         apply_punctuation_marks(&mut options, &preferences);
         // 先构建并校验，失败时原会话仍然可用。
         let mut engine = Session::new(&options).map_err(|e| e.to_string())?;
+        engine.set_prediction_allowed(!self.statistics_private);
         // 云候选席位不是 EngineOptions；新引擎默认关闭，每次重建都要恢复当前偏好。
         engine.set_cloud_candidates_enabled(preferences.cloud_candidates);
         engine.set_english_online_candidates_enabled(preferences.english_online_candidates);
@@ -2047,6 +2050,8 @@ impl HostOptions {
             single_character_only: self.preferences.single_character_only,
             learning: self.preferences.learning,
             learn_english_on_enter: self.preferences.enter_learns_english_word,
+            next_word_prediction: self.preferences.next_word_prediction
+                && cfg!(target_os = "android"),
             autocorrect_transposition: self.preferences.quanpin.autocorrect_transposition,
             autocorrect_neighbor: self.preferences.quanpin.autocorrect_neighbor,
             fuzzy_pinyin_rules: self.preferences.fuzzy_pinyin.active_rules(),
@@ -3392,6 +3397,11 @@ fn layout_key_grid_for(
     match (preferences.touch_keyboard_layout, scheme) {
         (TouchKeyboardLayout::NineKey, Some(SchemeType::Quanpin)) => Some(KeyGrid::NineKey),
         (TouchKeyboardLayout::FourteenKey, Some(SchemeType::Quanpin)) => Some(KeyGrid::FourteenKey),
+        (TouchKeyboardLayout::EighteenKey, Some(SchemeType::Quanpin))
+            if platform == HostPlatform::Android =>
+        {
+            Some(KeyGrid::EighteenKey)
+        }
         (TouchKeyboardLayout::NineKeyShuangpin, Some(SchemeType::Quanpin)) => {
             Some(nine_key_shuangpin_grid(preferences).0)
         }

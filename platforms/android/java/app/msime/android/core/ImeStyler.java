@@ -154,6 +154,7 @@ final class ImeStyler {
         s.imePanels.applyReplyGeometry();
         if (s.keyRows == null) return;
         applyKeyboardGeometry(s.keyRows);
+        s.imeLetterRows.applyEighteenKeyIndentGeometry(s.halfSpacingPixels(layoutKeySpacingTenths()));
         applyKeyboardHeight(s.keyRows);
         // 功能行是键行的兄弟而不是其中一行，按同一网格状态分摊高度；九宫格加高时底行保持默认高度，键帽照样带键距。
         if (s.actionRow != null) {

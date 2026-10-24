@@ -20,6 +20,12 @@ Windows 的笔记根目录通过 `cygpath -w` 传给原生 Node；MSYS 的 `/c/.
 
 `candidate_layout_reload` 的离线释义夹具用原子 `create_directory` 取得独立目录，名字含单调时钟值，碰撞时换名重试；只清理自己成功创建的目录。多个 worktree 的本机门禁可以同时运行，不能在测试开头删除固定名字的共享目录。
 
+原生 Windows 的逐翻译单元检查使用与 CMake 一致的 `NOMINMAX`、`UNICODE` 和 `_UNICODE`，并补齐公共绘制头的 include 路径。只把确定的 MSVC 缺符号错误码、LLVM `lld-link` 的缺符号和缺入口诊断交还原生 CMake 构建；语法错误、仓库头缺少 include 路径和已运行程序的非零退出仍失败。UTF-8 路径夹具在 C++17 使用 `std::filesystem::u8path`，在提供 `char8_t` 的 C++20 使用 `path` 构造函数，不依赖 Windows 当前代码页，也不屏蔽标准库的弃用诊断。Git Bash 向原生 Node 传递笔记根目录前用 `cygpath` 转成 Windows 路径，防止查到不存在的 `/e/...` 并空扫通过。TSF 标点测试明确使用 UTF-8 编译；常量规则用 `static_assert` 检查，局部变量仅改名，严格告警保持启用。
+
+合成 TSF 夹具只在 SAL 宏不存在时提供空定义，避免真实 MSVC 标准库引入 `sal.h` 后重定义。发布契约仍运行从 workflow 提取的原脚本：测试用当前 Python 并显式启用 UTF-8，模拟 Ubuntu 发布任务的文本环境；校验文件与生成 HTML 明确写 LF，C++ 文本 stdout 以通用换行读取。Windows Git 的只读对象只在各测试自己创建的临时仓库清理时恢复写权限，其他删除错误仍传播。Linux Bash 测试不继承父门禁为原生 CMake 设置的 MSYS 禁止路径转换变量；macOS 框架夹具为目录链接声明 `target_is_directory=True`，文件链接目标由 `Path` 组装本机分隔符。Android 摘要检查同时接受 GNU 文本与二进制标记；Windows 发布夹具用合成 ASCII 内容模拟 Ubuntu 的文本摘要标记，校验模式仍调用原工具，不注入无效的 `--text` 选项。不跳过整组测试、不改发布 workflow，也不调整生产框架的复制语义。
+
+日语快捷键的源码断言以文本模式读取受 Git 换行策略影响的文件，避免 Windows 检出的 CRLF 破坏跨行匹配。五笔生命周期夹具补齐生产方法使用的诊断开关、日志边界与原子状态，保留原方法和全部生命周期断言。公证夹具在 Windows 继承父进程的 `PATH` 与 `SystemRoot`，让临时 Python 启动器能加载安装目录中的动态库；在 POSIX 上仍使用固定工具搜索路径，不引入签名凭据或真实 Apple 请求。
+
 ## Existing note audit
 
 - [引擎测试进 CI](2026-10-10-engine-tests-in-ci.md)：部分重叠，保留 CI 覆盖与拒绝符号链接的约定，本篇补充 Windows 示例和本机门禁的兼容范围。
@@ -56,3 +62,11 @@ Windows 的笔记根目录通过 `cygpath -w` 传给原生 Node；MSYS 的 `/c/.
 - 本机未安装 Android SDK/NDK、DevEco 工具、相关 wasm 目标或 Docker，不具备 Apple 编译环境；对应平台编译与设备阶段不能据此认定通过。
 
 九键搜索页复用的本机 quick 在 Windows 可移植测试中暴露固定临时目录竞争。在独立临时根下，16 路并发执行同一旧测试 160 次，有 39 次因目录清理或内容断言失败；原子取得独立目录后，同样 160 次全部通过。此修正只涉及 Windows 测试夹具，不改变宿主的文件访问规则，也不据此声明 Android 设备验证通过。
+
+本轮初始修补精确复用已发布 `0cf774f545`、`ac2f98f3f0` 和 `5293946766` 的选择路径，随后将分支快进到远端 `develop` 固定 `c208d5748a4dd9e271b8a52ec83b19d5071b7a2a`，消除已合入的重复内容。真实编译器回归先在旧 runner 上复现 Windows `lld-link: error: undefined symbol` 被误报；修补后 Windows 与 macOS 原五项均通过。独立复审再发现裸字串 `unresolved external symbol` 会将含同样字样的 `static_assert` 源码错误降为缺依赖：真实编译回归在修补前失败，删除裸字串和同类 `undefined symbol:` 子串、仅匹配明确链接诊断后，macOS 六项通过。更新基点后 Windows 的光标提取、六项诊断、191 项回放、220 项分类、recovery、Shift 与 HTML 一致性检查通过；后补发布与链接夹具定向中，Android 9 项、Linux 16 项、macOS 框架 3 项通过。Windows 发布 14 项已运行通过，但启动探针的 PowerShell 环境设置报错，完整门禁需在修正后的调用环境和完整文件散列核对后重跑。macOS 相应定向检查及 Rust 格式检查通过，完整 quick 与真实编辑器验收仍待实际运行；不把旧失败写入允许失败基线。
+
+修正上述夹具后，同一固定基点与 27 份改动文件在 Windows 11 上经逐文件 SHA-256 核对后运行完整门禁，`bash scripts/verify-local.sh --quick` 返回 0、输出 `quick check passed`。逐翻译单元测试 130 项通过、2 项沿用宿主差异排除、114 项交给 Windows 构建；原生 Host API、TSF／Server 与 pipe-only 编译完成。5 项相关 MSVC CTest、五笔生命周期 32 项、真实编译器诊断六项和偏好测试 194 项均通过，client-core 严格 clippy 通过。完整门禁扫描 1807 篇笔记与 4 项归档封印；缺少 Android SDK/NDK、DevEco、WASM、Docker 和 Apple 环境的阶段仍报告跳过，不代表那些平台或真实编辑器通过。原失败日志保留；没有修改失败基线、警告等级或超时。
+
+新 Windows 检出树补跑会话维护回归时，Caps Lock 接线夹具暴露与日语夹具相同的 CRLF 问题：`ios::binary` 保留源码回车，使跨行查找误判。两个源码检查都按文本方式读取，不改变查找顺序或内容。符号分组表、插件架构 HTML 和语音语言目录的四份生成结果由 `.gitattributes` 固定 LF，与已有拆字表和许可证约束一致；生成器及其逐字节漂移检查保持原样。只对这些确定按字节比较的路径设置规则，避免影响插件包中的 CRLF/BOM 合成夹具。
+
+本轮在更新基点前，六项 MSVC CTest（会话、输入队列、C++17/20 路径、Caps Lock、日语切换）及六项真实编译器诊断回归通过，完整 quick 因上述生成文件 CRLF 和尚未进入当时基点的光标夹具 SAL 守卫失败；已保留日志并终止该失败运行。分支随后快进至已合并 #9553/#9554 的 `develop` 固定 `e2dbbd6c246d6c94b0beb6edb521c3b6469605f9`，删除已入库的重复门禁补丁。Windows 11 runner 核对全部五份改动文件 SHA-256 后重跑：六项 MSVC CTest 全通过（7.54 秒）、六项真实编译器诊断通过，完整 `bash scripts/verify-local.sh --quick` 退出 0、输出 `quick check passed`。逐翻译单元测试 131 项通过、2 项宿主差异排除、116 项交原生构建；Rust workspace、原生 Host API／TSF／Server 与 pipe-only 编译通过，1810 篇笔记及 4 项封印验证通过。运行后五份文件散列未变。前端依赖、JDK、SDK、DevEco、WASM、Docker、Apple 工具和参考输入缺失项仍如实跳过；真实设置页和编辑器验收仍缺，不修改基线、告警或时限。

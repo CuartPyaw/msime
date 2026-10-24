@@ -131,7 +131,7 @@ public class DeviceSmoke extends Instrumentation {
             stage = "typing";
             for (String key : new String[] {"n", "i", "h", "a", "o"}) tap(key(key));
             stage = "phrase composition";
-            await(field("msime-test-plain").and(node -> equalsText("nihao", node.getText())));
+            await(field("msime-test-plain").and(node -> equalsText("ni'hao", node.getText())));
             stage = "phrase commit key";
             tap(key("空格"));
             stage = "phrase commit result";
@@ -215,7 +215,7 @@ public class DeviceSmoke extends Instrumentation {
             for (String key : new String[] {"n", "i", "h", "a", "o"}) tap(key(key));
             // The field still holds 你輸入法 from the traditional stage, and getText() includes the
             // composing region, so this is that text with the pinyin still being composed on it.
-            await(field("msime-test-plain").and(node -> equalsText("你輸入法nihao", node.getText())));
+            await(field("msime-test-plain").and(node -> equalsText("你輸入法ni'hao", node.getText())));
             if (!automation.performGlobalAction(AccessibilityService.GLOBAL_ACTION_BACK))
                 throw new AssertionError("Keyboard hide action failed");
             SystemClock.sleep(500);

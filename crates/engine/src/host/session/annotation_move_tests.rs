@@ -24,6 +24,7 @@ fn frozen_snapshot(session: &Session) -> Result<EngineSnapshot> {
         value.normalized_segmentation.clone()
     };
     let mut output = EngineSnapshot {
+        prediction: false,
         local_mode: value.local_mode.name().to_owned(),
         spelling_symbols: value.spelling_symbols,
         dedicated_english: value.dedicated_english,

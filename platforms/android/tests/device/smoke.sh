@@ -107,6 +107,10 @@ if [[ "$text_edit_layout" == true ]]; then
   [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Text edit layout acceptance failed" >&2; exit 1; }
   exit 0
 fi
+# 十八键复用已有入口，API 28 核心验收与 API 35 完整验收都覆盖组码、回落和实际几何。
+result=$(run_instrumentation app.msime.android.test/app.msime.android.test.FourteenKeyDeviceSmoke -e eighteen_key true)
+printf '%s\n' "$result"
+[[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "十八键全拼验收失败" >&2; exit 1; }
 if [[ "$core" != true ]]; then
   result=$(run_instrumentation app.msime.android.test/app.msime.android.test.ChineseLanguageReturnDeviceSmoke -e japanese-toggle true)
   printf '%s\n' "$result"
@@ -165,6 +169,10 @@ printf '%s\n' "$result"
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.StaleCandidateDeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Stale candidate callback acceptance failed" >&2; exit 1; }
+# 空闲联想只在点选时上屏，自己的选区回声保留候选，外部移动和隐私模式清除候选。
+result=$(run_instrumentation app.msime.android.test/app.msime.android.test.StaleCandidateDeviceSmoke -e next-word true)
+printf '%s\n' "$result"
+[[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "Next word prediction acceptance failed" >&2; exit 1; }
 # 横向候选条不展开也能越过分页和分批边界，左右返回后按全局身份选词。
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.CandidatePanelDeviceSmoke -e continuous-strip true)
 printf '%s\n' "$result"

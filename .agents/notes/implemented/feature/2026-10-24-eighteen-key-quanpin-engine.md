@@ -16,6 +16,7 @@ Windows 的组字与上屏仍归 TSF 与 Server 会话所有。本切片只实�
 
 ## Historical audit
 
+- [Android 十八键全拼入口](2026-10-24-android-eighteen-key-quanpin.md)：复用本引擎和编号 4 接入 Android 原生设置与键面，Windows 原生接线仍由 #8936 跟踪。
 - [十四键](../../implemented/feature/2026-10-10-fourteen-key.md)：部分重叠，沿用多义全拼与独立组码入口；十八键的字母分组和 Windows 宿主链路是新增决定。
 - [Windows 屏幕键盘设置](../../implemented/feature/2026-10-11-windows-settings-screen-keyboard.md)：部分重叠，面板仍由共享组件承载，原生设置归属不变。
 - [九键双拼](../../implemented/feature/2026-10-10-nine-key-shuangpin.md)：独立能力；十八键全拼不改成固定两键一个音节的双拼。
@@ -43,4 +44,4 @@ Windows 的组字与上屏仍归 TSF 与 Server 会话所有。本切片只实�
 
 进程首次使用十八键时多建一份音节拼写索引，并常驻到进程退出；与十四键相比，重码结构不同，准确率和延迟尚无真实词库评测，不能声称性能或输入体验已经改善。
 
-Windows 屏幕键盘、TSF 和 Server 的接线与真实编辑器验收仍缺。本切片使用 `Refs #8936`；入口完成前，既有屏幕键盘布局选择和所有原生宿主均保持原来的用户可见能力。本地磁盘不足，没有新建本地构建树，构建和真实 C ABI 用例在有余量的远端 Windows 工作区执行。
+Windows 屏幕键盘、TSF 与 Server 的接线见[焦点租约面板](2026-10-24-windows-eighteen-key-panel.md)，两篇部分重叠：本篇持有共享算法与 C ABI，面板篇持有 Windows 来源、焦点与恢复边界。真实编辑器验收仍缺；本切片使用 `Refs #8936`，不以共享引擎测试代表 Windows 完整功能。本地磁盘不足，没有新建本地构建树，构建和真实 C ABI 用例在有余量的远端 Windows 工作区执行。

@@ -2578,6 +2578,16 @@ LRESULT CALLBACK CMetasequoiaIME_WindowProc(HWND hWnd, UINT message, WPARAM wPar
 
     switch (message)
     {
+    case WM_COPYDATA: {
+        const auto *data = reinterpret_cast<const COPYDATASTRUCT *>(lParam);
+        if (!data || data->dwData != msime::panel_key::CopyDataId ||
+            data->cbData != sizeof(msime::panel_key::Request) || !data->lpData)
+            return FALSE;
+        // 系统封送内存只在消息处理期间有效，先复制且不回写。
+        msime::panel_key::Request request;
+        memcpy(&request, data->lpData, sizeof(request));
+        return pIME->_HandleGroupedPanelKey(request) ? TRUE : FALSE;
+    }
     case WM_CancelKeyboardComposition: {
         CMetasequoiaIME::WorkerCompartmentSwitch request;
         if (pIME->_TakeWorkerCompartmentSwitch(static_cast<UINT>(wParam), request) &&

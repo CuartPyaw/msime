@@ -162,6 +162,15 @@ char *msime_client_focus(uint64_t, bool focused) {
     fake_editing.clear();
   return answer({{"handled", true}, {"commit", nullptr}, {"diagnostic", nullptr}, {"view", view()}});
 }
+// 这个夹具只验证确定键盘的生命周期；组码路径由独立双会话测试覆盖，误入必须失败。
+char *msime_client_set_key_grid(uint64_t, uint8_t) {
+  std::cerr << "Unexpected key grid call in lifecycle fixture\n";
+  std::abort();
+}
+char *msime_client_grid_key(uint64_t, uint8_t) {
+  std::cerr << "Unexpected grouped key call in lifecycle fixture\n";
+  std::abort();
+}
 char *msime_client_character(uint64_t, uint8_t ascii, bool) {
   record("character", ascii);
   // 韩文这样的方案里，开始新音节的字母带着上一个音节上屏（TIP 已经从自己的会话把它写进了文档）。

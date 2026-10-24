@@ -1101,6 +1101,7 @@ int wmain(int argc, wchar_t **argv) {
                       FanyImeProtocol::CandidateContinuation |
                       FanyImeProtocol::UiLessCandidates |
                       FanyImeProtocol::HostOnlineCandidates |
+                      FanyImeProtocol::GroupedPanelKeys |
                       FanyImeProtocol::GameHostCandidate |
                       FanyImeProtocol::FieldTraits |
                       FanyImeProtocol::JapaneseToggleShortcut)
@@ -1108,6 +1109,7 @@ int wmain(int argc, wchar_t **argv) {
                       FanyImeProtocol::CandidateContinuation |
                       FanyImeProtocol::UiLessCandidates |
                       FanyImeProtocol::HostOnlineCandidates |
+                      FanyImeProtocol::GroupedPanelKeys |
                       FanyImeProtocol::GameHostCandidate |
                       FanyImeProtocol::FieldTraits);
     // 管道对端身份对不上时记下 pid 和错误码，用来区分「DLL 加载了但 Server 拒了连接」和「DLL 根本没加载」，比如反作弊剥掉了 Server 打开游戏进程所需的权限。

@@ -785,8 +785,9 @@ char *msime_client_set_key_grid(uint64_t session, uint8_t grid);
 /* 字母归组键盘（14 键或十八键）的一键：letter 是这一组里的任一小写字母，引擎归成这一组，宿主约定送首字母（十四键为 q e t u o a d g j l z c b m，十八键见上方映射）。返回与 msime_client_character 相同的输入响应。不在字母归组键盘下、方案不兼容、在本地模式或专用英文里、26 键正在组字、或 letter 不是 a-z 时 handled=false，会话不变。
  * 硬件键盘的字母照常经 msime_client_character 走当前方案的 26 键：字母归组键盘组字进行中它们 handled=false，同九键。 */
 char *msime_client_grid_key(uint64_t session, uint8_t letter);
-/* 标出隐私会话（隐私模式、不允许学习的输入框）：这个会话的选词位置和上屏效率不记入打字统计。用户在设置里关掉学习不算隐私会话。学习本身仍由偏好里的 learning 决定。Value 是设下的布尔值。 */
+/* 标出隐私会话（隐私模式、不允许学习的输入框）：不记录选词位置和上屏效率，并立即禁止、清除上屏后联想；宿主须重新读取 View，以丢弃旧候选代次。用户单独关掉学习不算隐私会话；学习本身仍由 learning 偏好决定。Value 是设下的布尔值。 */
 char *msime_client_set_private_session(uint64_t session, bool enabled);
+/* Android 的 next_word_prediction 偏好开启时，View.prediction=true 标记上屏后的空闲联想：editing_text、preedit 和 reading 为空；只有显式选择候选才上屏。空格、回车、数字、导航和失焦不提交联想；普通状态省略 prediction 字段，宿主缺省按 false 读取。 */
 /* 中日英循环切换的状态机（`crates/client-core/src/language_cycle.rs`），一个键在 中 → 日 → 英 → 中 之间转圈。顺序来自旧版 Windows 正式版 `engine/contracts/trilingual_input.h` 的 `Next()`：中文 → 日文 → 英文 → 中文；参与循环的是「切换中英文」那一组快捷键，不是 Ctrl+Shift+J。
  * 参数：enabled 是 keybindings.trilingual_cycle；mode 是按下循环键那一刻的模式，0 中文、1 日文、2 英文；scheme 是实际在跑的方案，编号同 View.scheme；last_chinese_scheme 是要回去的中文方案（0/1/2/5/6/9），-1 表示还没记下；has_composition 是宿主会话里还有组字（已选词段或未上屏的拼音）。
  * Value 是 {mode, scheme, commit_raw}：mode 同上编号；scheme 是进入中文时要切到的方案，null 表示只换中英模式；commit_raw 为真时先原样上屏正在组的内容（已选词段保留，剩下没选的拼音串照原样出去），再换模式。value 为 null 表示这一键不循环（开关关着，这一组快捷键仍是二态切换），宿主照旧自己处理这个键。非法编号返回错误。
