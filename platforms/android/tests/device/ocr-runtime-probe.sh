@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# 独立 SDK/资源加载试验，不安装产品 APK，也不代替相机与真实编辑器验收。
+set -euo pipefail
+repo_root=$(cd "$(dirname "$0")/../../../.." && pwd)
+cd "$repo_root"
+serial=${1:?usage: ocr-runtime-probe.sh <emulator-serial>}
+android_sdk=${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}
+adb="$android_sdk/platform-tools/adb"
+[[ -x "$adb" ]] || { echo "Android platform-tools required" >&2; exit 1; }
+[[ $("$adb" -s "$serial" shell getprop ro.product.cpu.abi | tr -d '\r') == x86_64 ]] || {
+  echo "This isolation probe currently requires the x86_64 test AVD" >&2; exit 1;
+}
+gradlew=apps/desktop/src-tauri/gen/android/gradlew
+gradle_project=platforms/android/gradle-app
+"$gradlew" --project-dir "$gradle_project" --console=plain -PmsimeOcrProbe=true \
+  :ocr-module:assembleDebug :ocr-module:lintDebug
+mkdir -p target/android/ocr-probe-assets
+cp "$gradle_project/ocr-module/build/outputs/apk/debug/ocr-module-debug.apk" \
+  target/android/ocr-probe-assets/ocr-module.apk
+"$gradlew" --project-dir "$gradle_project" --console=plain -PmsimeOcrProbe=true \
+  :ocr-probe:assembleDebug :ocr-probe:lintDebug
+"$adb" -s "$serial" install -r "$gradle_project/ocr-probe/build/outputs/apk/debug/ocr-probe-debug.apk"
+"$adb" -s "$serial" shell pm clear app.msime.ocr.probe
+result=$("$adb" -s "$serial" shell am instrument -w app.msime.ocr.probe/app.msime.ocr.probe.OcrProbe)
+printf '%s\n' "$result" | tee target/android/ocr-runtime-probe.log
+[[ "$result" == *MSIME_OCR_PROBE_PASSED* && "$result" != *MSIME_OCR_PROBE_FAILED* ]]

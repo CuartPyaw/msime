@@ -1339,13 +1339,13 @@ impl<E: InputEngine> Runtime<E> {
         self.engine.pending_suffix()
     }
 
-    /// 换触屏的组码网格。九键要求全拼或注音，全拼 14 键和九键双拼要求全拼，双拼 14 键要求双拼；方案不符报 `InvalidNineKeyScheme`，组字中切换报 `CompositionActive`。
+    /// 换触屏的组码网格。九键要求全拼或注音，全拼十四键、十八键和九键双拼要求全拼，双拼 14 键要求双拼；方案不符报 `InvalidNineKeyScheme`，组字中切换报 `CompositionActive`。
     pub fn set_key_grid(&mut self, grid: Option<KeyGrid>) -> Result<(), RuntimeError> {
         let scheme = scheme_type(self.cached.scheme);
         let supported = match grid {
             None => true,
             Some(KeyGrid::NineKey) => scheme.is_some_and(SchemeType::nine_key),
-            Some(KeyGrid::FourteenKey | KeyGrid::NineKeyShuangpin(_)) => {
+            Some(KeyGrid::FourteenKey | KeyGrid::EighteenKey | KeyGrid::NineKeyShuangpin(_)) => {
                 scheme == Some(SchemeType::Quanpin)
             }
             Some(KeyGrid::FourteenKeyShuangpin(_)) => scheme == Some(SchemeType::Shuangpin),
@@ -1804,6 +1804,12 @@ impl<E: InputEngine> Runtime<E> {
     ///
     /// Answers whether the arrivals filled the page the caller is already on, in which case paging
     /// has to stay put: advancing would step over the candidates that just showed up.
+    ///
+    /// 「留在原地」只在这次展开确实没有长出新页时才成立。展开把隐藏的候选放出来，`len` 变大，
+    /// 末页随之后移：原来停的地方可能已经不是末页了。这时如果还返回 `true`，高亮就停在旧页上，
+    /// 而候选窗已经换成了新的一帧。数字键选词读的是高亮推出的页码（`ServerSession.cpp` 按槽位取
+    /// 当前页），于是按 1 上屏的是翻页前那一页的第一个候选（#9517）。所以只有展开之后页数没变、
+    /// 当前页只是从短变满，才留在原地。
     fn expand_for_next_page(&mut self) -> Result<bool, RuntimeError> {
         let len = self.visible_len();
         if len == 0 {
@@ -1819,7 +1825,14 @@ impl<E: InputEngine> Runtime<E> {
         if !self.expand_cached_candidates()? {
             return Ok(false);
         }
-        Ok(page == last_page && !page_was_full)
+        let grown = self.visible_len();
+        let stayed = page == last_page && !page_was_full;
+        // 展开长出了新页：候选集已经变了，高亮必须跟着前进，否则页面和内容对不上。
+        let grown_last_page = grown.saturating_sub(1) / self.page_size;
+        if stayed && grown_last_page > last_page {
+            return Ok(false);
+        }
+        Ok(stayed)
     }
 
     /// Moving the highlight off the end of the loaded list has to release the withheld candidates
@@ -2027,10 +2040,12 @@ impl<E: InputEngine> Runtime<E> {
         // consumed, with its candidates, and the caret at its end.
         self.engine.command(Command::Cancel)?;
         for byte in selection.reading.bytes() {
-            // 14 键的组码只认 `grid_key`；分词键 `'` 和九键的数字本来就从 `character` 进。
+            // 字母归组键盘的组码只认 `grid_key`；分词键 `'` 和九键的数字本来就从 `character` 进。
             if matches!(
                 selection.grid,
-                Some(KeyGrid::FourteenKey | KeyGrid::FourteenKeyShuangpin(_))
+                Some(
+                    KeyGrid::FourteenKey | KeyGrid::EighteenKey | KeyGrid::FourteenKeyShuangpin(_)
+                )
             ) && byte != b'\''
             {
                 self.engine.grid_key(byte)?;
@@ -3394,6 +3409,7 @@ fn key_grid_name(grid: Option<KeyGrid>) -> &'static str {
     match grid {
         None => "none",
         Some(KeyGrid::NineKey) => "nine_key",
+        Some(KeyGrid::EighteenKey) => "eighteen_key",
         Some(KeyGrid::FourteenKey | KeyGrid::FourteenKeyShuangpin(_)) => "fourteen_key",
         Some(KeyGrid::NineKeyShuangpin(_)) => "nine_key_shuangpin",
     }

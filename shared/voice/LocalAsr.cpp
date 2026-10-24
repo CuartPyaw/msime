@@ -337,12 +337,17 @@ bool model_path_inside(const fs::path &directory, const fs::path &candidate) {
   return true;
 }
 
-// A storage path may pass through one system-owned alias, matching the Rust
-// installer and the other native hosts. Linux has no fixed alias list because
-// distributions commonly link /home or /bin into another tree; a link is
-// trusted only when root owns it and its parent is a closed root directory.
+// 与 Rust 安装器一致，路径最多经过一个系统别名。Android 的固定别名先于 Linux 分支处理：
+// /data/user 属于 system，不能用要求父目录属于 root 的 Linux 规则判断。
+// Linux 发行版可能链接 /home 或 /bin，因此只信任链接和不可被组、其他用户写入的父目录均属于 root 的链接。
 bool trusted_model_path_link(const fs::path &path) {
-#if defined(__linux__)
+#if defined(__ANDROID__)
+  if (path != fs::path("/data/user/0"))
+    return false;
+  std::error_code error;
+  const auto target = fs::read_symlink(path, error);
+  return !error && (path.parent_path() / target).lexically_normal() == fs::path("/data/data");
+#elif defined(__linux__)
   struct stat link {};
   if (::lstat(path.c_str(), &link) != 0 || !S_ISLNK(link.st_mode) || link.st_uid != 0)
     return false;

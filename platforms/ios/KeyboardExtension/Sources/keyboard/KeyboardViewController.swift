@@ -7136,6 +7136,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     button.pressFeedback = .opacity(0.6)
     button.setContentCompressionResistancePriority(.required, for: .horizontal)
     let minimumWidth = button.widthAnchor.constraint(greaterThanOrEqualToConstant: Self.candidateChipMinimumSize.width)
+    // 隐藏的栈内词块由 UIStackView 强制设为零宽，词块自己的宽度下限必须让步。
+    minimumWidth.priority = .init(999)
     let minimumHeight = button.heightAnchor.constraint(greaterThanOrEqualToConstant: Self.candidateChipMinimumSize.height)
     minimumHeight.priority = .init(999)
     NSLayoutConstraint.activate([minimumWidth, minimumHeight])
@@ -7194,6 +7196,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     } else {
       let minimum = button.widthAnchor.constraint(greaterThanOrEqualToConstant: minimumWidth)
       minimum.identifier = "candidateSkinMinimumWidth"
+      minimum.priority = .init(999)
       minimum.isActive = true
     }
     let existing = button.constraints.first { $0.identifier == "candidateChipWidth" }
@@ -7210,6 +7213,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     } else {
       let constraint = button.widthAnchor.constraint(equalToConstant: width)
       constraint.identifier = "candidateChipWidth"
+      constraint.priority = .init(999)
       constraint.isActive = true
     }
   }

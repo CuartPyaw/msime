@@ -40,6 +40,13 @@ namespace
 {
 constexpr UINT kMaxDeferredKeyReplayAttempts = 8;
 
+// 诊断日志里拼「1」或「0」时，`L"x=" + (cond ? L"1" : L"0")` 两边都是指针，会变成指针加。
+// 统一走这个函数，返回 std::wstring，和左右两侧的 wstring 串接。
+inline std::wstring BoolFlag(bool value)
+{
+    return value ? L"1" : L"0";
+}
+
 // A recovery checkpoint may need one INPUT for every raw pinyin character and
 // one MOVE_LEFT for every character to the right of the caret.  Keep enough
 // additional room for a short burst that arrives while the replacement IPC
@@ -1575,6 +1582,14 @@ bool CMetasequoiaIME::_RefreshDeferredRecoveryPrefix(_In_ ITfContext *pContext)
     const size_t rawLength = raw.size();
     const size_t caret = min(rawLength, composition.caret);
     const size_t moveLeftCount = rawLength - caret;
+    // 这里把当前整串拼音摊回按键，重连之后它们会连同失败的那个键一起重放：用户在屏幕上看到的
+    // 就是「整段输入被重来一次」(#9518)。只记长度与光标，不记内容。
+    if (Global::TsfDiagnosticLogEnabled.load(std::memory_order_relaxed))
+    {
+        QueueTsfDiagnosticLog(L"[msime][deferred-recovery] stage=prefix raw_len=" + std::to_wstring(rawLength) +
+                              L" caret=" + std::to_wstring(caret) + L" move_left=" +
+                              std::to_wstring(moveLeftCount));
+    }
     if (rawLength + moveLeftCount > MAX_DEFERRED_KEY_DOWN_COUNT)
     {
         return false;
@@ -2473,6 +2488,18 @@ void CMetasequoiaIME::_ClearDeferredKeyDowns()
                         hadInFlight ? _deferredKeyInFlight.keyState.Function : 0, -1, _IsComposing(),
                         _pCompositionProcessorEngine ? _pCompositionProcessorEngine->GetVirtualKeyLength() : 0, S_FALSE,
                         inFlightToken);
+        // 整队作废的时候把当时的传输状态一起记下来：重置是否还挂着、前缀有多长、代次走到哪。
+        if (Global::TsfDiagnosticLogEnabled.load(std::memory_order_relaxed))
+        {
+            QueueTsfDiagnosticLog(L"[msime][deferred-clear] stage=queue-cleared queued=" +
+                                  std::to_wstring(queuedCount) + L" in_flight=" + BoolFlag(hadInFlight) +
+                                  L" applied_prefix=" + std::to_wstring(_deferredAppliedPrefix.size()) +
+                                  L" reset_pending=" +
+                                  BoolFlag(_localSessionResetPending.load(std::memory_order_acquire)) +
+                                  L" composing=" + BoolFlag(_IsComposing()) + L" generation=" +
+                                  std::to_wstring(_deferredKeyFocusGeneration) + L" token=" +
+                                  std::to_wstring(inFlightToken));
+        }
     }
     // A posted drain belongs to the current message window/generation.  It
     // may never run if Deactivate destroys that window, so never carry this
@@ -2764,6 +2791,20 @@ bool CMetasequoiaIME::_ResolveDeferredKeyClassification(uint64_t replayToken)
     if (!ownerCurrent || !enabled || _localSessionResetPending.load(std::memory_order_acquire) ||
         GetForegroundWindow() != captured.foregroundWindow)
     {
+        // 这四个条件都会整队作废，但含义完全不同：前三项是焦点或键盘状态真的变了，最后一项是
+        // 传输在重连。重置标志挂在这里时作废队列，会让组字永远结束不了，反过来又让重置清不掉，
+        // 正是 #9519 的闭环。日志把命中的是哪一项分开记。
+        if (Global::TsfDiagnosticLogEnabled.load(std::memory_order_relaxed))
+        {
+            QueueTsfDiagnosticLog(L"[msime][deferred-clear] stage=classification-aborted owner_current=" +
+                                  BoolFlag(ownerCurrent) + L" enabled=" + BoolFlag(enabled) +
+                                  L" reset_pending=" +
+                                  BoolFlag(_localSessionResetPending.load(std::memory_order_acquire)) +
+                                  L" foreground_changed=" +
+                                  BoolFlag(GetForegroundWindow() != captured.foregroundWindow) +
+                                  L" composing=" + BoolFlag(_IsComposing()) + L" queued=" +
+                                  std::to_wstring(_deferredKeyDowns.size()));
+        }
         _ClearDeferredKeyDowns();
         return false;
     }
@@ -3246,10 +3287,7 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
         Global::ModifiersDown = Global::CharacterModifiers(capturedModifiers, wch, code);
 
         PerfTimer writeShmTimer;
-        // Enter is finalized by the in-process TSF path. Reuse the legacy
-        // pinyin payload to carry the exact bounded text that path is about
-        // to commit, allowing the Server session to validate and clear its
-        // matching raw composition instead of rejecting an unobserved commit.
+        // 回车由 TIP 本地提交，沿用拼音载荷向 Server 交付原文观测，让它核对并清理同一段组字。
         std::wstring localCommitObservation;
         const bool hasLocalCommitObservation =
             code == VK_RETURN && _IsComposing() && _pCompositionProcessorEngine;
@@ -3261,11 +3299,12 @@ CMetasequoiaIME::KeyDownDispatchResult CMetasequoiaIME::_DispatchKeyDown(
             {
                 localCommitObservation.append(raw.Get(), raw.GetLength());
             }
+            localCommitObservation = msime::tsf::ReadLocalCommitObservation(
+                _pCompositionProcessorEngine->GetHostEngineAdapter(), std::move(localCommitObservation),
+                FanyUtils::string_to_wstring);
             if (localCommitObservation.size() >= 128)
             {
-                // A truncated observation is worse than an explicit fail
-                // closed response: the Server must not acknowledge text that
-                // differs from what TSF committed.
+                // 不截断成另一段文字；超界时保留 Server 既有的拒绝路径。
                 localCommitObservation.clear();
             }
         }

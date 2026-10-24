@@ -1,5 +1,7 @@
 export type KeybindingPreferences = {
   switch_language_shift: boolean;
+  /** macOS 单按 Shift 仅在可编辑焦点生效，需辅助功能权限，缺省为关。 */
+  switch_language_shift_requires_editable?: boolean;
   switch_language_ctrl: boolean;
   switch_language_ctrl_space?: boolean;
   switch_language_ctrl_alt_space: boolean;

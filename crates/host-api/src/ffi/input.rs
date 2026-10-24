@@ -233,6 +233,7 @@ pub extern "C" fn msime_client_set_key_grid(handle: u64, grid: u8) -> *mut c_cha
                 }
                 2 => Some(KeyGrid::FourteenKey),
                 3 => Some(crate::nine_key_shuangpin_grid(&session.applied).0),
+                4 => Some(KeyGrid::EighteenKey),
                 _ => return Err("unknown key grid".into()),
             };
             session

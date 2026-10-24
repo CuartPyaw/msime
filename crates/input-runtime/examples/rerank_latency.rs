@@ -148,7 +148,9 @@ fn type_case(
     };
     for byte in keys {
         let action = match grid {
-            Some(KeyGrid::FourteenKey | KeyGrid::FourteenKeyShuangpin(_)) => Action::GridKey(byte),
+            Some(
+                KeyGrid::FourteenKey | KeyGrid::EighteenKey | KeyGrid::FourteenKeyShuangpin(_),
+            ) => Action::GridKey(byte),
             Some(KeyGrid::NineKey | KeyGrid::NineKeyShuangpin(_)) | None => Action::Character {
                 value: byte,
                 shift: false,

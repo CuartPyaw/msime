@@ -20,6 +20,7 @@ platforms/android/tests/device/candidate/AiCandidateSeatDeviceSmoke.java
 platforms/android/tests/device/keyboard/MoreToolsDeviceSmoke.java
 platforms/android/tests/device/keyboard/PagedTileGridGestureDeviceSmoke.java
 platforms/android/tests/device/keyboard/CopyDeviceInfoDeviceSmoke.java
+platforms/android/tests/device/keyboard/WorldClockDeviceSmoke.java
 platforms/android/tests/device/keyboard/EmojiPickerDeviceSmoke.java
 platforms/android/tests/device/keyboard/PairedPunctuationDeviceSmoke.java
 platforms/android/tests/device/keyboard/NineKeySidebarPairDeviceSmoke.java
@@ -173,6 +174,7 @@ platforms/android/tests/device/keyboard/HelpcodeImportDeviceSmoke.java
 platforms/android/tests/device/candidate/CandidateExpansionDeviceSmoke.java
 
 platforms/android/tests/device/voice/VoiceRecognitionLifecycleDeviceSmoke.java
+platforms/android/tests/device/voice/OfflineVoiceDeviceCases.java
 platforms/android/tests/device/voice/VoiceDiagnosticsPrivacyDeviceSmoke.java
 platforms/android/tests/device/voice/SyntheticSpeechService.java
 platforms/android/tests/device/voice/LegacySyntheticSpeechService.java
@@ -227,6 +229,7 @@ platforms/android/tests/device/candidate/CloudCandidateTransportDeviceSmoke.java
 platforms/android/tests/device/settings/ContactsDeviceSmoke.java
 
 platforms/android/tests/device/voice/VoiceAutoInsertDeviceCases.java
+platforms/android/tests/device/voice/OfflineVoiceCallerActivity.java
 platforms/android/tests/device/settings/AiSettingsDeviceChecks.java
 platforms/android/tests/device/settings/LocalVoiceReadinessChecks.java
 platforms/android/tests/device/keyboard/CompositionSearchEditorActivity.java
@@ -236,3 +239,9 @@ platforms/android/tests/device/keyboard/ToolbarHistoryDeviceChecks.java
 platforms/android/tests/device/keyboard/PortraitSplitDeviceChecks.java
 platforms/android/tests/device/keyboard/KeyboardFeedbackDeviceChecks.java
 platforms/android/tests/device/candidate/RelativeDateDeviceSmoke.java
+
+platforms/android/tests/device/clipboard/ClipboardCategoriesDeviceSmoke.java
+
+platforms/android/tests/device/keyboard/TrackpadEditorActivity.java
+platforms/android/tests/device/keyboard/TextTrackpadDeviceChecks.java
+

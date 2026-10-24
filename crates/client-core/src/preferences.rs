@@ -106,6 +106,25 @@ pub enum NumberKeypadOrder {
     Calculator,
 }
 
+/// 文本编辑面板可排序的侧边动作；方向、选择、文档边界与换行固定。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextEditButton {
+    Copy,
+    Paste,
+    SelectAll,
+    Cut,
+    Space,
+    NumberPad,
+    Delete,
+}
+
+/// 从左列上到下，再到右列前三格；换行固定在右下角。
+pub fn default_text_edit_button_order() -> Vec<TextEditButton> {
+    use TextEditButton::*;
+    vec![Copy, Paste, SelectAll, Cut, Space, NumberPad, Delete]
+}
+
 /// 触屏 26 键按「123」切到的数字层。桌面宿主原样保留、不使用。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -126,6 +145,47 @@ pub enum TouchSpellingPosition {
     Editor,
     /// 只画在候选栏上，不写进输入框。
     CandidateBar,
+}
+
+/// Android 文本编辑触控板的本机偏好；默认值、步长范围和恢复设置归共享层，不参与账号同步。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TextTrackpadPreferences {
+    pub enabled: bool,
+    pub hold_to_open: bool,
+    pub horizontal_dp: u16,
+    pub vertical_dp: u16,
+    pub tap_selection: bool,
+    pub haptics: bool,
+    pub trail: bool,
+    pub magnifier: bool,
+}
+
+impl Default for TextTrackpadPreferences {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            hold_to_open: false,
+            horizontal_dp: 12,
+            vertical_dp: 28,
+            tap_selection: true,
+            haptics: true,
+            trail: true,
+            magnifier: true,
+        }
+    }
+}
+
+impl TextTrackpadPreferences {
+    pub const HORIZONTAL_MIN_DP: u16 = 4;
+    pub const HORIZONTAL_MAX_DP: u16 = 48;
+    pub const VERTICAL_MIN_DP: u16 = 8;
+    pub const VERTICAL_MAX_DP: u16 = 96;
+
+    pub fn validate(&self) -> bool {
+        (Self::HORIZONTAL_MIN_DP..=Self::HORIZONTAL_MAX_DP).contains(&self.horizontal_dp)
+            && (Self::VERTICAL_MIN_DP..=Self::VERTICAL_MAX_DP).contains(&self.vertical_dp)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1214,6 +1274,9 @@ pub struct Preferences {
     /// 九宫格数字层按电话还是计算器排列；字母层不受影响。
     #[serde(default)]
     pub touch_number_keypad_order: NumberKeypadOrder,
+    /// Android 文本编辑面板七个侧边动作的完整排列；其他宿主保留但不使用。
+    #[serde(default = "default_text_edit_button_order")]
+    pub touch_text_edit_button_order: Vec<TextEditButton>,
     /// 26 键按「123」时出一行 1 到 0 的数字符号页，还是九宫格那样的 3×3 数字层。
     #[serde(default)]
     pub touch_twenty_six_key_number_layout: TwentySixKeyNumberLayout,
@@ -1226,6 +1289,9 @@ pub struct Preferences {
     /// 触屏键盘的拼写写进输入框还是只画在候选栏；缺这个键的旧文档读作输入框。
     #[serde(default)]
     pub touch_spelling_position: TouchSpellingPosition,
+    /// 仅 Android 使用，其他宿主原样保留。
+    #[serde(default)]
+    pub android_text_trackpad: TextTrackpadPreferences,
     /// 中文触屏键盘的快捷符号，单个字素、去重，最多十二项；宿主只负责显示与提交。
     #[serde(default = "default_touch_quick_symbols")]
     pub touch_quick_punctuation_symbols: Vec<String>,
@@ -2603,6 +2669,9 @@ impl Default for NavigationPreferences {
 pub struct KeybindingPreferences {
     #[serde(default = "enabled_by_default")]
     pub switch_language_shift: bool,
+    /// macOS 单按 Shift 只在可确认的可编辑焦点生效；依赖辅助功能权限，默认关闭。
+    #[serde(default)]
+    pub switch_language_shift_requires_editable: bool,
     #[serde(default)]
     pub switch_language_ctrl: bool,
     /// Linux 已默认处理这个组合键；关闭时交还应用，不改输入法框架的全局绑定。
@@ -2896,6 +2965,7 @@ impl Default for KeybindingPreferences {
     fn default() -> Self {
         Self {
             switch_language_shift: true,
+            switch_language_shift_requires_editable: false,
             switch_language_ctrl: false,
             switch_language_ctrl_space: true,
             switch_language_ctrl_alt_space: true,
@@ -3153,10 +3223,12 @@ impl Default for Preferences {
             touch_shuangpin_layout: TouchShuangpinLayout::default(),
             touch_keyboard_schemes: TouchKeyboardSchemePreferences::default(),
             touch_key_spacing_tenths: default_touch_key_spacing_tenths(),
+            android_text_trackpad: TextTrackpadPreferences::default(),
             touch_row_spacing_tenths: default_touch_row_spacing_tenths(),
             touch_keyboard_height_adjustment: 0,
             touch_voice_shortcut: false,
             touch_number_keypad_order: NumberKeypadOrder::default(),
+            touch_text_edit_button_order: default_text_edit_button_order(),
             touch_twenty_six_key_number_layout: TwentySixKeyNumberLayout::default(),
             touch_shuangpin_key_hints: false,
             touch_japanese_toggle_input: true,
@@ -3890,6 +3962,14 @@ impl Preferences {
     }
 
     pub fn validate(&self) -> Result<(), PreferencesError> {
+        let expected = default_text_edit_button_order();
+        if self.touch_text_edit_button_order.len() != expected.len()
+            || !expected
+                .iter()
+                .all(|button| self.touch_text_edit_button_order.contains(button))
+        {
+            return Err(PreferencesError::InvalidTextEditButtonOrder);
+        }
         for helpcode in [&self.quanpin_helpcode, &self.shuangpin_helpcode] {
             if !matches!(
                 helpcode.trigger_key.as_str(),
@@ -4006,6 +4086,9 @@ impl Preferences {
         }
         if !(1..=MAX_CANDIDATE_PAGE_SIZE).contains(&self.candidate_page_size) {
             return Err(PreferencesError::InvalidPageSize);
+        }
+        if !self.android_text_trackpad.validate() {
+            return Err(PreferencesError::InvalidTextTrackpad);
         }
         if !(30..=60).contains(&self.touch_key_spacing_tenths)
             || !(40..=100).contains(&self.touch_row_spacing_tenths)
@@ -4147,6 +4230,8 @@ impl PreferencesSnapshot {
 
 #[derive(Debug, thiserror::Error)]
 pub enum PreferencesError {
+    #[error("text edit button order must contain each of the seven side actions once")]
+    InvalidTextEditButtonOrder,
     #[error("辅助码触发键必须为空或 ; / \\ ` = 中的一个标点")]
     InvalidHelpcodeTriggerKey,
     #[error("五笔二三候选键必须是两个不同的单个 ASCII 标点")]
@@ -4169,6 +4254,8 @@ pub enum PreferencesError {
     InvalidPageSize,
     #[error("touch keyboard key spacing must be 3.0-6.0 and row spacing must be 4.0-10.0")]
     InvalidTouchKeyboardSpacing,
+    #[error("触控板水平步长须为 4–48 dp，垂直步长须为 8–96 dp")]
+    InvalidTextTrackpad,
     #[error("快捷符号必须是去重的单字素列表，最多十二项且不含空白或控制字符")]
     InvalidTouchQuickSymbols,
     #[error(

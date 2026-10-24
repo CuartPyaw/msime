@@ -121,6 +121,7 @@ public final class MSIMEInputService extends InputMethodService {
     ImeCandidates imeCandidates;
     ImeNineKeyPanel imeNineKeyPanel;
     ImeFunctionPanel imeFunctionPanel;
+    ImeWorldClock imeWorldClock;
     ImePanels imePanels;
     ImeLetterRows imeLetterRows;
     ImeGlideTyping imeGlideTyping;
@@ -192,6 +193,7 @@ public final class MSIMEInputService extends InputMethodService {
     ScrollView clipboardScroll;
     FrameLayout clipboardSurface;
     LinearLayout clipboardHeader;
+    Button clipboardBackToTop;
     LinearLayout clipboardPanel;
     ScrollView schemeScroll;
     LinearLayout schemePanel;
@@ -389,6 +391,8 @@ public final class MSIMEInputService extends InputMethodService {
     boolean clipboardPreviewExpanded;
     int clipboardPreviewKeyboardHeight;
     private int clipboardPreviewKeyboardTop;
+    boolean textTrackpadPreviewExpanded;
+    int editorPreviewKeyboardHeight;
     /** 上一次套上的浮动布局是不是跟随光标的候选栏：它和浮动键盘的外框宽度、拖动条不同，在两者之间切换也要重新套。 */
     private boolean caretLayoutApplied;
     /** 第一次浮动前窗口与系统 inputArea 原来的高度，停靠时原样恢复；{@link Integer#MIN_VALUE} 表示还没记下。 */
@@ -963,6 +967,7 @@ public final class MSIMEInputService extends InputMethodService {
             ? (preferences == null ? null : preferences.optJSONObject("touch_toolbar"))
             : rememberedToolbar;
         applyToolbarPreferences(preferences, toolbar);
+        if (imeTextEditPanel != null) imeTextEditPanel.applyPreferences(preferences, live);
         applyVoicePreferences(preferences);
         applyAiPreferences(preferences);
         applyClipboardPreference(preferences, source);
@@ -1557,6 +1562,8 @@ public final class MSIMEInputService extends InputMethodService {
         if (restarting && retainRestartedComposition(info, nextConnection)) {
             imeDebugOverlay.recordEvent(DiagnosticEventKind.IME_START);
             connection = nextConnection;
+            imeTextEditPanel.editorChanged(info == null ? -1 : info.initialSelStart,
+                info == null ? -1 : info.initialSelEnd);
             resetCaretAnchor();
             updateAutomaticCapitalization();
             render();
@@ -1575,6 +1582,8 @@ public final class MSIMEInputService extends InputMethodService {
         stop(false);
         inputFailureRecoveryAttempts = 0;
         connection = getCurrentInputConnection();
+        imeTextEditPanel.editorChanged(info == null ? -1 : info.initialSelStart,
+            info == null ? -1 : info.initialSelEnd);
         resetCaretAnchor();
         selectionEcho.reset(info == null ? -1 : info.initialSelStart,
             info == null ? -1 : info.initialSelEnd);
@@ -1684,6 +1693,7 @@ public final class MSIMEInputService extends InputMethodService {
         imeCandidates = new ImeCandidates(this);
         imeNineKeyPanel = new ImeNineKeyPanel(this);
         imeFunctionPanel = new ImeFunctionPanel(this);
+        imeWorldClock = new ImeWorldClock(this);
         imePanels = new ImePanels(this);
         imeLetterRows = new ImeLetterRows(this);
         imeGlideTyping = new ImeGlideTyping(this);
@@ -1950,6 +1960,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     @Override public void onDestroy() {
         operationNotice.cancel();
+        if (imeWorldClock != null) imeWorldClock.close();
         voiceActivityGeneration++;
         getContentResolver().unregisterContentObserver(inputMethodWatcher);
         if (inlineAutofill != null) inlineAutofill.finishInput();
@@ -1979,6 +1990,7 @@ public final class MSIMEInputService extends InputMethodService {
         imeVoiceEntry.shutdown();
         imeStylusHandwriting.shutdown();
         imeKeyFeedback.shutdown();
+        imeTextEditPanel.shutdown();
         imeLayoutRows.shutdown();
         imeDebugOverlay.shutdown();
         cloudClipboardWorker.shutdownNow();
@@ -2081,6 +2093,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     /** 停止并重启输入会话时保留已打开的功能菜单，避免隐私开关切换时闪退式收起再弹出。 */
     private void stop(boolean finish, boolean keepMoreTools) {
+        if (imeWorldClock != null) imeWorldClock.close();
         imeCompositionEditor.close();
         pendingEngineStartup = -1;
         pendingRuntimeBootstrap = null;
@@ -3030,6 +3043,7 @@ public final class MSIMEInputService extends InputMethodService {
         selectedScheme = nextSchemeConfiguration.selected();
         rememberChineseScheme();
         preferencesSnapshot = accepted;
+        imeTextEditPanel.applyPreferences(preferences);
         if (!clipboardHistoryEnabled && clipboardHistory != null) {
             clipboardHistory.clearQuietly();
             // The cloud half does not depend on this switch; only a panel left with nothing to show closes.
@@ -4686,6 +4700,10 @@ public final class MSIMEInputService extends InputMethodService {
         String face = entries.get(0).face();
         // 与句号键一样按墨迹居中放大画：全角「，」原样居中时只剩键底一个小点。
         CenteredGlyphSpan.apply(quickPunctuationButton, face, 1.3f);
+        if (quickPunctuationButton instanceof KeyHintButton hintButton) {
+            hintButton.setCornerHint(commaSecondaryPeriod()
+                ? ChineseSymbolFaces.face(".", sendsChinesePunctuation(), punctuationMarks()) : "");
+        }
         quickPunctuationButton.setContentDescription("常用标点：" + face
             + (commaSecondaryPeriod() ? "；长按输入句号" : "；长按选择常用标点"));
     }
@@ -5308,6 +5326,7 @@ public final class MSIMEInputService extends InputMethodService {
 
     @Override public void onUpdateSelection(int oldStart, int oldEnd, int newStart, int newEnd, int composingStart, int composingEnd) {
         super.onUpdateSelection(oldStart, oldEnd, newStart, newEnd, composingStart, composingEnd);
+        imeTextEditPanel.selectionChanged(newStart, newEnd);
         cancelPendingCompositionMarkerLoss();
         int scheme = InputViewValuePolicy.scheme(view, -1);
         // restartInput 前可能先丢失标记，旧连接也已不可读；给紧随的重启一小段接手机会。
@@ -5842,6 +5861,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     void closeClipboardHistory() {
+        imePanels.resetClipboardCategoryPicker();
         imePanels.dismissClipboardPreview();
         if (clipboardSurface != null) ViewPolicy.hide(clipboardSurface);
         // Cloud entries live only as long as the panel that fetched them, so a later field - possibly a password one - never starts with them in memory.
@@ -5868,6 +5888,7 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     void closeMoreTools() {
+        if (imeWorldClock != null) imeWorldClock.close();
         localInputToolsOpen = false;
         aiAssistChooserOpen = false;
         if (moreToolsScroll != null) ViewPolicy.hide(moreToolsScroll);
@@ -7524,6 +7545,13 @@ public final class MSIMEInputService extends InputMethodService {
         openHostPage(ClipboardHistoryPolicy.EDIT_PAGE, args);
     }
 
+    /** 从键盘进入原生分类设置页，避免回程补读已处理过的系统剪贴板。 */
+    void openClipboardCategories() {
+        forgetCurrentClip();
+        closeClipboardHistory();
+        openHostPage("CLIPBOARD_CATEGORIES");
+    }
+
     /**
      * 面板顶行的「搜索」（#5973）：打开应用里可搜索的剪贴板历史页，在那里输入查询、复制、编辑或删除。键盘里没有可输入的文本框，查询框放在应用里，和编辑（#5971）一样；页面读的是同一份共享存储。
      *
@@ -8991,7 +9019,8 @@ public final class MSIMEInputService extends InputMethodService {
         bindSymbolPanelHold(layerButton);
         symbolPanelButton = keyId(button(controls, "符", imePanels::showSymbolPanel), "SoftSymbol");
         symbolPanelButton.setContentDescription("打开符号面板");
-        quickPunctuationButton = keyId(button(controls, ",", this::insertQuickPunctuation), "Comma");
+        quickPunctuationButton = keyId(addRowButton(controls, new KeyHintButton(this), ",",
+            this::insertQuickPunctuation, true), "Comma");
         quickPunctuationButton.setOnLongClickListener(ignored -> {
             if (commaSecondaryPeriod()) {
                 imeKeyFeedback.playFeedback(quickPunctuationButton);
@@ -9074,6 +9103,14 @@ public final class MSIMEInputService extends InputMethodService {
         clipboardScrollParams.topMargin = pixels(32);
         clipboardSurface.addView(clipboardScroll, clipboardScrollParams);
         clipboardSurface.addView(clipboardHeader, LayoutPolicy.frameMatchWidthWrapParams());
+        clipboardBackToTop = imePanels.buildClipboardBackToTop();
+        FrameLayout.LayoutParams backToTopParams = new FrameLayout.LayoutParams(pixels(44), pixels(44),
+            Gravity.BOTTOM | Gravity.END);
+        backToTopParams.setMarginEnd(pixels(8));
+        backToTopParams.bottomMargin = pixels(8);
+        ViewPolicy.hide(clipboardBackToTop);
+        clipboardSurface.addView(clipboardBackToTop, backToTopParams);
+        clipboardScroll.setOnScrollChangeListener((view, x, y, oldX, oldY) -> imePanels.updateClipboardBackToTop());
         ViewPolicy.hide(clipboardSurface);
         keyboardSurface.addView(clipboardSurface, LayoutPolicy.frameMatchParentParams());
         schemePanel = LayoutPolicy.column(this);
@@ -9322,6 +9359,25 @@ public final class MSIMEInputService extends InputMethodService {
         render();
     }
 
+    /** 触控板模式保存后接回统一快照；密码等直通编辑器没有 Engine 会话，也能保存面板选择。 */
+    void acceptTextTrackpadPreferences(JSONObject snapshot) {
+        try {
+            long revision = PreferencesRevisionPolicy.read(snapshot.opt("revision"), -1);
+            long current = preferencesSnapshot == null ? -1
+                : PreferencesRevisionPolicy.read(preferencesSnapshot.opt("revision"), -1);
+            if (revision < 0 || revision < current) return;
+            if (session != 0) applyPreferencesSnapshot(snapshot);
+            else {
+                preferencesSnapshot = snapshot;
+                JSONObject preferences = snapshot.getJSONObject("preferences");
+                applyEditorPreferences(preferences);
+            }
+        } catch (JSONException | LinkageError error) {
+            notice("触控板设置已保存，重新打开键盘后生效");
+        }
+        render();
+    }
+
     /** 功能面板开关对偏好文档的一处修改。 */
     interface PreferenceEdit {
         void apply(JSONObject preferences) throws JSONException;
@@ -9457,7 +9513,11 @@ public final class MSIMEInputService extends InputMethodService {
         return android.os.Build.VERSION.SDK_INT == 28;
     }
 
-    /** 全文预览使用透明全高窗口；键区保留原高，应用仍只为停靠键盘让出空间。 */
+    /** 两种编辑预览各自持有透明父窗口，只有最后一个结束时才恢复停靠窗口。 */
+    boolean editorPreviewExpanded() {
+        return clipboardPreviewExpanded || textTrackpadPreviewExpanded;
+    }
+
     void setClipboardPreviewExpanded(boolean expanded) {
         if (clipboardPreviewExpanded == expanded) return;
         if (expanded) {
@@ -9465,7 +9525,23 @@ public final class MSIMEInputService extends InputMethodService {
             keyboardSurface.getLocationOnScreen(floatingLocation);
             clipboardPreviewKeyboardTop = floatingLocation[1];
         }
+        if (expanded) clipboardPreviewKeyboardHeight = keyboardSurface.getHeight();
+        boolean previous = editorPreviewExpanded();
         clipboardPreviewExpanded = expanded;
+        updateEditorPreviewWindow(previous);
+    }
+
+    void setTextTrackpadPreviewExpanded(boolean expanded) {
+        if (textTrackpadPreviewExpanded == expanded) return;
+        boolean previous = editorPreviewExpanded();
+        textTrackpadPreviewExpanded = expanded;
+        updateEditorPreviewWindow(previous);
+    }
+
+    private void updateEditorPreviewWindow(boolean previous) {
+        boolean expanded = editorPreviewExpanded();
+        if (expanded == previous) return;
+        if (expanded) editorPreviewKeyboardHeight = keyboardSurface.getHeight();
         applyFloatingLayout(true);
         imeStyler.applySkin();
     }
@@ -9479,7 +9555,7 @@ public final class MSIMEInputService extends InputMethodService {
     private void applyFloatingLayout(boolean force) {
         boolean caret = caretCandidatesDrawn();
         boolean floating = caret || floatingDrawn();
-        boolean fullWindow = stableDockedWindow() || floating || clipboardPreviewExpanded;
+        boolean fullWindow = stableDockedWindow() || floating || editorPreviewExpanded();
         if (!force && fullWindow == fullWindowLayoutApplied
                 && floating == overlayLayoutApplied && caret == caretLayoutApplied) return;
         fullWindowLayoutApplied = fullWindow;
@@ -9541,8 +9617,9 @@ public final class MSIMEInputService extends InputMethodService {
     @Override public void onComputeInsets(InputMethodService.Insets outInsets) {
         super.onComputeInsets(outInsets);
         // 浮动时 inputArea 铺满窗口，系统默认的算法会把整个窗口算成键盘、把应用压没，所以这里总要覆盖；面板还没布局时可触摸区域为空。
-        if ((!overlayDrawn() && !clipboardPreviewExpanded && !stableDockedWindow())
-                || keyboardSurface == null) return;
+        // 候选栏、剪贴板预览和文本编辑放大条共用同一块输入区；停靠键盘只在稳定布局后参与 inset 计算。
+        if ((!overlayDrawn() && !clipboardPreviewExpanded && !editorPreviewExpanded()
+                && !stableDockedWindow()) || keyboardSurface == null) return;
         android.app.Dialog dialog = getWindow();
         android.view.Window window = dialog == null ? null : dialog.getWindow();
         if (window == null) return;
@@ -9633,12 +9710,12 @@ public final class MSIMEInputService extends InputMethodService {
     }
 
     /**
-     * 按需向当前输入框要光标位置（{@link CaretCandidatePolicy}）：开关打开、走引擎的输入框、配置报告接着实体键盘或已在候选条模式时，要求持续报告（`CURSOR_UPDATE_MONITOR`）并立即报一次（`CURSOR_UPDATE_IMMEDIATE`）；不再需要时撤回，免得编辑器每挪一次光标都白算一遍。要在实体键盘第一次按下之前就要：那一下同时开始组字，到那时才要，位置一定来不及，这一次的候选栏就会退回底部。每次 render 开头调用，状态没变时什么也不做。
+     * 统一维护物理键盘候选栏与触控板放大镜的光标位置订阅。任一消费者需要时持续报告并立即报一次，只有两者都结束才撤回。物理键盘需在第一次按键前订阅，避免第一次组字因位置尚未到达而退回底部；每次 render 开头调用，状态没变时不重复请求。
      */
-    private void synchronizeCursorUpdates() {
+    void synchronizeCursorUpdates() {
         InputConnection current = connection;
-        boolean wanted = caretCandidates && current != null && EditorPolicy.useEngine(editorInputType)
-            && (hardwareKeyboardAttached || hardwareKeyboardMode);
+        boolean wanted = current != null && ((caretCandidates && EditorPolicy.useEngine(editorInputType)
+            && (hardwareKeyboardAttached || hardwareKeyboardMode)) || imeTextEditPanel.needsCursorUpdates());
         boolean requested = caretAnchorConnection != null && caretAnchorConnection == current;
         if (wanted == requested) return;
         if (requested) InputConnectionGuard.requestCursorUpdates(current, 0);
@@ -9656,6 +9733,7 @@ public final class MSIMEInputService extends InputMethodService {
      */
     @Override public void onUpdateCursorAnchorInfo(android.view.inputmethod.CursorAnchorInfo info) {
         super.onUpdateCursorAnchorInfo(info);
+        imeTextEditPanel.cursorAnchor(info);
         if (info == null || !caretAnchorsAvailable()) return;
         int composingStart = info.getComposingTextStart();
         android.graphics.RectF character = composingStart < 0 ? null : info.getCharacterBounds(composingStart);

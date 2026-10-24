@@ -3137,7 +3137,10 @@ fn fourteen_key_grid_crosses_the_host_boundary() {
     let handle = test_host(dir.path());
     read(msime_client_focus(handle, true));
     assert_eq!(read(msime_client_view(handle))["value"]["key_grid"], "none");
-    assert_eq!(read(msime_client_set_key_grid(handle, 4))["ok"], false);
+    assert_eq!(
+        read(msime_client_set_key_grid(handle, u8::MAX))["ok"],
+        false
+    );
     assert_eq!(read(msime_client_view(handle))["value"]["key_grid"], "none");
     let enabled = read(msime_client_set_key_grid(handle, 2));
     assert_eq!(enabled["value"]["key_grid"], "fourteen_key");
@@ -4741,6 +4744,25 @@ fn restoring_default_preferences_is_a_locked_compare_and_swap() {
     assert_eq!(
         read(unsafe { msime_client_restore_default_preferences(std::ptr::null(), 0, 0) })["ok"],
         false
+    );
+}
+
+#[test]
+fn text_trackpad_options_publish_the_shared_defaults_and_slider_ranges() {
+    let options = read(msime_client_text_trackpad_options());
+    assert_eq!(options["ok"], true);
+    assert_eq!(
+        options["value"]["horizontal_dp"],
+        json!({"minimum": 4, "maximum": 48})
+    );
+    assert_eq!(
+        options["value"]["vertical_dp"],
+        json!({"minimum": 8, "maximum": 96})
+    );
+    assert_eq!(
+        options["value"]["defaults"],
+        serde_json::to_value(msime_client_core::preferences::TextTrackpadPreferences::default())
+            .unwrap()
     );
 }
 
@@ -6570,6 +6592,70 @@ fn mobile_clipboard_uses_structured_actions() {
         read(unsafe { msime_client_mobile_clipboard_history(relative.as_ptr(), relative.len()) })
             ["ok"],
         false
+    );
+}
+
+#[test]
+fn mobile_clipboard_categories_validate_and_preserve_entry_metadata() {
+    let directory = tempfile::tempdir().unwrap();
+    let call = |action: Value| {
+        let request =
+            serde_json::to_vec(&json!({"directory": directory.path(), "action": action})).unwrap();
+        read(unsafe { msime_client_mobile_clipboard_history(request.as_ptr(), request.len()) })
+    };
+    let limits = call(json!({"operation": "categories"}));
+    assert_eq!(limits["value"]["maxCategories"], 5);
+    assert_eq!(limits["value"]["maxNameCharacters"], 12);
+    for name in ["", "未分类", "带\n换行", "超过十二个字的分类名称不允许保存"]
+    {
+        assert_eq!(
+            call(json!({"operation": "add_category", "name": name}))["ok"],
+            false
+        );
+    }
+    assert_eq!(
+        call(json!({"operation": "add_category", "name": "合成分类"}))["value"]["updated"],
+        true
+    );
+    assert_eq!(
+        call(json!({"operation": "add_category", "name": "合成分类"}))["ok"],
+        false
+    );
+    let category = call(json!({"operation": "categories"}))["value"]["categories"][0].clone();
+    let id = category["id"].as_str().unwrap();
+    call(json!({"operation": "capture", "text": "synthetic category entry"}));
+    assert_eq!(
+        call(json!({"operation": "set_category", "text": "synthetic category entry", "id": id}))
+            ["value"]["updated"],
+        true
+    );
+    assert_eq!(
+        call(json!({"operation": "rename_category", "id": id, "name": "改名"}))["value"]["updated"],
+        true
+    );
+    let snapshot = call(json!({"operation": "load"}));
+    assert_eq!(snapshot["value"]["categories"][0]["name"], "改名");
+    assert_eq!(snapshot["value"]["entries"][0]["categoryId"], id);
+    assert_eq!(
+        call(
+            json!({"operation": "set_category", "text": "synthetic category entry", "id": "absent"})
+        )["ok"],
+        false
+    );
+    assert_eq!(
+        call(json!({"operation": "remove_category", "id": id}))["value"]["updated"],
+        true
+    );
+    let snapshot = call(json!({"operation": "load"}));
+    assert_eq!(
+        snapshot["value"]["entries"][0]["text"],
+        "synthetic category entry"
+    );
+    assert!(snapshot["value"]["entries"][0].get("categoryId").is_none());
+    assert_eq!(
+        call(json!({"operation": "set_category", "text": "synthetic category entry"}))["value"]
+            ["updated"],
+        true
     );
 }
 
@@ -15793,6 +15879,71 @@ fn pronunciation_request_reads_the_table_beside_resources() {
 }
 
 #[test]
+fn pronunciation_request_falls_back_to_explicit_bundled_table() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("state/generation");
+    let supplementary = root.path().join("bundle/Contents/Resources");
+    std::fs::create_dir_all(&resources).unwrap();
+    let install = |directory: &std::path::Path, reading: &str| {
+        std::fs::create_dir_all(directory).unwrap();
+        let database = rusqlite::Connection::open(directory.join("en-phonetic.db")).unwrap();
+        database
+            .execute_batch(
+                "CREATE TABLE en_phonetics(word TEXT PRIMARY KEY, phonetic TEXT NOT NULL) WITHOUT ROWID;
+                 CREATE TABLE meta(key TEXT PRIMARY KEY, value TEXT NOT NULL) WITHOUT ROWID;
+                 INSERT INTO meta VALUES('kind', 'en_phonetic');
+                 PRAGMA user_version = 1;",
+            )
+            .unwrap();
+        database
+            .execute("INSERT INTO en_phonetics VALUES('sky', ?1)", [reading])
+            .unwrap();
+    };
+    install(&supplementary.join("pronunciations"), "skaɪ");
+    let call = |request: Value| {
+        let request = serde_json::to_vec(&request).unwrap();
+        let resources = resources.to_str().unwrap();
+        read(unsafe {
+            msime_client_pronunciation_request(
+                request.as_ptr(),
+                request.len(),
+                resources.as_ptr(),
+                resources.len(),
+            )
+        })
+    };
+    let base = json!({"generation": 9, "items": [{"text": "sky", "language": "en"}]});
+    assert_eq!(call(base.clone())["value"]["pronunciations"], json!([]));
+    let mut request = base.clone();
+    request["supplementary_resources"] = json!(supplementary);
+    let result = call(request.clone());
+    assert_eq!(
+        result["ok"], true,
+        "包内音标表必须能作为旧资源目录的显式回退：{result}"
+    );
+    assert_eq!(
+        result["value"],
+        json!({"generation": 9, "pronunciations": [
+            {"text": "sky", "language": "en", "pronunciation": "/skaɪ/"}
+        ]})
+    );
+    // 活动资源旁的表优先，显式补充目录不能覆盖它。
+    install(&root.path().join("state/pronunciations"), "skaɪ primary");
+    assert_eq!(
+        call(request.clone())["value"]["pronunciations"][0]["pronunciation"],
+        "/skaɪ primary/"
+    );
+    for invalid in [
+        "relative/resources".to_string(),
+        String::new(),
+        "/".repeat(4097),
+    ] {
+        request["supplementary_resources"] = json!(invalid);
+        assert_eq!(call(request.clone())["ok"], false);
+    }
+}
+
+#[test]
 fn english_glosses_fill_single_characters_from_the_character_table() {
     let root = tempfile::tempdir().unwrap();
     let resources = root.path().join("generation");
@@ -18092,6 +18243,7 @@ fn voice_capture_device_export_lists_wasapi_endpoints_on_windows_only() {
 }
 
 mod fuzzy_single;
+mod initial_learning;
 mod lifecycle_traces;
 #[cfg(any(
     target_os = "macos",
@@ -19462,5 +19614,46 @@ fn sentence_collocation_tuning_reaches_engine_options() {
             weak_collocation_penalty: -120.0,
             rear_penalty: -25.0,
         }
+    );
+}
+
+#[test]
+fn world_clock_validates_and_forwards_offline_requests() {
+    let directory = tempfile::tempdir().unwrap();
+    let call = |action| {
+        call_android_data(
+            msime_client_world_clock,
+            json!({"directory": directory.path(), "action": action}),
+        )
+    };
+    let catalog = call(json!({"operation": "catalog"}));
+    assert!(catalog["value"].as_array().unwrap().len() > 400);
+    assert_eq!(
+        call(json!({"operation": "add", "id": "Asia/Tokyo"}))["ok"],
+        true
+    );
+    assert_eq!(
+        call(json!({"operation": "load"}))["value"]["cities"],
+        json!(["Asia/Tokyo"])
+    );
+    assert_eq!(
+        call(json!({"operation": "add", "id": "invalid"}))["error"],
+        "world_clock_invalid"
+    );
+    let snapshot = call(
+        json!({"operation": "snapshot", "timestamp": 1792686283_i64, "system_zone": "UTC", "system_offset": 0, "cities": ["Asia/Tokyo"]}),
+    );
+    assert_eq!(snapshot["ok"], true);
+    assert_eq!(snapshot["value"][1]["offset"], "UTC+09:00");
+    assert_eq!(
+        call(json!({"operation": "load", "unexpected": true}))["error"],
+        "world_clock_invalid"
+    );
+    assert_eq!(
+        call_android_data(
+            msime_client_world_clock,
+            json!({"directory": "relative", "action": {"operation": "load"}})
+        )["ok"],
+        false
     );
 }
