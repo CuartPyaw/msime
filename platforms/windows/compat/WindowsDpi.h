@@ -14,6 +14,7 @@ struct DpiApi {
   using WindowContext = DPI_AWARENESS_CONTEXT(WINAPI *)(HWND);
   using Awareness = DPI_AWARENESS(WINAPI *)(DPI_AWARENESS_CONTEXT);
   using SystemAwareProcess = BOOL(WINAPI *)();
+  using PointTransform = BOOL(WINAPI *)(HWND, LPPOINT);
 
   WindowDpi query_window = nullptr;
   SystemDpi query_system = nullptr;
@@ -22,6 +23,13 @@ struct DpiApi {
   WindowContext query_context = nullptr;
   Awareness query_awareness = nullptr;
   SystemAwareProcess set_system_aware_process = ::SetProcessDPIAware;
+  PointTransform logical_to_physical = nullptr;
+  PointTransform old_logical_to_physical = ::LogicalToPhysicalPoint;
+
+  BOOL physical_point(HWND window, LPPOINT point) const {
+    // Win7 没有每屏 DPI 入口，使用其真实坐标转换；新接口失败时不再套一次旧转换。
+    return logical_to_physical ? logical_to_physical(window,point) : old_logical_to_physical(window,point);
+  }
 
   static UINT gdi_dpi(HWND window) {
     const HDC dc = GetDC(window);
@@ -102,6 +110,7 @@ inline const DpiApi &dpi_api() {
     loaded.set_process = user32_function<DpiApi::ProcessContext>("SetProcessDpiAwarenessContext");
     loaded.query_context = user32_function<DpiApi::WindowContext>("GetWindowDpiAwarenessContext");
     loaded.query_awareness = user32_function<DpiApi::Awareness>("GetAwarenessFromDpiAwarenessContext");
+    loaded.logical_to_physical = user32_function<DpiApi::PointTransform>("LogicalToPhysicalPointForPerMonitorDPI");
     return loaded;
   }();
   return api;
@@ -137,6 +146,7 @@ inline void initialize_windows7_process_dpi() {
 }
 
 inline UINT window_dpi(HWND window) { return dpi_api().window_dpi(window); }
+inline BOOL physical_point(HWND window, LPPOINT point) { return dpi_api().physical_point(window,point); }
 inline UINT system_dpi() { return dpi_api().system_dpi(); }
 inline DPI_AWARENESS_CONTEXT thread_context(DPI_AWARENESS_CONTEXT context) {
   return dpi_api().thread_context(context);

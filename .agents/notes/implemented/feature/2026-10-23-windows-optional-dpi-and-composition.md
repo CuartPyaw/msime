@@ -16,6 +16,8 @@ Server、候选窗和 `msimeui` 直接导入 `GetDpiForWindow`、`SetThreadDpiAw
 
 `DeviceResources` 动态装载系统目录内的 `dcomp.dll` 并解析 `DCompositionCreateDevice`，取消 `msimeui` 的静态链接依赖。合成器可用时仍调用原入口；不可用时由既有 `EnsureForComposition` 进入分层窗口绘制。系统材质的既有失败回退保持。
 
+实际 Win7 依赖装载检查发现 TSF 光标定位仍静态引用 `LogicalToPhysicalPointForPerMonitorDPI`。同一适配表补充点坐标转换：新入口存在时原样透传，旧系统调用真实 `LogicalToPhysicalPoint`，保留失败而不重复转换。导入拒绝表覆盖这两个每屏点转换入口，回归比较真实旧 API 的返回值和坐标，并核对新版失败不会调用旧函数。
+
 ### 边界与历史审计
 
 这是 [完整 Win7 支持](../../proposed/feature/2026-10-23-windows7-support.md) 的装载与 DPI 基础切片，不能据此宣称 Win7 产品已支持。设置应用、Rust 标准库与第三方依赖、共享面板和安装包仍需完成适配。没有修改产品默认值、TSF/Server 协议、设置入口或其他平台实现。
@@ -45,3 +47,5 @@ quick 的首轮编译通过，但两个契约检查超时；第二轮仅 Linux �
 ## Consequences
 
 旧系统能够到达已有的绘制回退，现代系统保持原生 DPI 与 DirectComposition 路径。代价是多一层缓存的函数指针转发，并需要同时验证缺失 API 和原生 API 分支。Win7 的系统 DPI 与现代每显示器 DPI 能力不同，旧系统上的缩放、屏幕坐标和跨进程光标定位必须继续实测，不能用 Windows 11 上的注入测试代替。
+
+完整产品的两架构 Release 构建与 DPI CTest 在 Windows 11 通过。Win7 依赖检查已越过 TSF 的每屏点转换导入，新增 UI Automation 生命周期测试也通过；豆包 WinHTTP WebSocket 的静态导入也由专用传输替换后，完整产品两架构的 Win7 模块导出和 DLL 装载检查均通过。MSVC 增量链接可能保留已删除的导入，遇到对象已无符号但 DLL 仍有旧导入时，只删除对应 DLL 与 `.ilk` 重链；正式产品使用 Release 链接。

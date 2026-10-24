@@ -7,6 +7,14 @@ namespace {
 int system_aware_calls = 0;
 DPI_AWARENESS_CONTEXT received_context = nullptr;
 HWND received_window = nullptr;
+LPPOINT received_point = nullptr;
+int old_point_calls = 0;
+BOOL WINAPI native_point(HWND window, LPPOINT point) {
+  received_window = window; received_point = point; SetLastError(ERROR_ACCESS_DENIED); return FALSE;
+}
+BOOL WINAPI old_point(HWND window, LPPOINT point) {
+  ++old_point_calls; received_window = window; received_point = point; point->x += 17; return TRUE;
+}
 
 UINT WINAPI native_window_dpi(HWND window) {
   received_window = window;
@@ -50,6 +58,15 @@ int main() {
                                       GetModuleHandleW(nullptr), nullptr);
   assert(window);
   DpiApi windows7;
+  POINT anchor{3,5};
+  windows7.old_logical_to_physical = old_point;
+  assert(windows7.physical_point(window,&anchor));
+  assert(old_point_calls == 1 && anchor.x == 20 && received_window == window && received_point == &anchor);
+  DpiApi actual_old;
+  POINT native_anchor{10,10}, compat_anchor = native_anchor;
+  const BOOL native_result = LogicalToPhysicalPoint(window,&native_anchor);
+  assert(actual_old.physical_point(window,&compat_anchor) == native_result);
+  assert(native_anchor.x == compat_anchor.x && native_anchor.y == compat_anchor.y);
   windows7.set_system_aware_process = system_aware_process;
   assert(windows7.window_dpi(nullptr) == 0);
   assert(windows7.window_context(nullptr) == nullptr);
@@ -84,6 +101,9 @@ int main() {
 
   // 新系统分支必须保留错误、零结果及上下文令牌；新 API 调用失败时不能再改一次进程状态。
   DpiApi modern;
+  modern.logical_to_physical = native_point; modern.old_logical_to_physical = old_point;
+  assert(!modern.physical_point(window,&anchor) && GetLastError() == ERROR_ACCESS_DENIED);
+  assert(received_window == window && received_point == &anchor && old_point_calls == 1);
   modern.query_window = native_window_dpi;
   modern.query_system = native_system_dpi;
   modern.set_thread = native_thread_context;
