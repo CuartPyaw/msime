@@ -36,7 +36,7 @@ Status: implemented
 - Windows 无系统依赖的语音热键策略测试通过，覆盖自定义修饰键精确匹配、物理键映射与按下／重复／松键锁存。Windows 上同源原生 WinUI 设置页与 Server 均编译链接通过，原生 `windows-voice-hotkey-policy` CTest 通过。独立合成状态的 WinUI 录键专项接入 CI，覆盖保存、取消、固定键冲突、切页恢复和解绑；本机 SSH 会话启动 XAML 失败，已登录会话能开窗口但不能取得前台焦点，断言在发送快捷键前终止，不能计作界面通过。真实全局键盘钩子和编辑器入口仍待验收。
 - Linux 完整原生门禁终态通过：111 项中 110 项通过、1 项需求激活测试跳过，五笔版无测试构建、full/wubi 安装路径互斥与辅助码暂存检查通过。这轮早于最终 IBus 合成键锁存修正。随后用最终产品源码增量重建，两个新增资源专项 `ibus-custom-voice-hotkey` 和 `fcitx5-custom-voice-hotkey` 实际通过：前者走独立 D-Bus，后者走真实 Fcitx 输入上下文，均覆盖开始／结束、修饰键精确匹配、自动重复、先松修饰键与合成结果上屏；Fcitx 额外覆盖非美式布局的物理 Q。完整 IBus smoke 仍在到达语音场景前因 `Focus did not show the input mode` 失败，未做修复前对照，不能认定与本次无关。专项保留完整入口并纳入各自容器验收脚本。
 - macOS 上相关库与两个集成测试目标的严格 Clippy 通过。Windows 严格 Clippy 先后受已有 `host-windows::read_clipboard_text`、`host-api::windows_clipboard_text` 的 `Result<_, ()>` lint 阻塞，未放宽规则。
-- Windows quick 已实际执行并失败：基线的两处 `MixedInput` 字段缺失和一次移动后使用由独立 PR #9531 修复；另有缺少固定参考提交、发布夹具和三个旧 C++ 测试告警。该轮仅覆盖初始共享与 macOS 快照，后加 Linux／Windows 接入不能借用该结果。
+- Windows quick 的初始快照与最终产品源码两轮均已终态失败：基线的两处 `MixedInput` 字段缺失和一次移动后使用由独立 PR #9531 修复、尚未合入；另有缺少固定参考提交、发布夹具和三个旧 C++ 测试告警。最终轮使用明确的 Python 3 路径，未放宽检查；不能把各平台定向构建与专项通过写成完整 quick 通过。
 
 ## Consequences
 
