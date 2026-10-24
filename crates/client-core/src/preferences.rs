@@ -87,6 +87,7 @@ pub enum TouchShuangpinLayout {
     #[default]
     TwentySixKey,
     FourteenKey,
+    EighteenKey,
 }
 
 impl TouchShuangpinLayout {

@@ -20,10 +20,13 @@ public final class KeyboardLayout {
     public static final int ZHUYIN_NINE_KEY_LAYOUT = 7;
     /** 全拼 14 键：{@link FourteenKeyLayout} 的三行两字母键，点按经 `gridKey` 送这一组的首字母；123 层、底行和 26 键相同。 */
     public static final int FOURTEEN_KEY_LAYOUT = 8;
+    /** 双拼 18 键的 7＋6＋5 字母组；使用共享网格消歧。 */
+    public static final int EIGHTEEN_KEY_LAYOUT = 9;
 
     /** 画着的是引擎组码网格的键面（拼音九键或 14 键）：读音取 `nine_key_reading`（九键写进输入框，14 键画在读音行上），展开候选是三栏面板。 */
     public static boolean drawsKeyGrid(int layout) {
-        return layout == QUANPIN_NINE_KEY_LAYOUT || layout == FOURTEEN_KEY_LAYOUT;
+        return layout == QUANPIN_NINE_KEY_LAYOUT || layout == FOURTEEN_KEY_LAYOUT
+            || layout == EIGHTEEN_KEY_LAYOUT;
     }
 
     private static final List<List<String>> LETTER_ROWS = List.of(
@@ -49,7 +52,7 @@ public final class KeyboardLayout {
         if (layer != Layer.SYMBOLS) return false;
         if (layout == QUANPIN_NINE_KEY_LAYOUT) return true;
         return chinese && !localMode && (layout == STANDARD_TOUCH_LAYOUT
-            || layout == FOURTEEN_KEY_LAYOUT || layout == HANDWRITING_LAYOUT
+            || layout == FOURTEEN_KEY_LAYOUT || layout == EIGHTEEN_KEY_LAYOUT || layout == HANDWRITING_LAYOUT
             || layout == STROKE_LAYOUT || layout == ZHUYIN_NINE_KEY_LAYOUT);
     }
 
@@ -101,6 +104,12 @@ public final class KeyboardLayout {
      */
     public static int resolveTouchLayout(boolean handwriting, boolean nineKey, boolean fourteenKey,
                                          int scheme, String touchLayout) {
+        return resolveTouchLayout(handwriting, nineKey, fourteenKey, false, scheme, touchLayout);
+    }
+
+    /** 按引擎实际打开的字母网格选择键面；直输和本地模式由调用方关闭网格标志。 */
+    public static int resolveTouchLayout(boolean handwriting, boolean nineKey, boolean fourteenKey,
+                                         boolean eighteenKey, int scheme, String touchLayout) {
         // Korean has only the 26-key Dubeolsik keyboard, whatever layout the document carries.
         if (scheme == KoreanInputPolicy.KOREAN_SCHEME) return KOREAN_LAYOUT;
         // Zhuyin draws the nine-key bopomofo grid when the document stores the nine-key layout, the Dachen rows otherwise; it has no handwriting surface. The stored layout decides, as for Japanese, rather than the view's nine_key flag.
@@ -111,6 +120,7 @@ public final class KeyboardLayout {
         if (scheme == InputSchemeTraits.STROKE) return STROKE_LAYOUT;
         if (scheme == 3 && "nine_key".equals(touchLayout)) return JAPANESE_NINE_KEY_LAYOUT;
         if (fourteenKey) return FOURTEEN_KEY_LAYOUT;
+        if (eighteenKey && scheme == InputSchemeTraits.SHUANGPIN) return EIGHTEEN_KEY_LAYOUT;
         if (nineKey) return QUANPIN_NINE_KEY_LAYOUT;
         return STANDARD_TOUCH_LAYOUT;
     }

@@ -148,6 +148,25 @@ export const KEY_IDS: readonly string[] = [
   "FourteenCV",
   "FourteenBN",
   "FourteenM",
+  // 保留 Android 双拼 18 键的共享统计，当前宿主不显示该布局。
+  "EighteenQ",
+  "EighteenWE",
+  "EighteenRT",
+  "EighteenY",
+  "EighteenU",
+  "EighteenIO",
+  "EighteenP",
+  "EighteenA",
+  "EighteenSD",
+  "EighteenFG",
+  "EighteenH",
+  "EighteenJK",
+  "EighteenL",
+  "EighteenZ",
+  "EighteenXC",
+  "EighteenV",
+  "EighteenBN",
+  "EighteenM",
 ];
 
 const KNOWN: Set<string> = new Set<string>(KEY_IDS);

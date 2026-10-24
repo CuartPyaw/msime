@@ -537,6 +537,25 @@ pub const KEY_IDS: &[&str] = &[
     "FourteenCV",
     "FourteenBN",
     "FourteenM",
+    // Android 双拼 18 键的各键，其他宿主保留共享统计中的这些键位。
+    "EighteenQ",
+    "EighteenWE",
+    "EighteenRT",
+    "EighteenY",
+    "EighteenU",
+    "EighteenIO",
+    "EighteenP",
+    "EighteenA",
+    "EighteenSD",
+    "EighteenFG",
+    "EighteenH",
+    "EighteenJK",
+    "EighteenL",
+    "EighteenZ",
+    "EighteenXC",
+    "EighteenV",
+    "EighteenBN",
+    "EighteenM",
 ];
 
 /// Whether `id` is one of [`KEY_IDS`].

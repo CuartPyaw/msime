@@ -1523,7 +1523,8 @@ final class ImeLayoutRows {
             else ViewPolicy.show(nineKeyPunctuation);
         }
         s.nineKeySpellingScroll.setContentDescription(zhuyin ? "注音读音选择"
-            : fourteenKey ? "14 键拼音选择" : "九键拼音选择");
+            : fourteenKey ? "14 键拼音选择"
+            : layout == KeyboardLayout.EIGHTEEN_KEY_LAYOUT ? "18 键拼音选择" : "九键拼音选择");
         if (!visible) {
             s.nineKeySpellingIndices = java.util.List.of();
             s.nineKeySpellingGeneration = -1;
