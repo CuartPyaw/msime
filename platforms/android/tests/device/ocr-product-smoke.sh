@@ -74,6 +74,11 @@ prepared=$("$adb" -s "$serial" shell am instrument "${instrument_options[@]}" -w
 printf '%s\n' "$prepared" | tee target/android/ocr-product-handwriting-model.log
 "$adb" -s "$serial" shell svc wifi disable
 "$adb" -s "$serial" shell svc data disable
+picker=$("$adb" -s "$serial" shell am instrument "${instrument_options[@]}" -w -e ocr-picker-import true \
+  app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke)
+printf '%s\n' "$picker" | tee target/android/ocr-product-picker-import.log
+picker_status=0
+[[ "$picker" == *MSIME_DEVICE_SMOKE_PASSED* && "$picker" != *MSIME_DEVICE_SMOKE_FAILED* ]] || picker_status=1
 result=$("$adb" -s "$serial" shell am instrument "${instrument_options[@]}" -w app.msime.android.test/app.msime.android.test.OcrProductDeviceSmoke)
 printf '%s\n' "$result" | tee target/android/ocr-product-smoke.log
 product_status=0
@@ -107,15 +112,16 @@ fi
 "$adb" -s "$serial" shell svc wifi enable
 "$adb" -s "$serial" shell svc data enable
 for frame in captured preview result editor selection hidden resumed switched permission failure \
-  failure-handwriting-model failure-handwriting-coexistence; do
+  failure-handwriting-model failure-handwriting-coexistence failure-picker-import \
+  picker-documents picker-rejected picker-imported picker-preserved; do
   "$adb" -s "$serial" pull "/sdcard/Android/data/app.msime.android/files/ocr-product-$frame.png" \
     "target/android/ocr-product-$frame.png" >/dev/null 2>&1 || true
 done
-printf 'core=%s baseline=%s coexistence=%s\n' "$core_status" "$baseline_status" "$coexistence_status" \
+printf 'core=%s baseline=%s coexistence=%s picker=%s\n' "$core_status" "$baseline_status" "$coexistence_status" "$picker_status" \
   > target/android/ocr-product-baseline-status.txt
 if [[ "$api" == 35 ]]; then
   bash platforms/android/tests/device/smoke.sh "$serial" || baseline_status=$?
 fi
-printf 'core=%s baseline=%s coexistence=%s\n' "$core_status" "$baseline_status" "$coexistence_status" \
+printf 'core=%s baseline=%s coexistence=%s picker=%s\n' "$core_status" "$baseline_status" "$coexistence_status" "$picker_status" \
   | tee target/android/ocr-product-baseline-status.txt
-[[ "$core_status" == 0 && "$baseline_status" == 0 && "$product_status" == 0 && "$coexistence_status" == 0 ]]
+[[ "$core_status" == 0 && "$baseline_status" == 0 && "$product_status" == 0 && "$coexistence_status" == 0 && "$picker_status" == 0 ]]

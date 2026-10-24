@@ -109,6 +109,12 @@
             android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
             <intent-filter><action android:name="android.content.action.DOCUMENTS_PROVIDER" /></intent-filter>
         </provider>
+        <!-- OCR 专项资产只通过系统文档选择器授予产品读取权限。 -->
+        <provider android:name="app.msime.android.test.OcrDocumentsProvider"
+            android:authorities="app.msime.android.test.ocr-documents" android:exported="true"
+            android:grantUriPermissions="true" android:permission="android.permission.MANAGE_DOCUMENTS">
+            <intent-filter><action android:name="android.content.action.DOCUMENTS_PROVIDER" /></intent-filter>
+        </provider>
         <!-- 合成服务只发回调，不录音；专用模拟器测试结束后恢复系统的默认识别服务。 -->
         <service android:name="app.msime.android.test.LegacySyntheticSpeechService" android:enabled="false" android:exported="true" android:permission="android.permission.RECORD_AUDIO">
             <intent-filter><action android:name="android.speech.RecognitionService" /></intent-filter>
