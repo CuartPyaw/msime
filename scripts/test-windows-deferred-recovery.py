@@ -22,6 +22,7 @@ HARNESS = r'''
 #include <string>
 #include "InputSchemeTraits.h"
 #include "WubiCommitOwner.h"
+#include "GroupedPanelKeyLease.h"
 namespace Global {
 std::atomic<int> InputModeScheme{msime::windows::scheme::Quanpin};
 std::atomic_bool TsfDiagnosticLogEnabled{false};
@@ -97,6 +98,9 @@ template<typename... Args> void DebugTsfIssue47(Args...) {}
 struct CMetasequoiaIME {
     std::atomic<bool> _localSessionResetPending{false};
     msime::tsf::WubiCommitOwner _wubiCommitOwner;
+    msime::panel_key::Leases _groupedPanelLeases;
+    bool groupedComposition = false;
+    bool _HasGroupedPanelComposition() const { return groupedComposition; }
     Engine *_pCompositionProcessorEngine = nullptr;
     std::deque<DeferredKeyDown> _deferredAppliedPrefix;
     std::uint64_t _deferredKeyFocusGeneration = 7;
@@ -334,6 +338,40 @@ int main() {
         check(!ime._wubiCommitOwner.active() && !ime._hasDeferredKeyInFlight &&
               ime._deferredKeyReplayToken == 0 && context.refs == 1,
               "successful Wubi finish clears the owner before actual FIFO completion");
+    }
+    // 执行真实恢复方法，验证多义组码不会变成确定字母检查点或重连重放。
+    for (const bool sourceGrouped : {false, true}) {
+        engine.current = {L"old", 3};
+        check(ime._RefreshDeferredRecoveryPrefix(&context), "exact checkpoint created before grouped input");
+        ime.groupedComposition = true;
+        engine.current = {L"bihai", 5};
+        check(ime._RefreshDeferredRecoveryPrefix(&context) && keys.empty() && context.refs == 1,
+              "grouped composition cannot create a raw-letter checkpoint");
+        DeferredKeyDown key;
+        key.context = &context;
+        key.focusGeneration = ime._deferredKeyFocusGeneration;
+        key.keyState.groupedPanelKey = sourceGrouped;
+        context.AddRef(); ime._deferredKeyInFlight = key;
+        context.AddRef(); ime._deferredKeyDowns.push_back(key);
+        ime._hasDeferredKeyInFlight = true;
+        ime._deferredKeyReplayToken = 51;
+        // 首个组码尚未作用于会话时，也必须按已捕获来源清掉，而非重试。
+        ime.groupedComposition = !sourceGrouped;
+        const auto dirty = ime.dirtyNotifications;
+        const auto generation = ime._deferredKeyFocusGeneration;
+        ime._RetryDeferredKeyReplay(50);
+        check(ime._hasDeferredKeyInFlight && context.refs == 3, "stale grouped retry keeps current ownership");
+        ime._RetryDeferredKeyReplay(51);
+        check(!ime._hasDeferredKeyInFlight && ime._deferredKeyDowns.empty() && keys.empty() &&
+              context.refs == 1 && ime.dirtyNotifications == dirty + 1 &&
+              ime._deferredKeyFocusGeneration != generation,
+              "grouped retry discards its batch and invalidates the session without replay");
+        ime.groupedComposition = true;
+        context.AddRef(); ime._deferredKeyDowns.push_back(key);
+        ime._ArmDeferredRecoveryForTransport(&context);
+        check(ime._deferredKeyDowns.empty() && keys.empty() && context.refs == 1,
+              "transport reset cannot materialize grouped composition as ordinary keys");
+        ime.groupedComposition = false;
     }
     std::printf("deferred recovery checkpoint: %d failures\n", failures);
     return failures ? 1 : 0;

@@ -21,6 +21,7 @@ def section(source, begin, end):
 
 unit = r'''
 #include "platforms/windows/tsf/WubiCommitOwner.h"
+#include "platforms/windows/common/GroupedPanelKeyLease.h"
 #include <atomic>
 #include <deque>
 #include <map>
@@ -89,6 +90,7 @@ struct CMetasequoiaIME {
         struct { int Category=0,Function=0; } keyState; };
     std::atomic<bool> _localSessionResetPending{false};
     msime::tsf::WubiCommitOwner _wubiCommitOwner;
+    msime::panel_key::Leases _groupedPanelLeases;
     std::deque<DeferredKeyDown> _deferredKeyDowns, _deferredAppliedPrefix;
     DeferredKeyDown _deferredKeyInFlight;
     bool _hasDeferredKeyInFlight=false;

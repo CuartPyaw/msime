@@ -20,6 +20,7 @@ HARNESS = r'''
 #include <string>
 #include "InputSchemeTraits.h"
 #include "WubiCommitOwner.h"
+#include "GroupedPanelKeyLease.h"
 namespace Global {
 std::atomic<int> InputModeScheme{msime::windows::scheme::Quanpin};
 bool g_connected = true;
@@ -183,6 +184,7 @@ struct CMetasequoiaIME {
     std::deque<DeferredKeyDown> _deferredAppliedPrefix;
     std::uint64_t _deferredKeyFocusGeneration = 7;
     bool _RefreshDeferredRecoveryPrefix(ITfContext *);
+    bool _HasGroupedPanelComposition() const { return false; }
     std::deque<DeferredKeyDown> _deferredKeyDowns;
     DeferredKeyDown _deferredKeyInFlight;
     bool _hasDeferredKeyInFlight = false;

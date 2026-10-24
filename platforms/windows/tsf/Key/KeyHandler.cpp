@@ -1084,7 +1084,7 @@ HRESULT CMetasequoiaIME::_HandleCancelVoiceComposition(TfEditCookie ec, _In_ ITf
 //----------------------------------------------------------------------------
 
 HRESULT CMetasequoiaIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContext *pContext, WCHAR wch,
-                                                 uint64_t requestId)
+                                                 uint64_t requestId, bool groupedPanelKey)
 {
     HRESULT workerResult = S_OK;
     ITfRange *pRangeComposition = nullptr;
@@ -1111,6 +1111,10 @@ HRESULT CMetasequoiaIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContex
     {
         _HandleCompositionFinalize(ec, pContext, FALSE);
     }
+
+    if (groupedPanelKey && (!SupportsGroupedPanelKeys() || _serverUnavailableFallbackActive ||
+        !pCompositionProcessorEngine->GetHostEngineAdapter() ||
+        !pCompositionProcessorEngine->GetHostEngineAdapter()->valid())) return E_FAIL;
 
     // A composition this key did not start may be showing a syllable the host has since let go of (see the Korean check below).
     const bool composingBeforeKey = _IsComposing() != FALSE;
@@ -1171,10 +1175,10 @@ HRESULT CMetasequoiaIME::_HandleCompositionInput(TfEditCookie ec, _In_ ITfContex
                 current.view.editing_text.empty())
                 _HandleCompleteCommitFirst(ec, pContext);
         }
-        const bool shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        const bool shift = !groupedPanelKey && (GetKeyState(VK_SHIFT) & 0x8000) != 0;
         if (wch > 0x7f)
             workerResult = S_FALSE;
-        else if (!host->character(static_cast<uint8_t>(wch), shift, &raw, &error) ||
+        else if (!host->panel_character(static_cast<uint8_t>(wch), shift, groupedPanelKey, &raw, &error) ||
                  !msime::tsf::EngineSessionAdapter::parse_result(raw, &result, &error))
             workerResult = E_FAIL;
         else
