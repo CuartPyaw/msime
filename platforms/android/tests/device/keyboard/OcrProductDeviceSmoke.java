@@ -128,16 +128,22 @@ public final class OcrProductDeviceSmoke extends DeviceSmoke {
     }
 
     private void pickModule(String id) throws Exception {
+        String operation = stage;
+        stage = operation + " / open picker";
         openPicker();
+        stage = operation + " / show document roots";
         tap(node -> pickerNode(node) && node.getContentDescription() != null
             && (node.getContentDescription().toString().equalsIgnoreCase("Show roots")
                 || node.getContentDescription().toString().contains("根目录")
                 || node.getContentDescription().toString().contains("导航")));
+        stage = operation + " / choose synthetic provider";
         tap(node -> pickerNode(node) && equalsText("MSIME OCR 测试模块", node.getText())
             && "android:id/title".equals(node.getViewIdResourceName()));
+        stage = operation + " / choose synthetic document";
         awaitAny(node -> pickerNode(node) && equalsText("msime-synthetic-ocr-" + id + ".apk", node.getText()));
         screenshot("picker-documents");
         tap(node -> pickerNode(node) && equalsText("msime-synthetic-ocr-" + id + ".apk", node.getText()));
+        stage = operation;
     }
 
     private boolean pickerNode(AccessibilityNodeInfo node) {
@@ -215,7 +221,7 @@ public final class OcrProductDeviceSmoke extends DeviceSmoke {
         handwritingClient();
     }
 
-    /** ART 会在模块旁生成 oat；仅清理固定合成模块及其 x86_64 缓存，不跟随符号链接。 */
+    /** ART 还会生成性能采样和锁；只清理固定合成模块的已知条目，不跟随符号链接。 */
     private void clearSyntheticModule(File path, String relative) throws Exception {
         int mode = Os.lstat(path.getAbsolutePath()).st_mode;
         if (relative.isEmpty() || relative.equals("oat") || relative.equals("oat/x86_64")) {
@@ -226,9 +232,14 @@ public final class OcrProductDeviceSmoke extends DeviceSmoke {
                 clearSyntheticModule(entry, relative.isEmpty() ? entry.getName() : relative + "/" + entry.getName());
         } else {
             check(relative.equals("msime-ocr-v1.apk") || relative.equals("msime-model.json")
+                || relative.equals("msime-ocr-v1.apk.x86_64.flock")
+                || relative.equals("oat/msime-ocr-v1.apk.cur.prof")
+                || relative.equals("oat/msime-ocr-v1.apk.prof")
                 || relative.equals("oat/x86_64/msime-ocr-v1.odex")
                 || relative.equals("oat/x86_64/msime-ocr-v1.vdex")
-                || relative.equals("oat/x86_64/msime-ocr-v1.art"), "only known synthetic module files can be removed");
+                || relative.equals("oat/x86_64/msime-ocr-v1.art"), "only known synthetic module files can be removed: "
+                    + (relative.matches("(?:oat/|oat/x86_64/)?msime-ocr-v1[.a-z0-9_-]{0,80}")
+                        ? relative : "unrecognized path"));
             check(OsConstants.S_ISREG(mode), "synthetic module cache is a regular file");
         }
         check(path.delete(), "remove prior synthetic module entry");
