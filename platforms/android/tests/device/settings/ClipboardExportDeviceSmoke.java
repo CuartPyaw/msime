@@ -163,9 +163,13 @@ public final class ClipboardExportDeviceSmoke extends Instrumentation {
         seed();
         activity = startActivitySync(new Intent().setClassName("app.msime.android", "app.msime.android.home.HomeActivity")
             .putExtra("msime_open_page", "CLIPBOARD_SEARCH").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_CLEAR_TOP));
+        stage = "history page prompt interrupted by leaving: prompt before leaving";
         DeviceCredentialFixture.awaitPrompt(automation);
+        stage = "history page prompt interrupted by leaving: leave and return";
         leaveAndReturn();
+        stage = "history page prompt interrupted by leaving: prompt after return";
         DeviceCredentialFixture.enter(automation);
+        stage = "history page prompt interrupted by leaving: records";
         await(text("合成新记录"));
         SystemClock.sleep(1000);
         check(!DeviceCredentialFixture.promptVisible(automation), "history page prompted again after authentication");
@@ -173,9 +177,13 @@ public final class ClipboardExportDeviceSmoke extends Instrumentation {
         // 已授权时导出认证被离开打断：Android 10 起导出认证被系统取消，回来按重新进入处理，先认证页面、不导出；Android 9 回到仍在进行的凭据确认，认证后照常导出。
         int beforeInterrupted = files().size();
         tap(node -> "导出全部剪贴板历史".equals(node.getContentDescription() == null ? null : node.getContentDescription().toString()));
+        stage = "history page export prompt interrupted by leaving: prompt before leaving";
         DeviceCredentialFixture.awaitPrompt(automation);
+        stage = "history page export prompt interrupted by leaving: leave and return";
         leaveAndReturn();
+        stage = "history page export prompt interrupted by leaving: prompt after return";
         DeviceCredentialFixture.enter(automation);
+        stage = "history page export prompt interrupted by leaving: outcome";
         if (Build.VERSION.SDK_INT < 29) {
             waitFor(() -> filesUnchecked().size() == beforeInterrupted + 1, "credential confirmation survives leaving");
         } else {
