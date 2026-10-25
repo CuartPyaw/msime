@@ -172,6 +172,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         View view = getView();
         if (view != null) view.getViewTreeObserver().removeOnWindowFocusChangeListener(focusWatch);
         homeRows.clear();
+        pendingChoices = null;
         super.onDestroyView();
     }
 
@@ -179,7 +180,7 @@ public final class KeyboardFragment extends HomeTabFragment {
     // the user is in the keyboard rather than in here.
     // Notices are fetched when the app home comes on screen; the shared store caches the feed for a minute.
     @Override protected void onBecameVisible() {
-        OnboardingChoices.sync(requireContext(), null);
+        OnboardingChoices.sync(requireContext(), result -> { if (getView() != null) reload(); });
         reload();
         View view = getView();
         if (view != null) NoticeBanner.load(this, view.findViewById(R.id.keyboard_notices));
@@ -355,10 +356,10 @@ public final class KeyboardFragment extends HomeTabFragment {
             pendingChoices.setText("引导中的选择尚未保存，点此重试");
             ViewPolicy.setVisible(pendingChoices, pending);
         }
-        boolean enabled = ImeSetup.enabled(requireContext());
-        boolean current = enabled && ImeSetup.isDefault(requireContext());
+        Boolean enabled = ImeSetup.enabledState(requireContext());
+        Boolean current = ImeSetup.currentState(requireContext());
         String state = !loaded ? "检查中…" : !prepared ? "需要准备运行资源"
-            : snapshot == null ? "无法读取偏好设置" : OnboardingChoices.hasPending(requireContext()) ? "引导选择尚未保存" : getString(current
+            : snapshot == null ? "无法读取偏好设置" : OnboardingChoices.hasPending(requireContext()) ? "引导选择尚未保存" : enabled == null || current == null ? "请在系统设置中确认输入法状态" : getString(Boolean.TRUE.equals(current)
             ? R.string.settings_status_ready : R.string.settings_status_incomplete);
         ((TextView) view.findViewById(R.id.keyboard_status_title)).setText(state);
         TextView scheme = view.findViewById(R.id.keyboard_status_line);
@@ -373,15 +374,15 @@ public final class KeyboardFragment extends HomeTabFragment {
     }
 
     private void check(View view, int rowId, int markId, int actionId, @StringRes int label,
-            boolean done, Runnable action) {
+            Boolean done, Runnable action) {
         TextView mark = view.findViewById(markId);
         StatusMarkPolicy.apply(mark, requireContext(), done);
         TextView button = view.findViewById(actionId);
-        ViewPolicy.setVisible(button, !done);
-        ViewPolicy.bindOptionalClick(button, done ? null : action);
+        ViewPolicy.setVisible(button, !Boolean.TRUE.equals(done));
+        ViewPolicy.bindOptionalClick(button, Boolean.TRUE.equals(done) ? null : action);
         ViewPolicy.setTextColor(button, ColorStateList.valueOf(ThemeColorPolicy.accent(requireContext())));
         view.findViewById(rowId).setContentDescription(
-            getString(label) + (done ? "，已完成" : "，未完成"));
+            getString(label) + (done == null ? "，无法自动确认" : done ? "，已完成" : "，未完成"));
     }
 
     private void openInputMethodSettings() {

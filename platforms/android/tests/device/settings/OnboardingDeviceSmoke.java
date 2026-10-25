@@ -33,6 +33,21 @@ public final class OnboardingDeviceSmoke extends DeviceSmoke {
         Class<?> choices = target.getClassLoader().loadClass("app.msime.android.home.OnboardingChoices");
         Class<?> store = target.getClassLoader().loadClass("app.msime.android.home.HostStore");
         try {
+            stage = "系统服务不可查询时保留未知";
+            Class<?> setup = target.getClassLoader().loadClass("app.msime.android.home.ImeSetup");
+            Context unavailable = new ContextWrapper(target) {
+                @Override public Object getSystemService(String name) {
+                    return Context.INPUT_METHOD_SERVICE.equals(name) ? null : super.getSystemService(name);
+                }
+            };
+            check(invoke(setup, "enabledState", new Class<?>[] {Context.class}, unavailable) == null,
+                "缺少系统服务被误报为未启用");
+            stage = "返回系统设置后重新读取启用和默认状态";
+            shellDiscard("ime disable app.msime.android/.MSIMEInputService");
+            check(Boolean.FALSE.equals(invoke(setup, "enabledState", new Class<?>[] {Context.class}, target)), "禁用状态没有刷新");
+            restartIme();
+            check(Boolean.TRUE.equals(invoke(setup, "enabledState", new Class<?>[] {Context.class}, target)), "启用状态没有刷新");
+            check(Boolean.TRUE.equals(invoke(setup, "currentState", new Class<?>[] {Context.class}, target)), "默认状态没有刷新");
             stage = "资源尚未准备时保留 false 译文选择";
             invoke(choices, "rememberGloss", new Class<?>[] {Context.class, boolean.class}, isolated, false);
             Object waiting = invoke(choices, "syncNow", new Class<?>[] {Context.class, boolean.class}, isolated, true);
