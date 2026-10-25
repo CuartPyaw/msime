@@ -147,6 +147,20 @@ static NSRect CandidateFrame(NSView *view) {
     return chrome ? [view convertRect:view.bounds toView:MSIMECandidateControlsView(chrome)] : view.frame;
 }
 
+// 候选相对窗口左上角的位置；按候选身份找，不按按钮序号。
+static NSRect CandidateFrameFromPanelTop(NSWindow *panel, NSUInteger index) {
+    for (NSView *view in MSIMECandidateControlSubviews(panel.contentView)) {
+        if (![view isKindOfClass:MSIMECandidateButton.class] || view.tag < 0 ||
+            [((MSIMECandidateButton *)view).candidateID[@"index"] unsignedIntegerValue] != index) continue;
+        NSRect rect = [panel convertRectToScreen:[view convertRect:view.bounds toView:nil]];
+        rect.origin.x -= NSMinX(panel.frame);
+        rect.origin.y -= NSMaxY(panel.frame);
+        return rect;
+    }
+    assert(false);
+    return NSZeroRect;
+}
+
 static void AssertNoCandidateLayoutAnimation(NSView *content) {
     assert(![content.layer.mask animationForKey:@"candidate-expand-size"]);
     for (NSView *view in MSIMECandidateControlSubviews(content))
@@ -437,7 +451,18 @@ static void TestAdaptiveCandidateLayout(RowLayoutClient *client) {
         NSViewAnimation *closing = [controller valueForKey:@"candidateFrameAnimation"];
         [closing setCurrentProgress:0.4];
         const NSRect interrupted = panel.frame;
+        // 快速连按：收起到一半再展开，左上角的第一项从看到的位置出发，不能上下跳。
+        [panel.contentView layoutSubtreeIfNeeded];
+        const NSRect firstInterrupted = CandidateFrameFromPanelTop(panel, 0);
         assert([controller openExpandedCandidates]);
+        NSViewAnimation *reopening = [controller valueForKey:@"candidateFrameAnimation"];
+        for (NSNumber *progress in @[@0, @0.5]) {
+            [reopening setCurrentProgress:progress.doubleValue];
+            [panel.contentView layoutSubtreeIfNeeded];
+            const NSRect first = CandidateFrameFromPanelTop(panel, 0);
+            assert(fabs(NSMinX(first) - NSMinX(firstInterrupted)) <= 1 &&
+                   fabs(NSMaxY(first) - NSMaxY(firstInterrupted)) <= 1);
+        }
         AssertNativeCandidateFrameAnimation(controller, panel, interrupted, YES);
         [controller closeExpandedCandidates];
         [controller renderCandidates];

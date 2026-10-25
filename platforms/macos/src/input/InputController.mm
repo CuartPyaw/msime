@@ -9436,7 +9436,6 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
 }
 
 - (void)renderCandidates {
-    [self stopCandidateFrameAnimation];
     const bool timed = msime_macos_diagnostic_enabled();
     const uint64_t buildStarted = timed ? clock_gettime_nsec_np(CLOCK_UPTIME_RAW) : 0;
     _candidatePreviousVisible = _panel.isVisible;
@@ -9458,6 +9457,8 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         }
         _candidateTransitionFrames = frames;
     }
+    // 先记下看到的位置再停动画：停下会取消顶部对齐，窗口还在半途时旧内容会整体上下错开。
+    [self stopCandidateFrameAnimation];
     NSDictionary *previousRenderedView = _renderedCandidateView;
     _candidateMenuToken = [NSObject new];
     [self updateKeymapPanel];

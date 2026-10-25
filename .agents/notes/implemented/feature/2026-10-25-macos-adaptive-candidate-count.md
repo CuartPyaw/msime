@@ -20,6 +20,8 @@ macOS 横向增加 `candidate_count_mode`（`fixed` / `adaptive`）、`candidate
 
 展开、收起用一条 `NSViewAnimation` 直接改变原候选窗的真实 `frame`（200ms），候选按钮按完整身份（会话、代次、索引）从旧位置移到新位置，不按文字匹配；`MSIMECandidateChromeView` 在尺寸变化时调整内容原点，保持顶部对齐。只有横向展开状态改变才播放；普通输入、选行、滚动和纵向同步更新，重排、隐藏或释放控制器时停止上一条动画。「减弱动态效果」沿用 `MSIMECandidateMotion.reduceMotion`，开着时直接到位。逻辑状态、命中和选择不等待动画。
 
+快速连按展开/收起时，重画必须先记下候选当前看到的位置，再停止上一条动画。停止会清掉顶部对齐，窗口还在半途时旧内容整体按底部对齐，先停再记会让记下的位置差出「上一版布局高度 − 当前窗口高度」，左上角本应不动的第一项随之上下跳。
+
 参考仓库 `SlimeNull/macOS-Style-PinyinInputMethod` 的默认分支 `master`，固定提交 `5b5e27a438d94ac6ffedfd423177285f38a12167`。仅参考 `CandidateWorldPanel.ColumnCount` 的布局行为与移动动效，不复制源码；该提交没有许可证。
 
 ## Existing notes audit
@@ -46,7 +48,7 @@ macOS 横向增加 `candidate_count_mode`（`fixed` / `adaptive`）、`candidate
 
 比例数字回归使用系统字体，在 18/32pt 与 50%/100%/200% 缩放下逐一改变一位数候选数量，检查序号到内容的起点保持一致；测试数据均为合成候选，不使用实际输入记录。
 
-动画测试直接推进原窗口的动画进度（25%、75%、终点），验证动画目标就是同一个窗口、高度连续变化、内容顶部对齐，候选按钮起点对应展开前或收起前的位置；夹具含文字相同但身份不同的两项。完成回调由测试直接调用，不等真实时间：锁屏或熄屏时 `NSAnimation` 不前进。
+动画测试直接推进原窗口的动画进度（25%、75%、终点），验证动画目标就是同一个窗口、高度连续变化、内容顶部对齐，候选按钮起点对应展开前或收起前的位置；夹具含文字相同但身份不同的两项。完成回调由测试直接调用，不等真实时间：锁屏或熄屏时 `NSAnimation` 不前进。收起到 40% 再展开的回归检查第一项在新动画 0% 与 50% 时仍停在打断时的位置；先停再记的旧顺序在这里失败。
 
 - `pnpm --filter @msime/desktop exec vitest run tests/settings/candidate-page-size-section.test.tsx tests/settings/candidate-settings-layout.test.tsx tests/settings/candidate-window-style-section.test.tsx`：48 项通过；前端类型检查、生产构建与改动文件 lint 通过。
 - `CARGO_TARGET_DIR=target/macos-cargo cargo test -p msime-client-core --locked adaptive_candidate_settings_defaults_round_trip_and_validate`：通过；`cargo fmt --all -- --check` 与同一产物目录的 `cargo clippy -p msime-client-core --all-targets --locked -- -D warnings` 通过。
