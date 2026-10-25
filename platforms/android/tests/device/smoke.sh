@@ -90,6 +90,10 @@ sdk=$("$adb" -s "$serial" shell getprop ro.build.version.sdk | tr -d '\r')
 # 连续跑设备套件时，系统偶尔来不及重新绑定输入法。以测试 APK 为目标的用例继续正常启动 instrumentation。
 run_instrumentation() {
   local component=$1 class=${1#*/} target
+  # 引导专项替换这个清单入口，目标进程仍与原入口相同。
+  if [[ "$oobe" == true && "$class" == app.msime.android.test.OnboardingDeviceSmoke ]]; then
+    class=app.msime.android.test.CandidateCanvasDeviceSmoke
+  fi
   target=$(xmllint --xpath "string(//instrumentation[@*[local-name()='name']='$class']/@*[local-name()='targetPackage'])" \
     platforms/android/tests/device/AndroidManifest.xml)
   [[ "$target" == app.msime.android || "$target" == app.msime.android.test ]] \
