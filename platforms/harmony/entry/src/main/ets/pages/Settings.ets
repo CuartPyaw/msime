@@ -154,6 +154,8 @@ interface SetupStatusReply {
   value: SetupState;
 }
 
+interface OnboardingSeenValue { seen: boolean; }
+
 interface OobeStatusValue {
   resourcesReady: boolean | null;
   systemEnabled: boolean | null;
@@ -946,7 +948,12 @@ class SettingsBridge {
   attach(context: common.UIAbilityContext): void {
     this.context = context;
     this.stateDirectory = `${context.filesDir}/state`;
-    this.onboardingDone = this.readStateFile(ONBOARDING_SEEN_FILE, 64) !== null;
+    const seen = this.readStateFile(ONBOARDING_SEEN_FILE, 64);
+    this.onboardingDone = false;
+    if (seen !== null) {
+      try { this.onboardingDone = (JSON.parse(seen) as OnboardingSeenValue).seen === true; }
+      catch (_) { KeyboardLog.warn('onboarding seen marker is invalid'); }
+    }
     SharedStateMirror.resolve(context).then((groupDir: string | null): void => {
       const sharedSandbox = HarmonySharedSandboxPolicy.status(groupDir);
       this.sharedSandboxAvailable = sharedSandbox.available;

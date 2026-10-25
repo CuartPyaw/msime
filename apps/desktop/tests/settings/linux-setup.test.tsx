@@ -422,3 +422,21 @@ test("首次配置页的产品名、结果卡片和终端命令随安装的版�
   expect(card.textContent).toContain("「Metasequoia 水杉五笔」");
   expect(card.textContent).not.toContain("水杉输入法");
 });
+
+test("资源损坏的已有配置走修复事务，不重复创建状态目录", async () => {
+  const run = vi.fn();
+  const update = vi.fn().mockResolvedValue({ ...missing, prepared: true });
+  render(
+    <LinuxSetupPage
+      status={{ ...missing, prepared: true, dictionaryOutdated: false }}
+      repair
+      client={{ run, update }}
+      onComplete={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "运行资源需要修复" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "立即修复" }));
+  await screen.findByRole("heading", { name: "词库已更新" });
+  expect(update).toHaveBeenCalledOnce();
+  expect(run).not.toHaveBeenCalled();
+});

@@ -653,7 +653,10 @@ function DesktopSettings() {
           if (host?.platform === "linux") {
             setLinuxRepair(true);
             setLinuxSetup(await invoke<LinuxSetupStatus>("linux_setup_status"));
-          } else if (host?.platform === "macos") setMacosInstall(true);
+          } else if (host?.platform === "macos") {
+            await invoke("repair_macos_oobe_resources");
+            desktopOobe?.refresh?.();
+          }
         },
       );
       const hosted: SettingsClient = host

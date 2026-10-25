@@ -1698,6 +1698,45 @@ async fn desktop_oobe_status(
     .map_err(|_| CommandError { code: "storage" })?
 }
 
+/// 从安装包重新准备运行资源并重读同一份配置；保留用户状态和偏好。
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn repair_macos_oobe_resources(
+    app: tauri::AppHandle,
+    runtime: tauri::State<'_, RuntimeOptionsState>,
+) -> Result<(), CommandError> {
+    let resources = app
+        .path()
+        .resource_dir()
+        .map_err(|_| CommandError { code: "storage" })?
+        .join("EngineResources");
+    let runtime = runtime.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let path = runtime
+            .path
+            .as_ref()
+            .ok_or(CommandError { code: "storage" })?;
+        let parent = path.parent().ok_or(CommandError { code: "storage" })?;
+        let launch = macos_launch::resolve_with_resources(
+            parent,
+            Some(&resources),
+            Some(path.as_os_str().to_owned()),
+            None,
+        )
+        .map_err(|_| CommandError { code: "storage" })?;
+        if !msime_host_api::runtime_resources_ready(&launch.document) {
+            return Err(CommandError { code: "storage" });
+        }
+        *runtime
+            .document
+            .lock()
+            .map_err(|_| CommandError { code: "storage" })? = launch.document;
+        Ok(())
+    })
+    .await
+    .map_err(|_| CommandError { code: "storage" })?
+}
+
 async fn save_preferences_impl(
     store: Arc<PreferencesStore>,
     runtime: RuntimeOptionsState,
@@ -5830,6 +5869,8 @@ pub fn run() {
             load_preferences,
             #[cfg(any(target_os = "macos", target_os = "linux"))]
             desktop_oobe_status,
+            #[cfg(target_os = "macos")]
+            repair_macos_oobe_resources,
             restored_default_preferences,
             #[cfg(not(target_os = "ios"))]
             recover_preferences,

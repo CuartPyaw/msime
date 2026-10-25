@@ -67,13 +67,13 @@ export function OobeStatusNotice({ client }: { client?: OobeClient }) {
     state?.resourcesReady === false
       ? "运行资源尚未准备好"
       : state?.preferencesSaved === false
-        ? "无法读取偏好设置"
+        ? "无法读取偏好设置，请重新打开设置并按提示恢复"
         : state?.systemEnabled === false
           ? "水杉输入法尚未加入系统输入法列表"
           : state?.systemCurrent === false
             ? "当前使用的是其他输入法，可在系统输入法菜单中切换到水杉"
             : null;
-  const repair = state?.resourcesReady === false || state?.preferencesSaved === false;
+  const repair = state?.resourcesReady === false;
   const action = repair ? client?.prepareResources : client?.openSetup;
   if (!message) return null;
   return (
