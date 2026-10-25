@@ -6073,8 +6073,6 @@ pub fn run() {
             #[cfg(target_os = "android")]
             android_account::android_bootstrap_status,
             #[cfg(target_os = "android")]
-            android_account::android_oobe_status,
-            #[cfg(target_os = "android")]
             android_account::android_prepare_bootstrap,
             #[cfg(target_os = "android")]
             android_account::ai_models,
@@ -6190,7 +6188,6 @@ pub fn run() {
             open_system_keyboard_settings,
             #[cfg(target_os = "ios")]
             ios_onboarding_status,
-            #[cfg(target_os = "ios")]
             #[cfg(target_os = "ios")]
             ios_onboarding_complete,
             #[cfg(target_os = "ios")]
