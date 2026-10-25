@@ -45,6 +45,8 @@ Android 9、10 的锁屏凭据确认是设置应用里的独立 Activity，输�
 
 长符号条目同样有异步的无障碍数据：符号键的边界先稳定，不代表 `refreshWithExtraData` 立刻能返回每个字符的矩形。API 35 重新打开常用符号面板时曾在边界已稳定的瞬间拿到空数组。`LongSymbolCellDeviceSmoke` 现在在 15 秒内轮询字符位置扩展数据和布局，重试只覆盖数据尚未就绪的窗口，仍会在超时后报告缺失或裁切；重开面板和重启输入法的两段也写出独立阶段。
 
+触控板双击、三击的验收事件也必须按系统输入时间排序。原测试为了抵消 Binder 注入延迟，把整组点按的 `eventTime` 设到了当前时刻之前；API 35 慢模拟器上三击事件到达输入队列时可能已经过期，编辑器只保留键盘状态。`TextTrackpadDeviceChecks` 现在把完整点按序列排在当前时刻之后一次注入，仍用 40 毫秒间隔表达双击窗口，随后继续由真实编辑器选区断言收尾。
+
 导出验收通过之后，API 35 完整套件后面还有几项是在 #9682 修好动画缩放之前就被挡住、一直没跑到的旧断言，这次一并跟上已经记录的产品决定，没有放宽：全拼组字在输入框里按音节分词显示（[全拼宿主预编辑分词](../bug-fix/2026-10-23-quanpin-host-preedit-segmentation.md)），`LetterHintPunctuationDeviceSmoke`、`ChineseHelpcodeOffDeviceSmoke`、`NumberRowDeviceSmoke`、`HardwareTranslationDeviceSmoke` 和 `PreferencesDeviceSmoke` 对输入框的期望从 `nihao`、`wode` 改成 `ni'hao`、`wo'de`（`PreferencesDeviceSmoke` 里「不再含 nihao」的检查在分词后会恒真，也一并改掉）；输入页按方案族分行、双拼排法移到键盘页「中文键盘」（[三端手机设置按输入方案分行](./2026-10-25-mobile-scheme-rows.md)），`FourteenKeyShuangpinDeviceChecks` 改走新入口；横向候选条连续列出全部候选（[Android 横向候选条连续浏览](./2026-10-23-android-continuous-candidate-strip.md)），候选条不再按每页几个截断，`PreferencesDeviceSmoke` 改为核对候选条旁的引擎页码：同一组字每页 5 个时 P5 页，换成每页 2 个后页数必须落在 ⌈(5·P5−4)/2⌉ 到 ⌈5·P5/2⌉ 之间，任一次偏好没生效都落不进去。
 
 同一轮完整 API 35 套件里另外三处已由别的 PR 合入：日语 9 键换输入框后中英键停在「英」（#9770，每次重画按当前状态重写键面），英文键盘非 ASCII 角标滑动没有输出（#9741 恢复了被 #9482 合并冲掉的 #9486 判断），字母长按验收先上滑再打 @（#9741）。
