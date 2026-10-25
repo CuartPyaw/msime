@@ -14,6 +14,8 @@ Status: implemented
 
 检索结果：原统计认证笔记被本篇部分取代，已互链；剪贴板操作认证笔记只共享认证方式和暂停跟踪器，不涉及本次统计页的无凭据放行。
 
+iOS 和 HarmonyOS 采用相同规则，平台 API 与生命周期约束见[移动端统计认证对齐](2026-10-25-mobile-statistics-auth-parity.md)。
+
 ## Alternatives considered
 
 - 完全移除统计页认证：最直接、没有系统能力分支，但不能满足维护者澄清后的「有认证就用认证」，因此不采用。

@@ -1,3 +1,4 @@
+import { StatisticsAuthenticationGate } from "./statistics-authentication-gate";
 import {
   retentionChoices,
   activityMetrics,
@@ -126,21 +127,34 @@ export function availabilityNotice(
   return `统计文件已建立，但当前还没有输入记录。${fullAccess}`;
 }
 
-export function TypingStatisticsPage({
+export function TypingStatisticsPage(props: TypingStatisticsPageProps) {
+  if (props.client.authentication) {
+    return (
+      <StatisticsAuthenticationGate client={props.client.authentication}>
+        <TypingStatisticsContent {...props} />
+      </StatisticsAuthenticationGate>
+    );
+  }
+  return <TypingStatisticsContent {...props} />;
+}
+
+type TypingStatisticsPageProps = {
+  client: TypingStatisticsClient;
+  mobile?: boolean;
+  platform?: string;
+  /** iOS 共享面板打开系统设置；原生 iOS App 不使用此页面。 */
+  openSystemSettings?: () => Promise<void>;
+  /** 鸿蒙统计摘要使用「概览 / 习惯 / 按键 / 成就」四个标签。 */
+  look?: StatisticsLook;
+};
+
+function TypingStatisticsContent({
   client,
   mobile = false,
   platform,
   openSystemSettings,
   look,
-}: {
-  client: TypingStatisticsClient;
-  mobile?: boolean;
-  platform?: string;
-  /** iOS only: opens this app's page in Settings, from which Full Access is reachable. */
-  openSystemSettings?: () => Promise<void>;
-  /** HarmonyOS 手机或 2in1 外观。客户端能应答 `summary` 时，页面是基于摘要的「概览 / 习惯 / 按键 / 成就」标签页，而不是趋势图和分布图。 */
-  look?: StatisticsLook;
-}) {
+}: TypingStatisticsPageProps) {
   const { confirm, confirmation } = useConfirm();
   const { status, today, busy, error, summary, summaryFailed, update, openDataDirectory } =
     useTypingStatisticsState(client, look);
