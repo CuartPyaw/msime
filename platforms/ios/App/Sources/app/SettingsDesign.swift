@@ -227,6 +227,11 @@ struct KeyboardStatusCard: View {
         Text(scheme.shortLabel).font(.system(size: 17, weight: .semibold))
           .accessibilityIdentifier("keyboardStatusScheme")
       }
+      Text("请在系统设置中完成上面两步；iOS 不允许 App 自动确认键盘列表和完全访问状态。")
+        .font(.system(size: 13))
+        .foregroundStyle(MetasequoiaTheme.sub)
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("keyboardStatusManualCheckNotice")
       VStack(alignment: .leading, spacing: 8) {
         setupRow(1, "添加到键盘列表", identifier: "openKeyboardSettingsButton", hint: "设置 → 通用 → 键盘 → 键盘 → 添加新键盘")
         setupRow(2, "允许完全访问", identifier: "openFullAccessSettingsButton", hint: "云候选、云剪贴板和同步需要它，日常输入不联网")
