@@ -41,6 +41,8 @@ Android 9、10 的锁屏凭据确认是设置应用里的独立 Activity，输�
 
 导出验收在 CI 上还有一处时序问题：verify 段「real keyboard panel export action」在运行 40187763661 里等满 15 秒失败。日志里 `:ime` 进程 11:33:06.9 才冷启动，11:33:09.47 键盘显示，11:33:09.9 主线程报 `Skipped 124 frames`，之后再没有动作，也没有拉起认证桥。输入法服务的偏好由后台线程读（`loadAppearanceWithoutSession`），读到之前 `clipboardHistoryEnabled` 是 false，工具栏「剪贴板」按钮存在但不可用；验收找到它就点，点在不可用的按钮上没有任何反应，面板不打开，之后的「导出全部剪贴板历史」自然等不到。两个键盘内控件改成等到可用再点，断言不变。
 
+在同一段里写入系统剪贴板后，Android 的剪贴板监听、输入法服务和共享历史文件仍可能跨线程排队；只等工具栏按钮可用不能证明这条合成记录已经落盘。验收现在先用测试进程自己的 `ClipboardHistoryStore.load()` 轮询合成全文，确认记录捕获后再点击剪贴板入口并查找导出按钮。捕获、剪贴板入口、导出控件和认证动作各自使用独立阶段名，后续若再失败可以区分是监听落盘还是界面重画。
+
 导出验收通过之后，API 35 完整套件后面还有几项是在 #9682 修好动画缩放之前就被挡住、一直没跑到的旧断言，这次一并跟上已经记录的产品决定，没有放宽：全拼组字在输入框里按音节分词显示（[全拼宿主预编辑分词](../bug-fix/2026-10-23-quanpin-host-preedit-segmentation.md)），`LetterHintPunctuationDeviceSmoke`、`ChineseHelpcodeOffDeviceSmoke`、`NumberRowDeviceSmoke`、`HardwareTranslationDeviceSmoke` 和 `PreferencesDeviceSmoke` 对输入框的期望从 `nihao`、`wode` 改成 `ni'hao`、`wo'de`（`PreferencesDeviceSmoke` 里「不再含 nihao」的检查在分词后会恒真，也一并改掉）；输入页按方案族分行、双拼排法移到键盘页「中文键盘」（[三端手机设置按输入方案分行](./2026-10-25-mobile-scheme-rows.md)），`FourteenKeyShuangpinDeviceChecks` 改走新入口；横向候选条连续列出全部候选（[Android 横向候选条连续浏览](./2026-10-23-android-continuous-candidate-strip.md)），候选条不再按每页几个截断，`PreferencesDeviceSmoke` 改为核对候选条旁的引擎页码：同一组字每页 5 个时 P5 页，换成每页 2 个后页数必须落在 ⌈(5·P5−4)/2⌉ 到 ⌈5·P5/2⌉ 之间，任一次偏好没生效都落不进去。
 
 同一轮完整 API 35 套件里另外三处已由别的 PR 合入：日语 9 键换输入框后中英键停在「英」（#9770，每次重画按当前状态重写键面），英文键盘非 ASCII 角标滑动没有输出（#9741 恢复了被 #9482 合并冲掉的 #9486 判断），字母长按验收先上滑再打 @（#9741）。
