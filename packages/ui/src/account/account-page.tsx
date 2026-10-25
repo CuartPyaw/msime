@@ -7,6 +7,8 @@ import type {
   AccountCommunityDestination,
 } from "./account-model";
 import { useEffect, useState } from "react";
+import { StatisticsAuthenticationRow } from "./statistics-authentication-row";
+import type { StatisticsAuthenticationSettings } from "../settings/statistics-authentication-gate";
 import type { Preferences } from "../core/preferences-model";
 import { ActionButton } from "../core/action-button";
 import { errorCode } from "../core/error-code";
@@ -157,6 +159,7 @@ export function AccountPage({
 
 /** 鸿蒙手机「我的」页所需的附加能力；其他触屏宿主也可复用其中的通用入口。 */
 type HarmonyMeProps = {
+  statisticsAuthentication?: StatisticsAuthenticationSettings;
   /** 已保存的偏好；保留宿主接线兼容性，鸿蒙手机「我的」页不再重复展示设置入口。 */
   preferences?: Preferences;
   /** 打开共享设置页，例如「隐私」。 */
@@ -190,6 +193,7 @@ function AccountDetailsPage({
   onOpenDesktopDownload,
   onReplayOnboarding,
   preferences: _preferences,
+  statisticsAuthentication,
   onOpenPage,
   appTheme,
   onOpenUrl,
@@ -603,8 +607,11 @@ function AccountDetailsPage({
             />
           </AccountMeGroup>
         )}
-        {(appTheme || onOpenPage || onOpenUrl) && (
+        {(appTheme || onOpenPage || onOpenUrl || statisticsAuthentication) && (
           <AccountMeGroup title="通用">
+            {statisticsAuthentication && (
+              <StatisticsAuthenticationRow client={statisticsAuthentication} />
+            )}
             {appTheme && <AppThemeRow client={appTheme} disabled={busy} />}
             {(onOpenPage || onOpenUrl) && (
               <NavRow

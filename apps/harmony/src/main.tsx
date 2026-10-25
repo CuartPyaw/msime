@@ -1222,6 +1222,44 @@ function makeClient(
     }
   };
   const typingStatistics: TypingStatisticsClient = {
+    authentication: {
+      settings: {
+        load: async () =>
+          unwrap<boolean>(
+            await bridgeRequest(
+              native,
+              "statistics_auth_settings",
+              JSON.stringify({ operation: "load" }),
+            ),
+          ),
+        save: async (enabled: boolean) => {
+          unwrap<boolean>(
+            await bridgeRequest(
+              native,
+              "statistics_auth_settings",
+              JSON.stringify({ operation: "save", enabled }),
+            ),
+          );
+        },
+      },
+      authenticate: async () => {
+        const authorized = unwrap<boolean>(
+          await bridgeRequest(native, "statistics_auth", "{}", 120000),
+        );
+        if (authorized !== true) throw new Error("未完成身份验证");
+      },
+      cancel: () => {
+        native.typingStatistics(JSON.stringify({ operation: "cancel_authentication" }));
+      },
+      onLock: (listener) => {
+        window.addEventListener("msime-statistics-locked", listener);
+        return () => window.removeEventListener("msime-statistics-locked", listener);
+      },
+      onResume: (listener) => {
+        window.addEventListener("msime-statistics-active", listener);
+        return () => window.removeEventListener("msime-statistics-active", listener);
+      },
+    },
     cloudUpload: typingStatisticsUploadClient(native),
     load: async () =>
       unwrap<TypingStatisticsStatus>(

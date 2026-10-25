@@ -468,6 +468,8 @@ final class OnboardingUITests: XCTestCase {
   func testCommunityTabSwitchesBetweenSkinsAndDictionaries() {
     let app = XCUIApplication()
     app.launchArguments = ["-hasCompletedOnboarding", "YES", "-communityPreview"]
+    // 内容与导航回归固定关闭认证，系统认证由专门用例覆盖。
+    app.launchArguments += ["-statisticsAuthenticationEnabled", "NO"]
     app.launch()
     app.tabBars.buttons["社区"].tap()
     XCTAssertTrue(app.navigationBars["社区"].waitForExistence(timeout: 5))
@@ -753,6 +755,8 @@ final class OnboardingUITests: XCTestCase {
     let app = XCUIApplication()
     // 社区标签页一出现就读社区列表；用预览数据，不连网络。
     app.launchArguments = ["-hasCompletedOnboarding", "YES", "-communityPreview"]
+    // 内容与导航回归固定关闭认证，系统认证由专门用例覆盖。
+    app.launchArguments += ["-statisticsAuthenticationEnabled", "NO"]
     app.launch()
     XCTAssertTrue(app.tabBars.buttons["首页"].isSelected)
     app.buttons["inputSettingsLink"].tap()
@@ -817,6 +821,8 @@ final class OnboardingUITests: XCTestCase {
     continueAfterFailure = false
     let app = XCUIApplication()
     app.launchArguments = ["-hasCompletedOnboarding", "YES", "-communityPreview"]
+    // 内容与导航回归固定关闭认证，系统认证由专门用例覆盖。
+    app.launchArguments += ["-statisticsAuthenticationEnabled", "NO"]
     app.launch()
     let settingsTab = app.tabBars.buttons["首页"]
     XCTAssertTrue(settingsTab.waitForExistence(timeout: 10))
@@ -1690,6 +1696,19 @@ final class OnboardingUITests: XCTestCase {
     let app = XCUIApplication()
     app.launchArguments = ["-hasCompletedOnboarding", "YES"]
     app.launch()
+    // 由「我的」真实开关关闭认证，统计图表测试不依赖模拟器的系统凭据配置。
+    app.tabBars.buttons["我的"].tap()
+    let authentication = app.switches["accountStatisticsAuthentication"]
+    for _ in 0..<6 {
+      if authentication.isHittable { break }
+      app.swipeUp()
+    }
+    XCTAssertTrue(authentication.waitForExistence(timeout: 5))
+    if authentication.value as? String == "1" { authentication.tap() }
+    XCTAssertEqual(authentication.value as? String, "0")
+    // 重启应用后仍使用本机保存的选择。
+    app.terminate()
+    app.launch()
     app.tabBars.buttons["统计"].tap()
     // 概览 / 习惯 / 按键 / 成就，每个分段都是设计稿圆角分段控件里的一个按钮。
     let overview = app.buttons["statisticsTab-0"]
@@ -1721,6 +1740,21 @@ final class OnboardingUITests: XCTestCase {
     add(detail)
     app.navigationBars.buttons.element(boundBy: 0).tap()
     XCTAssertTrue(app.navigationBars["统计"].waitForExistence(timeout: 5))
+    app.tabBars.buttons["我的"].tap()
+    for _ in 0..<6 {
+      if authentication.isHittable { break }
+      app.swipeUp()
+    }
+    authentication.tap()
+    XCTAssertEqual(authentication.value as? String, "1")
+    app.terminate()
+    app.launch()
+    app.tabBars.buttons["我的"].tap()
+    for _ in 0..<6 {
+      if authentication.isHittable { break }
+      app.swipeUp()
+    }
+    XCTAssertEqual(authentication.value as? String, "1")
   }
 
   /// 统计默认关闭，关闭时键盘不写入。页面只用「记录已关闭」说明原因，不能同时让人去开完全访问。
@@ -1728,6 +1762,8 @@ final class OnboardingUITests: XCTestCase {
   func testStatisticsOffShowsOnlyTheRecordingNotice() {
     let app = XCUIApplication()
     app.launchArguments = ["-hasCompletedOnboarding", "YES"]
+    // 内容与导航回归固定关闭认证，系统认证由专门用例覆盖。
+    app.launchArguments += ["-statisticsAuthenticationEnabled", "NO"]
     app.launch()
     app.tabBars.buttons["统计"].tap()
     XCTAssertTrue(app.buttons["statisticsTab-0"].waitForExistence(timeout: 5))
@@ -1751,6 +1787,8 @@ final class OnboardingUITests: XCTestCase {
   func testEnablingRecordingWithZeroCountNamesFullAccess() throws {
     let app = XCUIApplication()
     app.launchArguments = ["-hasCompletedOnboarding", "YES"]
+    // 内容与导航回归固定关闭认证，系统认证由专门用例覆盖。
+    app.launchArguments += ["-statisticsAuthenticationEnabled", "NO"]
     app.launch()
     app.tabBars.buttons["统计"].tap()
     XCTAssertTrue(app.buttons["statisticsTab-0"].waitForExistence(timeout: 5))
@@ -2145,6 +2183,8 @@ final class OnboardingUITests: XCTestCase {
     continueAfterFailure = false
     let app = XCUIApplication()
     app.launchArguments = ["-hasCompletedOnboarding", "YES"]
+    // 内容与导航回归固定关闭认证，系统认证由专门用例覆盖。
+    app.launchArguments += ["-statisticsAuthenticationEnabled", "NO"]
     app.launch()
     app.tabBars.buttons["统计"].tap()
     app.buttons["statisticsMenu"].tap()

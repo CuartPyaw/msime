@@ -1,3 +1,4 @@
+import { StatisticsAuthentication } from '../keyboard/settings/StatisticsAuthentication';
 import { NativeCleanup } from '../keyboard/NativeCleanup';
 import web_webview from '@ohos.web.webview';
 import common from '@ohos.app.ability.common';
@@ -656,6 +657,7 @@ struct Settings {
     this.bridge.watchSetup();
     this.loadNotices();
     EntryAbility.onActivated = (): void => {
+      this.bridge.resumeStatistics();
       this.bridge.syncShared();
       this.bridge.refreshPreferencesIfChanged();
       this.loadNotices();
@@ -665,6 +667,7 @@ struct Settings {
       this.bridge.notifyAppThemeChanged();
     };
     EntryAbility.onDeactivated = (): void => {
+      this.bridge.lockStatistics();
       this.bridge.publishShared();
     };
     EntryAbility.onOpenPage = (page: string): void => {
@@ -807,6 +810,8 @@ struct Settings {
     // has gone.
     EntryAbility.onActivated = undefined;
     EntryAbility.onOpenPage = undefined;
+    this.bridge.lockStatistics();
+    EntryAbility.onDeactivated = undefined;
     this.bridge.unwatchSetup();
   }
 
@@ -915,6 +920,17 @@ class SettingsBridge {
   private setupDescription: string = '';
   // 设置文档是否已加载完成，让宿主到页面的调用只发给能接收的页面。在此之前页面会在启动时自己读取所需的一切。
   private pageReady: boolean = false;
+  private statisticsAuthentication: StatisticsAuthentication = new StatisticsAuthentication();
+
+  resumeStatistics(): void {
+    this.webview?.runJavaScript("window.dispatchEvent(new Event('msime-statistics-active'))").catch((): void => {});
+  }
+
+  lockStatistics(): void {
+    this.statisticsAuthentication.cancel();
+    this.webview?.runJavaScript("window.dispatchEvent(new Event('msime-statistics-locked'))").catch((): void => {});
+  }
+
   // 结构体的通知卡片开关：告知欢迎流程显示期间卡片是否应保持不出现在屏幕上。
   onNoticeHold: ((held: boolean) => void) | undefined = undefined;
   // 由页面组件设置：告知网页绘制的背景，即页面随系统栏颜色最后一次发来的值。
@@ -1216,6 +1232,16 @@ class SettingsBridge {
         KeyboardLog.error(`dictionary scel request failed: ${describeError(error)}`);
         deliver(JSON.stringify({ ok: false, error: 'dictionary_scel_invalid' }));
       });
+    } else if (kind === 'statistics_auth_settings') {
+      this.statisticsAuthenticationSettings(payload).then(deliver).catch(failed);
+    } else if (kind === 'statistics_auth') {
+      if (this.context === undefined) {
+        failed(new Error('认证宿主未就绪'));
+      } else {
+        this.statisticsAuthentication.authenticate(this.context).then((success: boolean): void => {
+          deliver(success ? JSON.stringify({ ok: true, value: true }) : JSON.stringify({ ok: false, error: '未完成身份验证，请重试。' }));
+        }).catch(failed);
+      }
     } else if (kind === 'typing_statistics') {
       this.typingStatisticsOnWorker(payload).then(deliver).catch(failed);
     } else if (kind === 'typing_upload') {
@@ -2256,12 +2282,27 @@ class SettingsBridge {
     }
   }
 
+  private async statisticsAuthenticationSettings(payload: string): Promise<string> {
+    if (this.context === undefined) throw new Error('认证宿主未就绪');
+    const action: TypingStatisticsAction = JSON.parse(payload) as TypingStatisticsAction;
+    if (action.operation === 'save' && typeof action.enabled === 'boolean') {
+      await this.statisticsAuthentication.setEnabled(this.context, action.enabled);
+    } else if (action.operation !== 'load') {
+      throw new Error('无效的认证设置');
+    }
+    return JSON.stringify({ ok: true, value: this.statisticsAuthentication.enabled(this.context) });
+  }
+
   typingStatistics(actionDocument: string): string {
     if (actionDocument.length === 0 || actionDocument.length > 4096) {
       return JSON.stringify({ ok: false, error: 'invalid typing statistics request' });
     }
     try {
       const action: TypingStatisticsAction = JSON.parse(actionDocument) as TypingStatisticsAction;
+      if (action.operation === 'cancel_authentication') {
+        this.statisticsAuthentication.cancel();
+        return JSON.stringify({ ok: true, value: true });
+      }
       if (!['load', 'set_enabled', 'set_retention', 'reset'].includes(action.operation)
         || (action.operation === 'set_enabled' && typeof action.enabled !== 'boolean')
         || (action.operation === 'set_retention'
