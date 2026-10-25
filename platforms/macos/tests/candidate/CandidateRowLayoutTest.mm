@@ -127,9 +127,22 @@ static void FinishCandidateFrameAnimation(MSIMEInputController *controller) {
 @property(nonatomic) BOOL animatesWindowFrame;
 // 普通候选窗一次测量里最多的项数，用来确认按需分页没有量全部候选。
 @property(nonatomic) NSUInteger largestMeasurement;
+// 展开网格累计测量的项数（网格测量不为释义预留，普通候选窗预留），用来确认移动光标不重排。
+@property(nonatomic) NSUInteger gridMeasuredItems;
 @end
 @implementation AdaptiveLayoutController
 - (void)reportPointerToLifecycle {}
+- (MSIMECandidatePageGeometry)candidatePageGeometry:(NSArray *)candidates font:(NSFont *)font glossFont:(NSFont *)glossFont
+                                     showSelectedBar:(BOOL)showSelectedBar inset:(CGFloat)inset paging:(BOOL)paging
+                                             visible:(NSRect)visible preeditWidth:(CGFloat)preeditWidth
+                                        minimumWidth:(CGFloat)minimumWidth reservesGloss:(BOOL)reservesGloss pagerWidth:(CGFloat)pagerWidth
+                                     expandedColumns:(NSUInteger)columnCount
+                                       sharedColumns:(const std::vector<double> *)sharedColumns {
+    if (!reservesGloss) self.gridMeasuredItems += candidates.count;
+    return [super candidatePageGeometry:candidates font:font glossFont:glossFont showSelectedBar:showSelectedBar inset:inset
+        paging:paging visible:visible preeditWidth:preeditWidth minimumWidth:minimumWidth reservesGloss:reservesGloss
+        pagerWidth:pagerWidth expandedColumns:columnCount sharedColumns:sharedColumns];
+}
 - (MSIMECandidatePageGeometry)candidatePageGeometry:(NSArray *)candidates font:(NSFont *)font glossFont:(NSFont *)glossFont
                                      showSelectedBar:(BOOL)showSelectedBar inset:(CGFloat)inset paging:(BOOL)paging
                                              visible:(NSRect)visible preeditWidth:(CGFloat)preeditWidth
@@ -369,6 +382,136 @@ static void TestAdaptiveCandidateLayout(RowLayoutClient *client) {
         appearance.showsCandidatePageNumber = NO;
         session.cursor = 0;
     }
+    // 展开网格里移动光标只换高亮和视口：逐行几何沿用上一次，几千个候选也不每步重测；外观变了照常重排。
+    for (NSString *mode in @[@"adaptive", @"fixed"]) {
+        [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":mode,
+            @"candidate_max_width":@400}];
+        NSArray *shapes = @[@"合", @"合成", @"合成词", @"合成词组"];
+        NSMutableArray *many = [NSMutableArray array];
+        for (NSUInteger index = 0; index < 120; ++index) [many addObject:shapes[index % shapes.count]];
+        session.texts = many;
+        session.cursor = 0;
+        [controller setValue:[session viewWithError:nil] forKey:@"view"];
+        [controller renderCandidates];
+        assert([controller openExpandedCandidates]);
+        auto key = [](unsigned short code) {
+            return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0
+                windowNumber:0 context:nil characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO keyCode:code];
+        };
+        auto highlightedIndex = [&] {
+            for (NSView *view in MSIMECandidateControlSubviews(panel.contentView))
+                if ([view isKindOfClass:MSIMECandidateButton.class] && view.tag >= 0 && ((MSIMECandidateButton *)view).candidateHighlighted)
+                    return [((MSIMECandidateButton *)view).candidateID[@"index"] unsignedIntegerValue];
+            return (NSUInteger)NSNotFound;
+        };
+        const CGFloat gridWidth = NSWidth(panel.frame);
+        for (unsigned short code : {125, 125, 124, 126}) {
+            controller.gridMeasuredItems = 0;
+            assert([controller handleExpandedCandidateEvent:key(code) client:client]);
+            // 已排的行一律沿用；自动适应下移可能追加新行，只量新增的那一批，不重测已排的。
+            if ([mode isEqual:@"adaptive"] && code == 125)
+                assert(controller.gridMeasuredItems <= 2 * MSIMEExpandedGridMeasureChunk);
+            else
+                assert(controller.gridMeasuredItems == 0);
+            assert(highlightedIndex() == [[controller valueForKey:@"expandedCursor"] unsignedIntegerValue]);
+            assert(fabs(NSWidth(panel.frame) - gridWidth) < 0.5);
+        }
+        assert([[controller valueForKey:@"expandedCursor"] unsignedIntegerValue] > 0);
+        // 外观变了，下一次移动光标照常重排，网格换成新宽度。
+        [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":mode,
+            @"candidate_max_width":@600, @"candidate_columns":@3}];
+        appearance.pageSize = 4;
+        controller.gridMeasuredItems = 0;
+        assert([controller handleExpandedCandidateEvent:key(125) client:client]);
+        // 固定数量的网格全量重排；自动适应按需排版，只重排到视口之后几行。
+        if ([mode isEqual:@"adaptive"]) {
+            assert(controller.gridMeasuredItems > 0 && controller.gridMeasuredItems < 2 * many.count);
+            assert(NSWidth(panel.frame) > gridWidth + 100);
+        } else {
+            assert(controller.gridMeasuredItems >= many.count);
+        }
+        assert(highlightedIndex() == [[controller valueForKey:@"expandedCursor"] unsignedIntegerValue]);
+        // 收起时引擎高亮会跟到光标那一项；替身会话不处理那条路径，先把光标放回首项。
+        [controller setValue:@0 forKey:@"expandedCursor"];
+        [controller closeExpandedCandidates];
+        appearance.pageSize = 6;
+        [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":@"adaptive",
+            @"candidate_max_width":@400, @"candidate_columns":@6}];
+    }
+    // 自动适应的展开网格按需排版：三千项展开时只排 20 行；不显示行号，滚动条照常；往下走、往下滚时接着排，画面不跳。
+    {
+        appearance.showsCandidatePageNumber = YES;
+        NSArray *shapes = @[@"合", @"合成", @"合成词", @"合成词组"];
+        NSMutableArray *many = [NSMutableArray array];
+        for (NSUInteger index = 0; index < 3000; ++index) [many addObject:shapes[index % shapes.count]];
+        session.texts = many;
+        session.cursor = 0;
+        [controller setValue:[session viewWithError:nil] forKey:@"view"];
+        [controller renderCandidates];
+        controller.gridMeasuredItems = 0;
+        assert([controller openExpandedCandidates]);
+        assert(controller.gridMeasuredItems > 0 && controller.gridMeasuredItems < 400);
+        for (NSView *child in MSIMECandidateControlSubviews(panel.contentView))
+            assert(![child.identifier isEqual:@"candidate-page-indicator"]);
+        MSIMEExpandedCandidateScrollView *grid = [controller valueForKey:@"expandedScrollView"];
+        assert(grid && grid.hasVerticalScroller && grid.hasMoreRows);
+        // 展开后立刻排出 20 行：暂时关掉追加，滚到底数出已排的行数，再滚回顶部。
+        grid.hasMoreRows = NO;
+        [grid scrollToTopOffset:CGFLOAT_MAX];
+        assert(NSMaxRange(grid.visibleRowRange) == 20);
+        grid.hasMoreRows = YES;
+        [grid scrollToTopOffset:0];
+        assert(grid.visibleRowRange.location == 0);
+        auto key = [](unsigned short code) {
+            return [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0
+                windowNumber:0 context:nil characters:@"" charactersIgnoringModifiers:@"" isARepeat:NO keyCode:code];
+        };
+        auto highlighted = [&] {
+            for (NSView *view in MSIMECandidateControlSubviews(panel.contentView))
+                if ([view isKindOfClass:MSIMECandidateButton.class] && view.tag >= 0 && ((MSIMECandidateButton *)view).candidateHighlighted)
+                    return (NSInteger)view.tag;
+            return (NSInteger)-1;
+        };
+        // 一行一行往下走到远超首次排出的范围，每一步高亮都跟着光标。
+        NSUInteger previous = 0;
+        for (NSUInteger step = 0; step < 60; ++step) {
+            assert([controller handleExpandedCandidateEvent:key(125) client:client]);
+            const NSUInteger cursor = [[controller valueForKey:@"expandedCursor"] unsignedIntegerValue];
+            assert(cursor > previous && highlighted() == (NSInteger)cursor);
+            previous = cursor;
+        }
+        // 翻屏同样不会停在已排的末行。
+        for (NSUInteger step = 0; step < 5; ++step) {
+            assert([controller handleExpandedCandidateEvent:key(121) client:client]);
+            const NSUInteger cursor = [[controller valueForKey:@"expandedCursor"] unsignedIntegerValue];
+            assert(cursor > previous && highlighted() == (NSInteger)cursor);
+            previous = cursor;
+        }
+        assert(controller.gridMeasuredItems < many.count);
+        for (NSView *child in MSIMECandidateControlSubviews(panel.contentView))
+            assert(![child.identifier isEqual:@"candidate-page-indicator"]);
+        // 滚到已排的末尾：追加行，文档变高，看到的首行不变。
+        grid = [controller valueForKey:@"expandedScrollView"];
+        const CGFloat before = NSHeight(grid.documentView.frame);
+        const CGFloat bottom = before - NSHeight(grid.contentView.bounds);
+        [grid scrollToTopOffset:bottom];
+        assert(NSHeight(grid.documentView.frame) > before);
+        const NSRange visibleRows = grid.visibleRowRange;
+        const CGFloat top = NSHeight(grid.documentView.frame) - NSMaxY(grid.documentVisibleRect);
+        assert(fabs(top - bottom) < 1 && visibleRows.length > 0);
+        // 看得见的按钮都在视口里，没有因为文档变高而错位。
+        const NSRect shown = grid.documentVisibleRect;
+        NSUInteger inside = 0;
+        for (NSView *view in grid.documentView.subviews)
+            if (NSIntersectsRect(view.frame, shown)) ++inside;
+        assert(inside > 0);
+        for (NSView *view in grid.documentView.subviews)
+            assert(NSMinY(view.frame) >= -1 && NSMaxY(view.frame) <= NSHeight(grid.documentView.frame) + 1);
+        [controller setValue:@0 forKey:@"expandedCursor"];
+        [controller closeExpandedCandidates];
+        appearance.showsCandidatePageNumber = NO;
+    }
+    session.cursor = 0;
     [appearance applySharedCandidatePreferences:@{@"candidate_count_mode":@"adaptive", @"candidate_max_width":@400}];
     session.texts = texts;
     [controller setValue:[session viewWithError:nil] forKey:@"view"];

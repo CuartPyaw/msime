@@ -47,6 +47,16 @@ int main()
     // 含 `through` 的是最后一行时没有下一页。
     const auto last = msime::mac::LayoutAdaptiveCandidates(lazyWidths, 300, 5, 0, {}, 0, 6);
     assert(!last.more && last.starts == full.starts);
+    // 至少排够 `minimumRows` 行才停：展开网格要排满视口，不只是光标那一行。
+    const auto window = msime::mac::LayoutAdaptiveCandidates(lazyWidths, 300, 5, 0, {}, 0, 0, 3);
+    assert((window.starts == std::vector<std::size_t>{0, 3, 4, 5}) && window.more && window.widths[2] == full.widths[2]);
+    const auto beyond = msime::mac::LayoutAdaptiveCandidates(lazyWidths, 300, 5, 0, {}, 0, 0, 10);
+    assert(!beyond.more && beyond.starts == full.starts);
+    // 等宽列的展开网格同样按需：前几行与全量一致。
+    const auto gridFull = msime::mac::LayoutAdaptiveCandidates(std::vector<double>(40, 45), 295, 5, 6);
+    const auto gridLazy = msime::mac::LayoutAdaptiveCandidates(std::vector<double>(40, 45), 295, 5, 6, {}, 0, 0, 2);
+    assert(gridLazy.more && gridLazy.widths.size() == 2 &&
+           std::equal(gridLazy.starts.begin(), gridLazy.starts.end(), gridFull.starts.begin()));
     // 只给前缀时停不下来：最后一行未满，也没有 `more`，由调用方补量。
     const auto prefix = msime::mac::LayoutAdaptiveCandidates({40, 40}, 300, 5, 0, {}, 0, 0);
     assert(!prefix.more && (prefix.starts == std::vector<std::size_t>{0, 2}));
