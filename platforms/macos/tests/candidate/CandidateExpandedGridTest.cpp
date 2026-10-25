@@ -34,6 +34,22 @@ int main()
     assert(msime::mac::StepAdaptiveCandidates(expanded, 6, 5, ExpandedGridMove::Up, 0).cursor == 3);
     assert(msime::mac::StepAdaptiveCandidates(expanded, 0, 5, ExpandedGridMove::Up, 0).close);
     assert(msime::mac::LayoutAdaptiveCandidates({}, 0, 0).widths.empty());
+    // 按需分页：停在含 `through` 的那一行之后，已排的行与全量排版逐行一致。
+    const std::vector<double> lazyWidths{40, 40, 40, 200, 500, 20, 30, 30};
+    const auto full = msime::mac::LayoutAdaptiveCandidates(lazyWidths, 300, 5);
+    assert(!full.more && full.knownPages() == full.widths.size());
+    const auto firstRow = msime::mac::LayoutAdaptiveCandidates(lazyWidths, 300, 5, 0, {}, 0, 0);
+    assert((firstRow.starts == std::vector<std::size_t>{0, 3}) && firstRow.more && firstRow.knownPages() == 2);
+    assert(firstRow.widths[0] == full.widths[0] && firstRow.rowFor(2) == 0);
+    const auto third = msime::mac::LayoutAdaptiveCandidates(lazyWidths, 300, 5, 0, {}, 0, 4);
+    assert((third.starts == std::vector<std::size_t>{0, 3, 4, 5}) && third.more && third.rowFor(4) == 2);
+    assert(third.widths[2] == full.widths[2]);
+    // 含 `through` 的是最后一行时没有下一页。
+    const auto last = msime::mac::LayoutAdaptiveCandidates(lazyWidths, 300, 5, 0, {}, 0, 6);
+    assert(!last.more && last.starts == full.starts);
+    // 只给前缀时停不下来：最后一行未满，也没有 `more`，由调用方补量。
+    const auto prefix = msime::mac::LayoutAdaptiveCandidates({40, 40}, 300, 5, 0, {}, 0, 0);
+    assert(!prefix.more && (prefix.starts == std::vector<std::size_t>{0, 2}));
     const auto exact = msime::mac::LayoutAdaptiveCandidates({45, 45, 45, 45, 45, 45, 45}, 295, 5, 6);
     assert(exact.starts[1] == 6);
     // 23 个候选、每行 5 个：5 行，最后一行只有 3 个（20、21、22）。

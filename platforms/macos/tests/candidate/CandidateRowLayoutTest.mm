@@ -125,9 +125,19 @@ static void FinishCandidateFrameAnimation(MSIMEInputController *controller) {
 
 @interface AdaptiveLayoutController : MSIMEInputController
 @property(nonatomic) BOOL animatesWindowFrame;
+// 普通候选窗一次测量里最多的项数，用来确认按需分页没有量全部候选。
+@property(nonatomic) NSUInteger largestMeasurement;
 @end
 @implementation AdaptiveLayoutController
 - (void)reportPointerToLifecycle {}
+- (MSIMECandidatePageGeometry)candidatePageGeometry:(NSArray *)candidates font:(NSFont *)font glossFont:(NSFont *)glossFont
+                                     showSelectedBar:(BOOL)showSelectedBar inset:(CGFloat)inset paging:(BOOL)paging
+                                             visible:(NSRect)visible preeditWidth:(CGFloat)preeditWidth
+                                        minimumWidth:(CGFloat)minimumWidth reservesGloss:(BOOL)reservesGloss {
+    if (reservesGloss) self.largestMeasurement = MAX(self.largestMeasurement, candidates.count);
+    return [super candidatePageGeometry:candidates font:font glossFont:glossFont showSelectedBar:showSelectedBar inset:inset
+        paging:paging visible:visible preeditWidth:preeditWidth minimumWidth:minimumWidth reservesGloss:reservesGloss];
+}
 - (void)applyCandidateFrame:(NSRect)frame {
     [super applyCandidateFrame:frame];
     if (!self.animatesWindowFrame) FinishCandidateFrameAnimation(self);
@@ -317,6 +327,47 @@ static void TestAdaptiveCandidateLayout(RowLayoutClient *client) {
         const NSUInteger expected = (NSUInteger)floor((maximum - 2 * NSMinX(firstCell) -
             NSWidth(expandButton.frame) + gap) / (NSWidth(firstCell) + gap));
         assert([[controller valueForKey:@"adaptivePageCandidates"] count] == expected);
+    }
+    // 按需分页：300 项只量到首行排完；只显示 ‹ ›、不显示总页数；逐页翻到末页，页与页首尾相接。
+    {
+        appearance.showsCandidatePageNumber = YES;
+        [appearance applySharedCandidatePreferences:@{@"candidate_count_mode":@"adaptive", @"candidate_max_width":@400}];
+        auto assertArrows = [&](BOOL previous, BOOL next) {
+            for (NSView *child in MSIMECandidateControlSubviews(panel.contentView))
+                assert(![child.identifier isEqual:@"candidate-page-indicator"]);
+            MSIMECandidateButton *back = CandidateButton(panel.contentView, -1);
+            MSIMECandidateButton *forward = CandidateButton(panel.contentView, -2);
+            assert(back && forward && back.enabled == previous && forward.enabled == next);
+        };
+        NSMutableArray *many = [NSMutableArray array];
+        for (NSUInteger index = 0; index < 300; ++index) [many addObject:@"合成词组"];
+        session.texts = many;
+        session.cursor = 0;
+        [controller setValue:[session viewWithError:nil] forKey:@"view"];
+        controller.largestMeasurement = 0;
+        [controller renderCandidates];
+        assert(controller.largestMeasurement > 0 && controller.largestMeasurement <= MSIMEAdaptiveCandidateMeasureChunk);
+        assertArrows(NO, YES);
+        session.texts = [many subarrayWithRange:NSMakeRange(0, 40)];
+        [controller setValue:[session viewWithError:nil] forKey:@"view"];
+        [controller renderCandidates];
+        NSUInteger expectedStart = 0, pages = 1;
+        for (;;) {
+            NSArray *page = [controller valueForKey:@"adaptivePageCandidates"];
+            assert(page.count && [page.firstObject[@"id"][@"index"] unsignedIntegerValue] == expectedStart);
+            expectedStart += page.count;
+            if (!CandidateButton(panel.contentView, -2).enabled) break;
+            assertArrows(pages > 1, YES);
+            NSDictionary *next = [controller candidateCommand:MSIME_NEXT_PAGE];
+            assert(next && session.cursor == expectedStart);
+            [controller setValue:next[@"view"] forKey:@"view"];
+            [controller renderCandidates];
+            assert(++pages < 40);
+        }
+        assert(pages > 2 && expectedStart == 40);
+        assertArrows(YES, NO);
+        appearance.showsCandidatePageNumber = NO;
+        session.cursor = 0;
     }
     [appearance applySharedCandidatePreferences:@{@"candidate_count_mode":@"adaptive", @"candidate_max_width":@400}];
     session.texts = texts;

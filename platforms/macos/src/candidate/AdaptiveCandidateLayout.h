@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <vector>
 #include "../../../../shared/candidate/CandidateExpandedGrid.h"
 
@@ -9,6 +10,11 @@ namespace msime::mac {
 struct AdaptiveCandidateRows {
     std::vector<std::size_t> starts{0};
     std::vector<std::vector<double>> widths;
+    // 按需分页停在最后一行之后时为真：后面还有候选，只是还没排。
+    bool more = false;
+
+    // 已知的页数：排好的行，加上还没排的下一页（如果有）。总数未知，只够判断前后有没有页。
+    std::size_t knownPages() const { return widths.size() + (more ? 1 : 0); }
 
     std::size_t rowFor(std::size_t index) const {
         if (widths.empty()) return 0;
@@ -44,10 +50,13 @@ inline candidate::ExpandedGridStep StepAdaptiveCandidates(const AdaptiveCandidat
 }
 
 // 单行按自然宽度装满；展开时列跨度向上取整，长词独占多列，超宽词收窄到整行。
+// 逐行贪心装填，一行只取决于它之前的候选，所以排完含 `through` 的那一行就可以停，`more` 标出后面还有。
+// 只给了前缀宽度时，没有 `more` 的最后一行可能还没装满，调用方要么已给出全部宽度，要么补量后重排。
 inline AdaptiveCandidateRows LayoutAdaptiveCandidates(const std::vector<double> &naturalWidths,
                                                        double available, double gap, std::size_t columns = 0,
                                                        const std::vector<double> &numberWidths = {},
-                                                       double minimumWidth = 0) {
+                                                       double minimumWidth = 0,
+                                                       std::size_t through = std::numeric_limits<std::size_t>::max()) {
     AdaptiveCandidateRows result;
     available = std::max(1.0, available);
     gap = std::max(0.0, gap);
@@ -72,6 +81,10 @@ inline AdaptiveCandidateRows LayoutAdaptiveCandidates(const std::vector<double> 
         result.widths.push_back(rowWidths(start, end - 1));
         start = end - 1;
         result.starts.push_back(start);
+        if (start > through) {
+            result.more = true;
+            return result;
+        }
     }
     if (start < naturalWidths.size()) result.widths.push_back(rowWidths(start, naturalWidths.size()));
     result.starts.push_back(naturalWidths.size());

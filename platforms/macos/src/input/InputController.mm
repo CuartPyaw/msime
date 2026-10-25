@@ -493,6 +493,9 @@ static NSString *CandidateAnnotationRun(NSDictionary *candidate, BOOL traditiona
 }
 
 // One page of candidate rows laid out at the card width they get: what the panel draws, what its buttons answer clicks in, and what the keymap panel keeps clear of.
+// 自动适应按需测量的首批项数；量到的还排不完高亮所在那一行时，按已量项数成倍追加。
+static constexpr NSUInteger MSIMEAdaptiveCandidateMeasureChunk = 16;
+
 struct MSIMECandidatePageGeometry {
     std::vector<msime::candidate::CandidateRowLayout> rows;
     std::vector<double> naturalColumns;
@@ -2499,7 +2502,7 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
 - (BOOL)expandedCandidatesOffered {
     if (![self expandedCandidatesAllowed]) return NO;
     if (_appearance.adaptiveCandidateCount && _adaptiveCandidates.count)
-        return _adaptivePages.widths.size() > 1;
+        return _adaptivePages.knownPages() > 1;
     NSUInteger pageCount = 0;
     return MSIMEStrictUnsignedIntegerValue(_view[@"page_count"], &pageCount) && pageCount > 1;
 }
@@ -4275,7 +4278,8 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     if (![self usesAdaptiveCandidates] || _expandedCandidates || !_adaptivePages.widths.size() ||
         (command != MSIME_NEXT_PAGE && command != MSIME_PREVIOUS_PAGE))
         return [_session command:command error:nil];
-    const NSUInteger count = _adaptivePages.widths.size();
+    // 下一页从已排最后一行的结尾开始，按需分页总会多排出这一项的位置。
+    const NSUInteger count = _adaptivePages.knownPages();
     const NSUInteger page = command == MSIME_NEXT_PAGE ? MIN(_adaptivePage + 1, count - 1)
                                                        : (_adaptivePage ? _adaptivePage - 1 : 0);
     const NSUInteger target = [_adaptiveCandidates[_adaptivePages.starts[page]][@"id"][@"index"] unsignedIntegerValue];
@@ -9530,13 +9534,21 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     const BOOL adaptive = [self usesAdaptiveCandidates];
     const CGFloat adaptiveWidth = MIN(_appearance.candidateMaxWidth - canvasExtra, rowVisible.size.width - 2 * MSIMECandidateScreenMargin);
     MSIMECandidatePageGeometry adaptiveMeasure;
+    NSUInteger adaptiveHighlight = 0;
+    // 按需分页：只量到高亮所在那一行排完、再多一项确认后面还有；不够就成倍补量重排，候选再多也不全量测量。
+    // 单项宽度不随测量了多少项变化（序号栏按行内编号另算），所以前缀量出的行与全量一致。
     auto paginate = [&](CGFloat controls) {
-        _adaptivePages = msime::mac::LayoutAdaptiveCandidates(adaptiveMeasure.unnumberedColumns, adaptiveWidth - 2 * inset - controls,
-            adaptiveMeasure.columnGap, 0, adaptiveMeasure.numberWidths, adaptiveMeasure.minimumColumnWidth);
-        NSUInteger highlight = 0;
-        for (NSUInteger index = 0; index < _adaptiveCandidates.count; ++index)
-            if (MSIMEStrictBoolean(_adaptiveCandidates[index][@"highlighted"])) { highlight = index; break; }
-        _adaptivePage = _adaptivePages.rowFor(highlight);
+        for (;;) {
+            const NSUInteger measured = adaptiveMeasure.unnumberedColumns.size();
+            _adaptivePages = msime::mac::LayoutAdaptiveCandidates(adaptiveMeasure.unnumberedColumns, adaptiveWidth - 2 * inset - controls,
+                adaptiveMeasure.columnGap, 0, adaptiveMeasure.numberWidths, adaptiveMeasure.minimumColumnWidth, adaptiveHighlight);
+            if (_adaptivePages.more || measured >= _adaptiveCandidates.count) break;
+            const NSUInteger next = MIN(_adaptiveCandidates.count, MAX(MSIMEAdaptiveCandidateMeasureChunk, 2 * measured));
+            adaptiveMeasure = [self candidatePageGeometry:[_adaptiveCandidates subarrayWithRange:NSMakeRange(0, next)]
+                font:font glossFont:glossFont showSelectedBar:geometry.showSelectedBar inset:inset paging:NO visible:visible
+                preeditWidth:0 minimumWidth:0 reservesGloss:YES];
+        }
+        _adaptivePage = _adaptivePages.rowFor(adaptiveHighlight);
         const NSUInteger start = _adaptivePages.starts[_adaptivePage];
         _adaptivePageCandidates = candidates =
             [_adaptiveCandidates subarrayWithRange:NSMakeRange(start, _adaptivePages.starts[_adaptivePage + 1] - start)];
@@ -9555,9 +9567,8 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
             return;
         }
         _adaptiveCandidates = entries;
-        adaptiveMeasure = [self candidatePageGeometry:entries font:font glossFont:glossFont
-            showSelectedBar:geometry.showSelectedBar inset:inset paging:NO visible:visible
-            preeditWidth:0 minimumWidth:0 reservesGloss:YES];
+        for (NSUInteger index = 0; index < entries.count; ++index)
+            if (MSIMEStrictBoolean(entries[index][@"highlighted"])) { adaptiveHighlight = index; break; }
         paginate(0);
     } else {
         _adaptiveCandidates = nil;
@@ -9569,7 +9580,8 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     NSUInteger page = 0; NSUInteger pageCount = 0;
     MSIMEStrictUnsignedIntegerValue(_view[@"page"], &page);
     MSIMEStrictUnsignedIntegerValue(_view[@"page_count"], &pageCount);
-    if (adaptive) { page = _adaptivePage; pageCount = _adaptivePages.widths.size(); }
+    // 自动适应只知道到下一页为止的页数，够判断前后有没有页；总页数不显示。
+    if (adaptive) { page = _adaptivePage; pageCount = _adaptivePages.knownPages(); }
     const BOOL paging = pageCount > 1;
     // 用户开关控制所有鼠标翻页按钮；共享版式把它们放进列表，显式关闭时也不回退到首行。
     const BOOL pageControls = paging && _appearance.showsCandidatePageNumber && !skin.pageArrows.has_value();
@@ -9594,12 +9606,15 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     if (adaptive && paging) {
         paginate(listPager.column + toggle.column() + (compactExpand ? arrowWidth : 0));
         page = _adaptivePage;
-        pageCount = _adaptivePages.widths.size();
+        pageCount = _adaptivePages.knownPages();
     }
+    // 「1 / 3」只在知道总页数时显示；自动适应只留 ‹ ›。
+    const BOOL pageIndicatorShown = pageControls && !adaptive;
     NSFont *pageIndicatorFont = [NSFont monospacedDigitSystemFontOfSize:MSIMECandidatePageIndicatorPointSize * scale weight:NSFontWeightRegular];
-    NSString *pageIndicator = pageControls ? [NSString stringWithFormat:@"%lu / %lu", (unsigned long)(page + 1), (unsigned long)pageCount] : @"";
-    const CGFloat pageIndicatorWidth = pageControls ? ceil([pageIndicator sizeWithAttributes:@{NSFontAttributeName: pageIndicatorFont}].width) : 0;
-    const CGFloat pageControlsWidth = (pageControls ? pageIndicatorWidth + indicatorGap + 2 * arrowWidth : 0) + (expandable && !skinExpand && !compactExpand ? arrowWidth : 0);
+    NSString *pageIndicator = pageIndicatorShown ? [NSString stringWithFormat:@"%lu / %lu", (unsigned long)(page + 1), (unsigned long)pageCount] : @"";
+    const CGFloat pageIndicatorWidth = pageIndicatorShown ? ceil([pageIndicator sizeWithAttributes:@{NSFontAttributeName: pageIndicatorFont}].width) : 0;
+    const CGFloat pageControlsWidth = (pageControls ? (pageIndicatorShown ? pageIndicatorWidth + indicatorGap : 0) + 2 * arrowWidth : 0) +
+        (expandable && !skinExpand && !compactExpand ? arrowWidth : 0);
     const auto preeditMargin = MSIMECandidatePreeditMargins(skin, preedit.length > 0, scale);
     const CGFloat bodyRowGap = MSIMECandidateBodyRowGap(skin, preedit.length > 0, scale);
     const CGFloat headerContentHeight = MAX(preeditHeight, pageControls || logo || (expandable && !skinExpand && !compactExpand) ? headerRow : 0);
@@ -9788,15 +9803,17 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         // 首行右对齐；预编辑更高时，按钮仍相对它居中。
         const CGFloat controlsBottom = headerBottom + preeditMargin.bottom + floor((headerContentHeight - headerRow) / 2);
         const CGFloat arrowsLeft = width - inset - (expandable ? 3 : 2) * arrowWidth;
-        NSTextField *indicator = [NSTextField labelWithString:pageIndicator];
-        indicator.identifier = @"candidate-page-indicator";
-        indicator.accessibilityLabel = [NSString stringWithFormat:@"第 %lu 页，共 %lu 页", (unsigned long)(page + 1), (unsigned long)pageCount];
-        indicator.font = pageIndicatorFont;
-        indicator.alignment = NSTextAlignmentRight;
-        const CGFloat indicatorHeight = ceil([pageIndicator sizeWithAttributes:@{NSFontAttributeName: pageIndicatorFont}].height);
-        indicator.frame = NSMakeRect(arrowsLeft - indicatorGap - pageIndicatorWidth,
-                                     controlsBottom + floor((headerRow - indicatorHeight) / 2), pageIndicatorWidth, indicatorHeight);
-        [content.candidateContentView addSubview:indicator];
+        if (pageIndicatorShown) {
+            NSTextField *indicator = [NSTextField labelWithString:pageIndicator];
+            indicator.identifier = @"candidate-page-indicator";
+            indicator.accessibilityLabel = [NSString stringWithFormat:@"第 %lu 页，共 %lu 页", (unsigned long)(page + 1), (unsigned long)pageCount];
+            indicator.font = pageIndicatorFont;
+            indicator.alignment = NSTextAlignmentRight;
+            const CGFloat indicatorHeight = ceil([pageIndicator sizeWithAttributes:@{NSFontAttributeName: pageIndicatorFont}].height);
+            indicator.frame = NSMakeRect(arrowsLeft - indicatorGap - pageIndicatorWidth,
+                                         controlsBottom + floor((headerRow - indicatorHeight) / 2), pageIndicatorWidth, indicatorHeight);
+            [content.candidateContentView addSubview:indicator];
+        }
         for (NSUInteger direction = 0; direction < 2; ++direction) {
             MSIMECandidateButton *button = [MSIMECandidateButton buttonWithTitle:direction == 0 ? @"‹" : @"›" target:self action:@selector(changeCandidatePage:)];
             button.frame = NSMakeRect(arrowsLeft + direction * arrowWidth, controlsBottom, arrowWidth, headerRow);
@@ -10254,7 +10271,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     if (!MSIMEUnsignedCandidateIdentityValue(_view[@"page_count"])) return;
     NSUInteger page = 0; NSUInteger count = 0;
     if (!MSIMEStrictUnsignedIntegerValue(_view[@"page"], &page) || !MSIMEStrictUnsignedIntegerValue(_view[@"page_count"], &count)) return;
-    if ([self usesAdaptiveCandidates]) { page = _adaptivePage; count = _adaptivePages.widths.size(); }
+    if ([self usesAdaptiveCandidates]) { page = _adaptivePage; count = _adaptivePages.knownPages(); }
     if (count == 0 || page >= count) return;
     // 先定下要派发的命令，报告和派发共用同一个条件，免得两边各写一份、日后改出分歧。
     uint32_t command = UINT32_MAX;
