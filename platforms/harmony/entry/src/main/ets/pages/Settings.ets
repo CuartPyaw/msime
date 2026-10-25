@@ -1209,10 +1209,16 @@ class SettingsBridge {
         KeyboardLog.error(`dictionary scel request failed: ${describeError(error)}`);
         deliver(JSON.stringify({ ok: false, error: 'dictionary_scel_invalid' }));
       });
+    } else if (kind === 'statistics_auth_settings') {
+      this.statisticsAuthenticationSettings(payload).then(deliver).catch(failed);
     } else if (kind === 'statistics_auth') {
-      this.statisticsAuthentication.authenticate().then((success: boolean): void => {
-        deliver(success ? JSON.stringify({ ok: true, value: true }) : JSON.stringify({ ok: false, error: '未完成身份验证，请重试。' }));
-      }).catch(failed);
+      if (this.context === undefined) {
+        failed(new Error('认证宿主未就绪'));
+      } else {
+        this.statisticsAuthentication.authenticate(this.context).then((success: boolean): void => {
+          deliver(success ? JSON.stringify({ ok: true, value: true }) : JSON.stringify({ ok: false, error: '未完成身份验证，请重试。' }));
+        }).catch(failed);
+      }
     } else if (kind === 'typing_statistics') {
       this.typingStatisticsOnWorker(payload).then(deliver).catch(failed);
     } else if (kind === 'typing_upload') {
@@ -2251,6 +2257,17 @@ class SettingsBridge {
       KeyboardLog.error(`vocabulary review failed: ${describeError(error)}`);
       return JSON.stringify({ ok: false, error: 'vocabulary review failed' });
     }
+  }
+
+  private async statisticsAuthenticationSettings(payload: string): Promise<string> {
+    if (this.context === undefined) throw new Error('认证宿主未就绪');
+    const action: TypingStatisticsAction = JSON.parse(payload) as TypingStatisticsAction;
+    if (action.operation === 'save' && typeof action.enabled === 'boolean') {
+      await this.statisticsAuthentication.setEnabled(this.context, action.enabled);
+    } else if (action.operation !== 'load') {
+      throw new Error('无效的认证设置');
+    }
+    return JSON.stringify({ ok: true, value: this.statisticsAuthentication.enabled(this.context) });
   }
 
   typingStatistics(actionDocument: string): string {

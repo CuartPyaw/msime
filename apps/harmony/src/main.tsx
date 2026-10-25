@@ -1169,6 +1169,25 @@ function makeClient(
   };
   const typingStatistics: TypingStatisticsClient = {
     authentication: {
+      settings: {
+        load: async () =>
+          unwrap<boolean>(
+            await bridgeRequest(
+              native,
+              "statistics_auth_settings",
+              JSON.stringify({ operation: "load" }),
+            ),
+          ),
+        save: async (enabled: boolean) => {
+          unwrap<boolean>(
+            await bridgeRequest(
+              native,
+              "statistics_auth_settings",
+              JSON.stringify({ operation: "save", enabled }),
+            ),
+          );
+        },
+      },
       authenticate: async () => {
         const authorized = unwrap<boolean>(
           await bridgeRequest(native, "statistics_auth", "{}", 120000),

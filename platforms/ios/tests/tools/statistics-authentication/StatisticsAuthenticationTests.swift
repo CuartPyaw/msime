@@ -59,6 +59,21 @@ struct StatisticsAuthenticationTests {
     precondition(gate.authorized)
     gate.lock()
     precondition(!gate.authorized)
+    let disabled = AuthenticationContext()
+    let enabledAgain = AuthenticationContext()
+    var choices = [disabled, enabledAgain]
+    let configurable = StatisticsAuthentication(makeContext: { choices.removeFirst() })
+    configurable.authenticate()
+    configurable.authenticate(enabled: false)
+    precondition(configurable.authorized && disabled.invalidated && !configurable.busy)
+    disabled.reply?(true, nil)
+    await Task.yield()
+    configurable.lock()
+    configurable.authenticate(enabled: true)
+    precondition(!configurable.authorized && enabledAgain.evaluations == 1)
+    configurable.lock()
+    configurable.authenticate(enabled: false)
+    precondition(configurable.authorized && !configurable.busy)
     print("iOS 统计认证：无密码、失败、重试、后台和过期回调检查通过")
   }
 }

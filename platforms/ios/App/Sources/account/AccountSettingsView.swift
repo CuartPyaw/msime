@@ -8,6 +8,7 @@ struct AccountSettingsView: View {
   @Environment(\.horizontalSizeClass) private var widthClass
   @AppStorage(GlobalThemePreference.key, store: KeyboardFeedbackPreference.defaults)
   private var skin = GlobalThemeCatalog.systemId
+  @AppStorage(StatisticsAuthentication.preferenceKey) private var statisticsAuthenticationEnabled = true
   @State private var signedIn = false
   @State private var user: CommunityUser?
   @State private var profile: CommunityProfile?
@@ -333,6 +334,19 @@ struct AccountSettingsView: View {
       }
       .buttonStyle(PressFillButtonStyle())
       .accessibilityIdentifier("accountPrivacyLink")
+      MeDivider()
+      Toggle(isOn: $statisticsAuthenticationEnabled) {
+        VStack(alignment: .leading, spacing: 2) {
+          Text("统计页身份验证").font(.system(size: 16))
+          Text("开启后使用系统认证，未配置锁屏凭据时直接进入")
+            .font(.system(size: 12)).foregroundStyle(MetasequoiaTheme.sub)
+        }
+      }
+      .toggleStyle(.switch)
+      .tint(MetasequoiaTheme.switchOn)
+      .padding(.vertical, 8)
+      .padding(.horizontal, 14)
+      .accessibilityIdentifier("accountStatisticsAuthentication")
       MeDivider()
       // 皮肤编辑器的入口只留皮肤页那一个。这里原来还有一个「我的设计」指向同一个编辑器,于是同一件事在两个标签页下各有一条路。
       NavigationLink { AppIconSettingsView() } label: {

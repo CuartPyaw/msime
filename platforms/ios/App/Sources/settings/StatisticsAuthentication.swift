@@ -12,6 +12,7 @@ extension LAContext: StatisticsAuthenticationContext {}
 /// 仅系统明确表示未配置密码时免认证；临时故障和取消不能变成通行凭据。
 @MainActor
 final class StatisticsAuthentication: ObservableObject {
+  static let preferenceKey = "statisticsAuthenticationEnabled"
   @Published private(set) var authorized = false
   @Published private(set) var busy = false
   @Published private(set) var message = ""
@@ -24,7 +25,12 @@ final class StatisticsAuthentication: ObservableObject {
     self.makeContext = makeContext
   }
 
-  func authenticate(automatically: Bool = false) {
+  func authenticate(automatically: Bool = false, enabled: Bool = true) {
+    if !enabled {
+      lock()
+      authorized = true
+      return
+    }
     guard !busy, !authorized, !automatically || !attempted else { return }
     attempted = true
     generation += 1

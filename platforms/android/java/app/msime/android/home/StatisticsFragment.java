@@ -129,6 +129,10 @@ public final class StatisticsFragment extends HomeTabFragment {
     private void requestAuthentication() {
         if (authentication != null) return;
         Context context = requireContext();
+        if (!StatisticsAuthenticationPreference.enabled(context)) {
+            reload();
+            return;
+        }
         KeyguardManager keyguard = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
         if (keyguard == null) {
             MsToast.show(context, "无法读取系统认证状态，请稍后重试");

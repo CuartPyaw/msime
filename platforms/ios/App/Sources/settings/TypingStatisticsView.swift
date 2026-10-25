@@ -5,7 +5,7 @@ import SwiftUI
 /// 统计只保留聚合计数，所以设计稿里的常用词和最常打错两张卡片没有做：它们需要用户打过的词本身。
 struct TypingStatisticsView: View {
   var body: some View {
-    StatisticsAuthenticationGate { AuthenticatedTypingStatisticsView() }
+    StatisticsAuthenticationGate { NavigationStack { AuthenticatedTypingStatisticsView() } }
   }
 }
 

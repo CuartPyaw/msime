@@ -4,6 +4,8 @@ import { compactPage } from "../core/page-style";
 
 /** 移动宿主提供系统认证；只有明确未配置凭据或验证成功时才完成 Promise。 */
 export interface StatisticsAuthenticationClient {
+  /** 只在提供本机开关的宿主显示「我的」设置行。 */
+  settings?: StatisticsAuthenticationSettings;
   authenticate(): Promise<void>;
   cancel(): void;
   onLock(listener: () => void): () => void;
@@ -93,4 +95,10 @@ export function StatisticsAuthenticationGate({
       <ActionButton disabled={busy} action={authenticate} label={busy ? "正在验证…" : "验证身份"} />
     </div>
   );
+}
+
+/** 宿主持久化本机认证选择，不进入账号偏好或同步文档。 */
+export interface StatisticsAuthenticationSettings {
+  load(): Promise<boolean>;
+  save(enabled: boolean): Promise<void>;
 }

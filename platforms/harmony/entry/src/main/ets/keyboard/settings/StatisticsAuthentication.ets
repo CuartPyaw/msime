@@ -1,4 +1,7 @@
+import preferences from '@ohos.data.preferences';
+import common from '@ohos.app.ability.common';
 import userAuth from '@ohos.userIAM.userAuth';
+import cryptoFramework from '@ohos.security.cryptoFramework';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 /** 只接受系统验证成功或明确未设置锁屏密码，不记录认证令牌。 */
@@ -7,8 +10,26 @@ export class StatisticsAuthentication {
   private instance: userAuth.UserAuthInstance | undefined = undefined;
   private finish: ((success: boolean) => void) | undefined = undefined;
 
-  authenticate(): Promise<boolean> {
+  enabled(context: common.UIAbilityContext): boolean {
+    return preferences.getPreferencesSync(context, { name: 'statistics-authentication' })
+      .getSync('enabled', true) as boolean;
+  }
+
+  async setEnabled(context: common.UIAbilityContext, enabled: boolean): Promise<void> {
+    const store = preferences.getPreferencesSync(context, { name: 'statistics-authentication' });
+    const previous = store.getSync('enabled', true);
+    store.putSync('enabled', enabled);
+    try {
+      await store.flush();
+    } catch (error) {
+      store.putSync('enabled', previous);
+      throw error as Error;
+    }
+  }
+
+  authenticate(context: common.UIAbilityContext): Promise<boolean> {
     this.cancel();
+    if (!this.enabled(context)) return Promise.resolve(true);
     try {
       userAuth.getAvailableStatus(userAuth.UserAuthType.PIN, userAuth.AuthTrustLevel.ATL1);
     } catch (error) {
@@ -28,7 +49,9 @@ export class StatisticsAuthentication {
           }
         }
         const parameters: userAuth.AuthParam = {
-          challenge: new Uint8Array([]), authType: types, authTrustLevel: userAuth.AuthTrustLevel.ATL1
+          // 真机的认证窗口拒绝空挑战值，使用系统安全随机源生成本次请求的挑战。
+          challenge: cryptoFramework.createRandom().generateRandomSync(16).data,
+          authType: types, authTrustLevel: userAuth.AuthTrustLevel.ATL1
         };
         const widget: userAuth.WidgetParam = { title: '查看打字统计' };
         instance = userAuth.getUserAuthInstance(parameters, widget);
