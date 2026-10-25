@@ -10,6 +10,7 @@ import type { PunctuationPreferences } from "../settings/punctuation-preferences
 import type { KeybindingPreferences } from "../settings/keybinding-preferences";
 import type { WubiPreferences } from "../settings/wubi-preferences";
 import type { VietnamesePreferences } from "../settings/vietnamese-preferences";
+import type { KoreanPreferences } from "../settings/korean-preferences";
 import type { FloatingToolbarPreferences } from "../settings/floating-toolbar-preferences";
 import type { TraditionalChineseVariant } from "../settings/chinese-output-preferences";
 import type {
@@ -88,6 +89,8 @@ export type Preferences = PunctuationPreferences &
     translation_ai?: boolean;
     /** 各宿主共用的匿名用量上报（每日活跃、会话结束与崩溃摘要）；缺省为开启。 */
     usage_reporting?: boolean;
+    /** 桌面应用检查更新跟的发布通道，关于页「版本与更新」里选；等于缺省的稳定版时 client-core 不写进文档。只属于本机，不进设置文件、不进账号同步。 */
+    update_channel?: "stable" | "beta" | "nightly";
     floating_toolbar?: FloatingToolbarPreferences;
     mixed_input?: MixedInputPreferences;
     multilingual_input?: MultilingualInputPreferences;
@@ -159,6 +162,7 @@ export type Preferences = PunctuationPreferences &
     /** 「输入时显示双拼键位提示」。没选过时文档里没有这一项，按关显示；macOS 那时仍沿用本机旧的选择。 */
     shuangpin_keymap_hint?: boolean;
     vietnamese?: VietnamesePreferences;
+    korean?: KoreanPreferences;
     /** 只出单字：全拼、双拼、五笔和粤拼的候选只留单个汉字；缺省为关。 */
     single_character_only?: boolean;
     candidate_page_size: number;

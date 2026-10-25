@@ -1234,6 +1234,80 @@ fn usage_reporting_defaults_on_and_survives_a_save() {
 }
 
 #[test]
+fn update_channel_defaults_to_stable_and_reads_unknown_values_as_stable() {
+    let defaults = Preferences::default();
+    assert_eq!(defaults.update_channel, UpdateChannel::Stable);
+    // 等于默认值时不写进文档，旧版本读到的文档和以前一样。
+    let serialized = serde_json::to_value(&defaults).unwrap();
+    assert!(serialized.get("update_channel").is_none());
+    assert_eq!(
+        serde_json::from_value::<Preferences>(serialized.clone())
+            .unwrap()
+            .update_channel,
+        UpdateChannel::Stable
+    );
+    for (value, expected) in [
+        ("beta", UpdateChannel::Beta),
+        ("nightly", UpdateChannel::Nightly),
+        ("stable", UpdateChannel::Stable),
+        // 以后的版本加的通道、手改的值：按稳定版读，整份偏好照常读出来。
+        ("canary", UpdateChannel::Stable),
+        ("Beta", UpdateChannel::Stable),
+        ("", UpdateChannel::Stable),
+    ] {
+        let mut document = serialized.clone();
+        document["update_channel"] = value.into();
+        assert_eq!(
+            serde_json::from_value::<Preferences>(document)
+                .unwrap()
+                .update_channel,
+            expected,
+            "{value}"
+        );
+    }
+    let mut malformed = serialized;
+    malformed["update_channel"] = 1.into();
+    assert!(serde_json::from_value::<Preferences>(malformed).is_err());
+
+    let nightly = Preferences {
+        update_channel: UpdateChannel::Nightly,
+        ..Preferences::default()
+    };
+    assert_eq!(
+        serde_json::to_value(&nightly).unwrap()["update_channel"],
+        "nightly"
+    );
+    assert!(nightly.validate().is_ok());
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    store.save(0, nightly).unwrap();
+    assert_eq!(
+        store.load().unwrap().preferences.update_channel,
+        UpdateChannel::Nightly
+    );
+    // 恢复默认设置回到稳定版。
+    assert_eq!(
+        store
+            .load()
+            .unwrap()
+            .preferences
+            .restored_to_defaults()
+            .update_channel,
+        UpdateChannel::Stable
+    );
+
+    assert_eq!(UpdateChannel::parse("beta"), Some(UpdateChannel::Beta));
+    assert_eq!(UpdateChannel::parse("canary"), None);
+    for channel in [
+        UpdateChannel::Stable,
+        UpdateChannel::Beta,
+        UpdateChannel::Nightly,
+    ] {
+        assert_eq!(UpdateChannel::parse(channel.as_str()), Some(channel));
+    }
+}
+
+#[test]
 fn app_logo_starts_hidden_but_an_upgraded_document_keeps_it() {
     let defaults = Preferences::default();
     assert!(!defaults.show_app_logo);
@@ -3665,6 +3739,51 @@ fn vietnamese_preferences_default_when_absent_and_round_trip() {
         serde_json::from_value(serde_json::json!({ "tone_style": "classic" })).unwrap();
     assert_eq!(partial.input_method, VietnameseInputMethod::Telex);
     assert_eq!(partial.tone_style, VietnameseToneStyle::Classic);
+}
+
+#[test]
+fn korean_layout_loads_legacy_files_and_roundtrips_romaja() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let mut document = serde_json::to_value(PreferencesSnapshot::default()).unwrap();
+    document["preferences"]
+        .as_object_mut()
+        .unwrap()
+        .remove("korean");
+    let bytes = serde_json::to_vec(&document).unwrap();
+    fs::write(store.path(), &bytes).unwrap();
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.preferences.korean.layout, KoreanLayout::Dubeolsik);
+    assert_eq!(fs::read(store.path()).unwrap(), bytes);
+    let mut preferences = loaded.preferences;
+    preferences.korean.layout = KoreanLayout::Romaja;
+    let saved = store.save(loaded.revision, preferences).unwrap();
+    assert_eq!(store.load().unwrap(), saved);
+    assert_eq!(
+        serde_json::to_value(saved.preferences).unwrap()["korean"]["layout"],
+        "romaja"
+    );
+}
+
+#[test]
+fn korean_unknown_disk_layout_falls_back_without_resetting_other_preferences() {
+    let dir = tempfile::tempdir().unwrap();
+    let store = PreferencesStore::new(dir.path());
+    let mut document = serde_json::to_value(PreferencesSnapshot::default()).unwrap();
+    document["preferences"]["korean"] =
+        serde_json::json!({ "layout": "future", "future_option": true });
+    document["preferences"]["candidate_page_size"] = 4.into();
+    let bytes = serde_json::to_vec(&document).unwrap();
+    fs::write(store.path(), &bytes).unwrap();
+    let loaded = store.load().unwrap();
+    assert_eq!(loaded.preferences.korean.layout, KoreanLayout::Dubeolsik);
+    assert_eq!(loaded.preferences.candidate_page_size, 4);
+    assert_eq!(fs::read(store.path()).unwrap(), bytes);
+    store.save(loaded.revision, loaded.preferences).unwrap();
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(store.path()).unwrap()).unwrap();
+    assert_eq!(saved["preferences"]["korean"]["future_option"], true);
+    assert!(serde_json::from_value::<Preferences>(document["preferences"].clone()).is_err());
 }
 
 #[test]

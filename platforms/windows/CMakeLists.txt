@@ -1,6 +1,10 @@
 cmake_minimum_required(VERSION 3.25)
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/common" "${CMAKE_CURRENT_SOURCE_DIR}/src/ipc" "${CMAKE_CURRENT_SOURCE_DIR}/src/candidate" "${CMAKE_CURRENT_SOURCE_DIR}/src/voice" "${CMAKE_CURRENT_SOURCE_DIR}/src/clipboard" "${CMAKE_CURRENT_SOURCE_DIR}/src/input" "${CMAKE_CURRENT_SOURCE_DIR}/src/system")
 project(MSIMEClientWindowsBoundary LANGUAGES CXX)
+# 原生宿主、演示和测试均使用 UTF-8 源码，MSVC 不能按本机代码页读取。
+if(MSVC)
+  add_compile_options(/utf-8)
+endif()
 option(MSIME_WINDOWS7_CLIENT "使用 Win7 原生设置与面板承载" OFF)
 include("${CMAKE_CURRENT_SOURCE_DIR}/Edition.cmake")
 # vcpkg-style dependency prefixes ship a Release variant under bin/ and a Debug
@@ -1004,6 +1008,17 @@ else()
   target_compile_options(windows-telemetry-consent PRIVATE -Wall -Wextra -Werror)
 endif()
 add_test(NAME windows-telemetry-consent COMMAND windows-telemetry-consent)
+# Server 后台更新检查里不碰 Windows API 的部分：偏好里的通道、共享层请求、回答解析和通知文字（UpdateNotification.h）。
+add_executable(windows-update-notification tests/system/update_notification.cpp)
+target_include_directories(windows-update-notification PRIVATE src)
+target_link_libraries(windows-update-notification PRIVATE nlohmann_json::nlohmann_json)
+if(MSVC)
+  target_compile_options(windows-update-notification PRIVATE /W4 /WX /utf-8)
+else()
+  target_compile_options(windows-update-notification PRIVATE -Wall -Wextra -Werror)
+endif()
+add_test(NAME windows-update-notification COMMAND windows-update-notification)
+set_tests_properties(windows-update-notification PROPERTIES TIMEOUT 10)
 add_executable(windows-prepare-host tests/runtime/prepare_host.cpp)
 target_include_directories(windows-prepare-host PRIVATE src)
 target_link_libraries(windows-prepare-host PRIVATE nlohmann_json::nlohmann_json)
@@ -1858,7 +1873,7 @@ if(WIN32)
   # 候选窗、悬浮状态栏和托盘卡片共用的 UI Automation 提供者（读屏）；UiaReturnRawElementProvider 等在 uiautomationcore，BSTR 与 SAFEARRAY 在 oleaut32。
   target_sources(msime-windows-server PRIVATE src/candidate/AccessibleWindow.cpp)
   target_link_libraries(msime-windows-server PUBLIC uiautomationcore oleaut32)
-  target_sources(msime-windows-server PRIVATE src/candidate/FloatingToolbarWindow.cpp src/candidate/InputModeHudWindow.cpp src/candidate/ShuangpinKeymapWindow.cpp src/candidate/TypingEffectOverlay.cpp src/system/ShellLauncher.cpp src/system/DiagnosticLog.cpp src/system/SystemAccent.cpp
+  target_sources(msime-windows-server PRIVATE src/candidate/FloatingToolbarWindow.cpp src/candidate/InputModeHudWindow.cpp src/candidate/ShuangpinKeymapWindow.cpp src/candidate/TypingEffectOverlay.cpp src/system/ShellLauncher.cpp src/system/DiagnosticLog.cpp src/system/SystemAccent.cpp src/system/UpdateNotifier.cpp
                  src/voice/WaveOverlay.cpp src/voice/WaveOverlayUtils.cpp src/voice/VoiceInputSession.cpp
                  src/voice/DoubaoAsrClient.cpp src/voice/CuePlayer.cpp src/voice/SystemAudioMuter.cpp
                  src/voice/SystemAsrStream.cpp
@@ -1999,6 +2014,8 @@ if(WIN32)
     endif()
   endforeach()
   add_test(NAME windows-server COMMAND windows-server-smoke)
+  # 两项测试查询真实桌面的前台窗口、鼠标捕获或 UIA 提供者，不能与其他窗口夹具争用桌面。
+  set_tests_properties(windows-server windows-accessible-window-runtime PROPERTIES RUN_SERIAL TRUE)
   set_tests_properties(windows-server PROPERTIES TIMEOUT 30)
   install(TARGETS msime-client-server msime-client-watchdog msime-client-prepare
           RUNTIME DESTINATION bin)

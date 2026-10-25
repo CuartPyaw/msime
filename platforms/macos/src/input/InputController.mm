@@ -6014,6 +6014,7 @@ static NSDictionary *MSIMESessionOptions(NSDictionary *runtimeOptions, NSString 
     // This host draws view.phrase_prefix, so a phrase being assembled out of several selections
     // stays in the composition instead of arriving in the document one piece at a time.
     requested[@"phrase_preedit"] = @YES;
+    requested[@"korean_romaja"] = @YES;
     // macOS 让快捷短语编码参与普通候选；其他宿主仍保留显式 K 模式入口。这是临时宿主能力，不写入偏好。
     requested[@"quick_phrase_candidates"] = @YES;
     // An options file that names a directory itself keeps it.
@@ -6286,6 +6287,9 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     if (snapshot[@"revision"] && !MSIMEStrictUnsignedInteger(snapshot[@"revision"], &revision)) { msime_macos_diagnostic_write("preferences_load_failed"); return; }
     if (!_preferenceLoadState.needsApply(revision)) return;
     NSDictionary *preferences = snapshot[@"preferences"];
+    // 更新通道与会话无关，读到新的偏好就交给 Sparkle：下一次检查按它取 appcast，通道变了时重排检查周期（UpdateController.mm）。没有 feed 的构建不创建更新控制器。
+    if ([preferences isKindOfClass:NSDictionary.class] && MSIMEUpdateHostUsesSparkle(NSBundle.mainBundle))
+        [[MSIMEUpdateController sharedController] applyUpdateChannelPreference:preferences[@"update_channel"]];
     NSMutableDictionary *inputPreferences = [preferences isKindOfClass:NSDictionary.class] ? [preferences mutableCopy] : nil;
     id inlinePreedit = inputPreferences[@"tsf_preedit_style"];
     if (![inlinePreedit isKindOfClass:NSString.class] ||
@@ -9027,7 +9031,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     const CGFloat decorationHeight = decorationImage ? MAX(0.0, skin.decorationTopDip) : 0.0;
     const CGFloat height = rowsHeight + 2 * verticalInset + decorationHeight + headerHeight + bodyRowGap;
     const CGFloat headerBottom = height - verticalInset - decorationHeight - headerHeight;
-    [_panel setContentSize:NSMakeSize(width, height)];
+    // 候选窗口只在补齐画布与阴影留白后调整尺寸，避免每次组字先缩小再撑高。
     MSIMECandidateChromeView *content = [self candidateChromeWithFrame:NSMakeRect(0, 0, width, height) skin:skin];
     content.candidateContentView.clipsToBounds = YES;
     content.candidateRowsRect = NSMakeRect(inset, verticalInset,
@@ -9385,7 +9389,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
             return;
         }
     }
-    [_panel setContentSize:NSMakeSize(width, height)];
+    // 候选窗口只在补齐画布与阴影留白后调整尺寸，避免每次组字先缩小再撑高。
     MSIMECandidateChromeView *content = [self candidateChromeWithFrame:NSMakeRect(0, 0, width, height) skin:skin];
     content.candidateContentView.clipsToBounds = NO;
     content.candidateRowsRect = NSMakeRect(inset, verticalInset + listPager.row, pageGeometry.lineWidth, pageGeometry.rowsHeight);
