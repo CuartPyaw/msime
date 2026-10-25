@@ -26,7 +26,9 @@ Status: implemented
 
 ### 保存与重试边界
 
-Android 和 iOS 将引导中未写成的方案、译文选择保留在主应用的待保存队列中；只有共享偏好确认成功才清除对应字段，离开引导不清空队列。首页继续提供重试入口。HarmonyOS 的离开标记独立于系统输入法启用状态，跳过不伪造完成。桌面状态查询失败会清除旧的成功快照，返回前台重新查询。
+Android 和 iOS 将引导中未写成的方案、译文选择保留在主应用的待保存队列中；只有共享偏好确认成功才清除对应字段，离开引导不清空队列。首页继续提供重试入口。HarmonyOS 的离开标记独立于系统输入法启用状态，跳过不伪造完成；保存失败时保留流程中的选择并显示重试提示，不能吞掉错误后离开。Android 的系统服务不可用、默认输入法标识不可读时也保留未知，以中性标记提示重新确认。
+
+桌面状态查询失败或原生桥返回空快照会清除旧的成功结果，返回前台重新查询。资源准备与系统设置是两个动作：macOS 重新从安装资源生成运行配置；Linux 资源修复显式复用已有目录的更新事务，系统设置则打开当前 Fcitx5 或 IBus 的配置工具。Windows 首次准备失败显示可重试的原生提示，WinUI 与 Win7 共用系统查询和添加、设为默认操作。
 
 ## Alternatives considered
 
@@ -42,9 +44,12 @@ iOS 老用户的旧完成标记会迁移到 `hasSeenOnboarding`，不会再次�
 
 - 共享 Rust OOBE 纯逻辑测试 5 项通过；它们验证状态语义，不代表六个平台设备验收。
 - `msime-host-api` 的只读资源状态测试通过，覆盖正确资源、损坏资源、相对路径和未知版本拒绝，以及查询不创建状态目录。
-- 桌面与鸿蒙 TypeScript 类型检查通过；5 个 vitest 文件共 104 项通过。
+- 桌面与鸿蒙 TypeScript 类型检查通过；6 个 vitest 文件共 119 项通过，包括空快照、前台刷新、资源动作分离、Linux 修复与鸿蒙保存失败重试。
 - Linux 配置脚本测试通过，覆盖 Fcitx5/IBus 只读状态查询、部分查询失败和注册流程；鸿蒙桥调用一致性检查通过。
-- Android Java/API/manifest 检查通过，尚不代表 APK 或设备运行。iOS 原生 App 构建正在远端执行；Windows 共用系统查询头文件通过 MinGW 语法检查，Win7 完整窗口和各平台设备流程仍需后续实际验证。
+- Android Java/API/manifest 检查通过；原生 APK 构建、API 28/35 安装和系统输入冒烟通过。两个 API 的 client-base、client-core、client-providers、client-services 设备单测均通过。`smoke.sh <serial> --oobe` 是引导专项入口，使用实际安装产品与沙箱权限失败验证待保存选择、离开标记、系统状态刷新和恢复写入；它不代表完整键盘套件验收。
+- iOS 原生 App 与键盘扩展构建通过，模拟器待保存队列单测 3 项通过；iOS 27 专用模拟器的首次引导与首页 UI 用例 2 项通过。
+- macOS 原生输入法 CMake 构建、设置应用 Rust 全目标检查通过；HarmonyOS 的 Rust/NAPI、共享设置页和完整 ArkTS/HAP 构建通过。
+- Win7 完整窗口通过 Clang/MinGW 交叉语法检查。Linux 原生宿主与设置应用、Windows GNU 及 WinUI 构建另由 PR CI 检查；编译不代表实际系统入口验收，未执行 Windows、Linux 和 HarmonyOS 的实机 OOBE。
 
 ## Related decisions
 
