@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState } from "react";
 import type { Preferences } from "../core/preferences-model";
-import type { ImeSetupClient, ImeSetupState } from "../core/host-contracts";
+import type { ImeSetupClient, ImeSetupState, OobeClient, OobeState } from "../core/host-contracts";
 import { MsimeMark } from "../core/brand-logo";
 import { CheckGlyph } from "../core/check-glyph";
 import { FluentIcon } from "../core/fluent-icons";
@@ -9,9 +9,12 @@ import { useHostAction } from "../core/use-host-action";
 
 /** 设置引导界面调用的宿主操作：两个设置步骤，以及宿主自己的设置状态。 */
 export interface SetupActions {
+  /** 完成共享 OOBE 契约中的资源准备步骤。 */
+  prepareResources?: () => Promise<void>;
   openSystemKeyboardSettings?: () => Promise<void>;
   showInputMethodPicker?: () => Promise<void>;
   setup?: ImeSetupClient;
+  oobe?: OobeClient;
 }
 
 /**
@@ -29,6 +32,68 @@ export function useImeSetupState(setup: ImeSetupClient | undefined): ImeSetupSta
   }, [setup]);
   // 从界面已不再持有的客户端读到的状态，不是这个宿主的答案。
   return state && state.client === setup ? state.value : null;
+}
+
+/** 读取跨平台 OOBE 快照；与输入法系统状态一样，先订阅再读取避免漏掉变化。 */
+export function useOobeState(oobe: OobeClient | undefined): OobeState | null {
+  const [state, setState] = useState<{ client: OobeClient; value: OobeState | null }>();
+  useLayoutEffect(() => {
+    if (!oobe) return;
+    const unsubscribe = oobe.subscribe((value) => setState({ client: oobe, value }));
+    setState({ client: oobe, value: oobe.read() });
+    const refresh = () => oobe.refresh?.();
+    const visible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("pageshow", refresh);
+    document.addEventListener("visibilitychange", visible);
+    refresh();
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("pageshow", refresh);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  }, [oobe]);
+  return state && state.client === oobe ? state.value : null;
+}
+
+/** 桌面设置页没有移动端首页卡片，未完成的准备仍需有持续可达的处理入口。 */
+export function OobeStatusNotice({ client }: { client?: OobeClient }) {
+  const state = useOobeState(client);
+  const run = useHostAction();
+  const message =
+    state?.resourcesReady === false
+      ? "运行资源尚未准备好"
+      : state?.preferencesSaved === false
+        ? "无法读取偏好设置，请重新打开设置并按提示恢复"
+        : state?.systemEnabled === false
+          ? "水杉输入法尚未加入系统输入法列表"
+          : state?.systemCurrent === false
+            ? "当前使用的是其他输入法，可在系统输入法菜单中切换到水杉"
+            : null;
+  const repair = state?.resourcesReady === false;
+  const action = repair ? client?.prepareResources : client?.openSetup;
+  if (!message) return null;
+  return (
+    <div
+      role="status"
+      className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--p-sep)] bg-[var(--p-card)] p-3 text-sm"
+    >
+      <span className="flex-1">{message}</span>
+      {action && (
+        <button type="button" onClick={() => run(action)}>
+          {repair ? "修复运行资源" : "检查设置"}
+        </button>
+      )}
+      {client?.refresh && (
+        <button type="button" onClick={() => client.refresh?.()}>
+          重新检查
+        </button>
+      )}
+    </div>
+  );
 }
 
 /** 把本输入法设为默认的操作。系统选择器只列出已启用的输入法，所以第一步完成前改为打开系统的输入法列表，与 Android 的 `ImeSetup.makeDefault` 一致。 */
@@ -116,23 +181,31 @@ export function SetupStatusCard({
   onTry: () => void;
 }) {
   const state = useImeSetupState(actions?.setup);
+  const oobe = useOobeState(actions?.oobe);
   const run = useHostAction();
-  const reporting = Boolean(actions?.setup);
-  const enabled = state?.enabled ?? null;
-  const current = state?.current ?? null;
+  const reporting = Boolean(actions?.setup || actions?.oobe);
+  const enabled = oobe ? oobe.systemEnabled : (state?.enabled ?? null);
+  const current = oobe ? oobe.systemCurrent : (state?.current ?? null);
+  const resources = oobe?.resourcesReady ?? null;
   const scheme = touchKeyboardSchemeTitle(preferences);
   const status =
-    enabled === true && current === true
-      ? "已启用"
-      : enabled === false || current === false
-        ? "尚未完成设置"
-        : reporting
-          ? "检查中"
-          : null;
+    resources === false
+      ? "需要准备运行资源"
+      : enabled === true && current === true
+        ? "已启用"
+        : enabled === false || current === false
+          ? "尚未完成设置"
+          : oobe
+            ? "请在系统设置中确认"
+            : reporting
+              ? "检查中"
+              : null;
   // 检查待处理时提供对应步骤；宿主无法回答时始终提供。
-  const offered = (done: boolean | null) => done === false || (!reporting && done === null);
+  const offered = (done: boolean | null) =>
+    done === false || (done === null && (!reporting || Boolean(oobe)));
   const enable = actions?.openSystemKeyboardSettings;
-  const makeDefault = makeDefaultAction(actions, state);
+  const makeDefault = makeDefaultAction(actions, { enabled, current });
+  const prepareResources = actions?.prepareResources ?? actions?.oobe?.prepareResources;
 
   return (
     <div
@@ -155,6 +228,16 @@ export function SetupStatusCard({
         </div>
       </div>
       <div className="flex flex-col gap-2">
+        {actions?.oobe && (
+          <SetupCheck
+            label="运行资源已准备"
+            done={resources}
+            actionLabel="立即准备"
+            onAction={
+              resources === false && prepareResources ? () => run(prepareResources) : undefined
+            }
+          />
+        )}
         <SetupCheck
           label="已在系统中启用"
           done={enabled}

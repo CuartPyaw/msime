@@ -77,6 +77,12 @@ if [[ "${MSIME_ANDROID_MULTILINGUAL:-0}" == 1 ]]; then
     "$editor_manifest" > "$build_dir/multilingual-manifest.xml"
   editor_manifest="$build_dir/multilingual-manifest.xml"
 fi
+# 引导专项复用现有入口，不突破 API 35 的 instrumentation 数量上限。
+if [[ "${MSIME_ANDROID_OOBE_SMOKE:-0}" == 1 ]]; then
+  sed 's/app.msime.android.test.CandidateCanvasDeviceSmoke/app.msime.android.test.OnboardingDeviceSmoke/' \
+    "$editor_manifest" > "$build_dir/oobe-manifest.xml"
+  editor_manifest="$build_dir/oobe-manifest.xml"
+fi
 "$tools_dir/aapt2" compile --dir platforms/android/tests/device/res -o "$build_dir/resources.zip"
 "$tools_dir/aapt2" link -I "$android_jar" --manifest "$editor_manifest" -A "$build_dir/assets" \
   -R "$build_dir/resources.zip" -o "$build_dir/unsigned.apk"

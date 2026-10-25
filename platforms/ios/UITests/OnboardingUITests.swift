@@ -540,6 +540,8 @@ final class OnboardingUITests: XCTestCase {
     XCTAssertTrue(app.descendants(matching: .any)["settingsSearchField"].exists)
     XCTAssertTrue(app.buttons["openKeyboardSettingsButton"].exists)
     XCTAssertTrue(app.buttons["openFullAccessSettingsButton"].exists)
+    XCTAssertTrue(app.staticTexts["keyboardStatusManualCheckNotice"].exists)
+    XCTAssertTrue(app.staticTexts["keyboardStatusManualCheckNotice"].label.contains("无法自动确认"))
     XCTAssertTrue(app.buttons["skinSettingsLink"].exists)
     XCTAssertFalse(app.buttons["keyboardSettingsLink"].exists)
     XCTAssertFalse(app.buttons["keyboardGuideLink"].exists)

@@ -8,8 +8,13 @@ import { useTimeout } from "../core/use-timeout";
 import { FluentIcon, type FluentIconName } from "../core/fluent-icons";
 import { msimeFramePath, msimeStrokePath } from "../core/brand-logo";
 import { appThemeStyle, seasonAttr } from "../core/app-theme-style";
-import type { HostChromeClient, ImeSetupClient, ResolvedAppTheme } from "../core/host-contracts";
-import { makeDefaultAction, useImeSetupState } from "../keyboard/setup-status-card";
+import type {
+  HostChromeClient,
+  ImeSetupClient,
+  OobeClient,
+  ResolvedAppTheme,
+} from "../core/host-contracts";
+import { makeDefaultAction, useImeSetupState, useOobeState } from "../keyboard/setup-status-card";
 import { KeyboardSwitchGuideHost } from "../keyboard/keyboard-switch-guide";
 import { useSettingsPlatform } from "../theme/settings-platform";
 import { useHarmonyWelcomeSystemBars } from "../settings/use-settings-theme";
@@ -45,6 +50,8 @@ export interface OnboardingActions {
   prepareResources: () => Promise<void>;
   openSystemKeyboardSettings: () => Promise<void>;
   showInputMethodPicker: () => Promise<void>;
+  /** 跨平台 OOBE 状态；宿主无法确认系统键盘时保留 `null`。 */
+  oobe?: OobeClient;
 }
 
 /** How long the first-launch splash stays up before the flow opens on its own. */
@@ -390,7 +397,11 @@ export function WelcomeFlowPage({
   const harmonyPhone = platform === "harmony";
   const [splashing, setSplashing] = useState(splash && !desktop);
   const endSplash = useCallback(() => setSplashing(false), []);
-  const setupState = useImeSetupState(harmony ? setup : undefined);
+  const reportedSetupState = useImeSetupState(harmony ? setup : undefined);
+  const oobeState = useOobeState(actions.oobe);
+  const setupState =
+    reportedSetupState ??
+    (oobeState ? { enabled: oobeState.systemEnabled, current: oobeState.systemCurrent } : null);
   const schemeCards = harmony
     ? harmonySchemeCards(desktop, edition, inputSchemes, wubiProfile)
     : [];

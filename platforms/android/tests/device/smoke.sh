@@ -12,6 +12,7 @@ core=false
 feedback=false
 diagnostics=false
 text_edit_layout=false
+oobe=false
 for option in "${@:2}"; do
   case "$option" in
     # --core 跑安装、词库准备、打字主路径及剪贴板保存生命周期；其余键盘套件在 API 28 上仍不支持。
@@ -22,14 +23,19 @@ for option in "${@:2}"; do
     --feedback) feedback=true ;;
     --diagnostics) diagnostics=true ;;
     --text-edit-layout) text_edit_layout=true ;;
-    *) echo "usage: smoke.sh [emulator-5580] [--core] [--settings] [--handwriting] [--statistics] [--feedback] [--diagnostics] [--text-edit-layout]" >&2; exit 1 ;;
+    --oobe) oobe=true ;;
+    *) echo "usage: smoke.sh [emulator-5580] [--core] [--settings] [--handwriting] [--statistics] [--feedback] [--diagnostics] [--text-edit-layout] [--oobe]" >&2; exit 1 ;;
   esac
 done
 [[ "$serial" == emulator-* ]] || { echo "Only the dedicated emulator is supported" >&2; exit 1; }
 avd_name=$("$adb" -s "$serial" emu avd name | tr -d '\r' | head -1)
 [[ "$avd_name" == msime-client-test || "$avd_name" == msime-client-test-api* ]] || { echo "Refusing a non-test AVD" >&2; exit 1; }
 [[ $("$adb" -s "$serial" shell getprop sys.boot_completed | tr -d '\r') == 1 ]] || { echo "Test AVD has not booted" >&2; exit 1; }
-bash platforms/android/tests/device/build-editor.sh
+if [[ "$oobe" == true ]]; then
+  MSIME_ANDROID_OOBE_SMOKE=1 bash platforms/android/tests/device/build-editor.sh
+else
+  bash platforms/android/tests/device/build-editor.sh
+fi
 # 先推送完整 APK 再交给包管理器，避免 API 28 的流式安装桥卡住而阻塞整套验收。
 "$adb" -s "$serial" install --no-streaming --no-incremental -r target/android/msime-android.apk
 "$adb" -s "$serial" install --no-streaming --no-incremental -r target/android/editor-test.apk
@@ -84,6 +90,10 @@ sdk=$("$adb" -s "$serial" shell getprop ro.build.version.sdk | tr -d '\r')
 # 连续跑设备套件时，系统偶尔来不及重新绑定输入法。以测试 APK 为目标的用例继续正常启动 instrumentation。
 run_instrumentation() {
   local component=$1 class=${1#*/} target
+  # 引导专项替换这个清单入口，目标进程仍与原入口相同。
+  if [[ "$oobe" == true && "$class" == app.msime.android.test.OnboardingDeviceSmoke ]]; then
+    class=app.msime.android.test.CandidateCanvasDeviceSmoke
+  fi
   target=$(xmllint --xpath "string(//instrumentation[@*[local-name()='name']='$class']/@*[local-name()='targetPackage'])" \
     platforms/android/tests/device/AndroidManifest.xml)
   [[ "$target" == app.msime.android || "$target" == app.msime.android.test ]] \
@@ -102,6 +112,13 @@ run_instrumentation() {
 result=$(run_instrumentation app.msime.android.test/app.msime.android.test.DeviceSmoke)
 printf '%s\n' "$result"
 [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "System input acceptance failed" >&2; exit 1; }
+if [[ "$oobe" == true ]]; then
+  result=$(run_instrumentation app.msime.android.test/app.msime.android.test.OnboardingDeviceSmoke)
+  printf '%s\n' "$result"
+  [[ "$result" == *MSIME_DEVICE_SMOKE_PASSED* ]] || { echo "原生引导保存与系统状态验收失败" >&2; exit 1; }
+  echo "Dedicated Android AVD: OOBE resource setup, system state and save recovery acceptance passed"
+  exit 0
+fi
 if [[ "$text_edit_layout" == true ]]; then
   result=$(run_instrumentation app.msime.android.test/app.msime.android.test.TextEditRecentClipboardDeviceSmoke -e layout-only true)
   printf '%s\n' "$result"

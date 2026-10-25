@@ -93,6 +93,8 @@ import type {
   HostChromeClient,
   ImeSetupClient,
   ImeSetupState,
+  OobeClient,
+  OobeState,
   MobileKeyboardFeedback,
   OnboardingChoices,
   OnboardingInputScheme,
@@ -179,6 +181,10 @@ interface NativeBridge {
    * `{"ok":true,"ready":boolean,"value":{"enabled":boolean|null,"current":boolean|null}}`：本键盘是否已在系统中启用、是否为当前输入法。和 `onboardingStatus` 一样是同步调用，宿主第一次读取完成前 `ready` 一直为 false。
    */
   setupStatus(): string;
+  /** 实际资源准备结果、系统状态和独立引导离开记录。 */
+  oobeStatus(): string;
+  /** 显式重试资源暂存。 */
+  retryOobeResources(): string;
   /** 现在重新读一次设置状态，有变化时照常调用 `msimeHarmonySetupChanged`。从键盘的 🌐 菜单切换输入法不会触发宿主监听的 `imeChange`，引导打开期间靠它轮询。 */
   refreshSetupStatus(): void;
   /**
@@ -445,6 +451,54 @@ function imeSetupClient(native: NativeBridge): ImeSetupClient | undefined {
       typeof native.refreshSetupStatus === "function"
         ? () => native.refreshSetupStatus()
         : undefined,
+  };
+}
+
+/** 从原生宿主读取真实快照；查询失败清掉旧结果，保留未知。 */
+function oobeClient(native: NativeBridge, setup: ImeSetupClient | undefined): OobeClient {
+  let cached: OobeState | null = null;
+  const listeners = new Set<(state: OobeState) => void>();
+  let unsubscribeSetup: (() => void) | undefined;
+  const refresh = () => {
+    try {
+      cached = unwrap<OobeState>(native.oobeStatus());
+    } catch {
+      cached = {
+        resourcesReady: null,
+        systemEnabled: null,
+        systemCurrent: null,
+        preferencesSaved: null,
+        onboardingSeen: null,
+      };
+    }
+    for (const listener of listeners) listener(cached);
+  };
+  return {
+    read: () => cached,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      if (listeners.size === 1) unsubscribeSetup = setup?.subscribe(refresh);
+      refresh();
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) {
+          unsubscribeSetup?.();
+          unsubscribeSetup = undefined;
+        }
+      };
+    },
+    refresh: () => {
+      setup?.refresh?.();
+      refresh();
+    },
+    prepareResources: async () => {
+      try {
+        unwrap<boolean>(native.retryOobeResources());
+      } finally {
+        refresh();
+      }
+    },
+    openSetup: async () => native.openSystemKeyboardSettings(),
   };
 }
 
@@ -1261,6 +1315,7 @@ function makeClient(
   // 只读一次：能力记录在应用运行期间不会变化，下面的反馈报告据此写明版本。
   const host = unwrap<HostCapabilities>(native.hostCapabilities());
   const setup = imeSetupClient(native);
+  const oobe = oobeClient(native, setup);
   const chrome = hostChrome(native);
   // 「反馈」经账号桥接提交：有人登录时桥接附上已登录的会话，无人登录时附上设备的匿名账号会话（宿主在原生层持有，与 Android 一致）。只有两者都没有时（例如匿名注册还没成功）提交才会以 `account_unauthorized` 被拒绝，页面会如实提示。
   const feedback: FeedbackClient = {
@@ -1493,6 +1548,7 @@ function makeClient(
             },
       // 「设置」卡片各项检查背后的两项设置状态，在 2in1 上也是「输入」和「关于」页警告条的依据。2in1 没有首页要画，但仍需要这些操作：警告条调用的是同样两个。
       setup,
+      oobe,
     },
     appTheme: appThemeClient(native),
     chrome,
@@ -1577,8 +1633,6 @@ function HarmonyWelcomeFlow({
       actions={{
         platform: "harmony",
         mobileSettings,
-        // 资源由键盘启动时就绪，这里没有单独的步骤要执行；流程需要的是这个 promise，而不是实际工作。
-        prepareResources: async () => {},
         openSystemKeyboardSettings: async () => native.openSystemKeyboardSettings(),
         showInputMethodPicker:
           mobileSettings !== false
@@ -1586,6 +1640,12 @@ function HarmonyWelcomeFlow({
             : async () => {
                 native.showInputMethodPicker();
               },
+        oobe: client.home?.oobe,
+        prepareResources: async () => {
+          const prepare = client.home?.oobe?.prepareResources;
+          if (!prepare) throw new Error("宿主未提供资源准备入口");
+          await prepare();
+        },
       }}
       // 方案步骤只提供本版本和本宿主具备的键盘。
       edition={client.host?.edition}
@@ -1717,8 +1777,8 @@ function HarmonySettings({
           leaveFlow();
         }}
         onSkip={async (scheme, choices) => {
-          // 「跳过」是离开流程的出口，而流程后面的设置页才是报告和恢复无法读取的文档的地方。因此，已做选择写入失败（文档无法读取，或保存时与键盘发生竞争）不会把用户卡在这里：无论如何都离开流程，设置页加载文档时会报告文档无法读取。
-          await applyChoices(scheme, choices).catch(() => undefined);
+          // 保存失败由流程显示重试提示；保留当前选择，不能静默离开后丢失。
+          await applyChoices(scheme, choices);
           leaveFlow();
         }}
       />,

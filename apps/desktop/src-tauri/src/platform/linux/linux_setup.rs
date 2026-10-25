@@ -472,6 +472,54 @@ pub fn linux_setup_status(options: State<'_, RuntimeOptionsState>) -> LinuxSetup
     )
 }
 
+/// 复用安装脚本的只读查询，使用相同版本标识和有界进程执行器；失败保留未知。
+pub fn input_method_status() -> (Option<bool>, Option<bool>) {
+    match input_method_status_document() {
+        Ok(value) => (value["enabled"].as_bool(), value["current"].as_bool()),
+        Err(_) => (None, None),
+    }
+}
+
+fn input_method_status_document() -> Result<serde_json::Value, LinuxSetupError> {
+    let program = setup_program().ok_or(LinuxSetupError::new("setup_unavailable"))?;
+    let output = Arc::new(std::sync::Mutex::new(String::new()));
+    let captured = Arc::clone(&output);
+    run_setup(
+        &program,
+        &["--status".into(), "--json".into()],
+        Duration::from_secs(40),
+        move |line| {
+            if !line.error {
+                if let Ok(mut value) = captured.lock() {
+                    value.push_str(&line.text);
+                }
+            }
+        },
+    )?;
+    let output = output
+        .lock()
+        .map_err(|_| LinuxSetupError::new("setup_failed"))?;
+    serde_json::from_str(&output).map_err(|_| LinuxSetupError::new("setup_failed"))
+}
+
+/// 只打开当前框架自己的设置，不把已配置的用户再次送进首次准备流程。
+#[tauri::command]
+pub async fn open_linux_input_method_settings() -> Result<(), LinuxSetupError> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let status = input_method_status_document()?;
+        let program = match status["host"].as_str() {
+            Some("fcitx5") => "fcitx5-configtool",
+            Some("ibus") => "ibus-setup",
+            _ => return Err(LinuxSetupError::new("configtool_unavailable")),
+        };
+        super::linux_process::launch(program, &[], Duration::from_millis(300))
+            .then_some(())
+            .ok_or(LinuxSetupError::new("configtool_unavailable"))
+    })
+    .await
+    .map_err(|_| LinuxSetupError::new("configtool_unavailable"))?
+}
+
 fn load_dictionary_downloads(
     program: &Path,
     arguments: &[OsString],

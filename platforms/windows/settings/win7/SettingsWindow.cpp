@@ -1,4 +1,5 @@
 #include "SettingsWindow.h"
+#include "../InputMethodSetup.h"
 #include "SettingsChrome.h"
 #include "KeyboardSkinPage.h"
 #include "SettingsRoutes.h"
@@ -929,6 +930,9 @@ struct SettingsWindow::State {
   HWND selector_label = nullptr;
   HWND status = nullptr;
   HWND reload = nullptr;
+  HWND setup_notice = nullptr;
+  HWND setup_fix = nullptr;
+  input_method::InputMethodState input_method_state = input_method::InputMethodState::unknown;
   HWND navigation_tree = nullptr;
   HWND heading = nullptr;
   HWND page_summary = nullptr;
@@ -1064,6 +1068,9 @@ struct SettingsWindow::State {
     strong_font = CreateFontW(-dip(14), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET,
         OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH, L"Microsoft YaHei");
     selector_label = add(window, L"STATIC", L"设置页面", SS_LEFT, -1);
+    setup_notice = add(window, L"STATIC", L"", SS_LEFT, setup_state);
+    setup_fix = add(window, L"BUTTON", L"", WS_TABSTOP | BS_PUSHBUTTON, setup_action);
+    refresh_setup();
     selector = add(window, WC_COMBOBOXW, L"设置页面", WS_TABSTOP | CBS_DROPDOWNLIST | WS_VSCROLL, page_selector);
     for (const auto* title : {L"快捷键", L"悬浮工具栏", L"维护与诊断", L"输入", L"标点与翻译", L"候选窗口", L"AI 输入辅助", L"账号与同步", L"主题与皮肤", L"社区皮肤", L"打字统计", L"剪贴板", L"云剪贴板", L"词库", L"背单词", L"插件", L"关于与帮助", L"社区插件", L"社区词库与回复模板", L"语音输入", MSIME_EDITION_HANDWRITING != 0 ? L"屏幕键盘与手写" : L"屏幕键盘", L"连接 AI 助手", L"键盘皮肤制作"})
       SendMessageW(selector, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(title));
@@ -1691,6 +1698,16 @@ struct SettingsWindow::State {
     EnableWindow(reload, !busy);
   }
 
+  bool refresh_setup() {
+    const auto state = input_method::input_method_state();
+    const bool changed = state != input_method_state;
+    input_method_state = state;
+    const bool missing = state == input_method::InputMethodState::missing;
+    SetWindowTextW(setup_notice, missing ? L"水杉输入法尚未添加到系统键盘列表" : L"水杉输入法还不是默认输入法");
+    SetWindowTextW(setup_fix, missing ? L"添加输入法" : L"设为默认");
+    return changed;
+  }
+
   void layout() {
     if (!body) return;
     RECT client{};
@@ -1700,17 +1717,24 @@ struct SettingsWindow::State {
     const int left = dip(224);
     const int available = std::max(width - left - dip(32), 1);
     MoveWindow(navigation_tree, dip(12), dip(86), dip(180), std::max(height - dip(118), 1), TRUE);
-    MoveWindow(heading, left, dip(27), available, dip(38), TRUE);
-    MoveWindow(page_summary, left, dip(74), available, dip(38), TRUE);
+    const bool needs_setup = input_method_state == input_method::InputMethodState::missing ||
+        input_method_state == input_method::InputMethodState::not_default;
+    const int setup_height = needs_setup ? 54 : 0;
+    ShowWindow(setup_notice, needs_setup ? SW_SHOW : SW_HIDE);
+    ShowWindow(setup_fix, needs_setup ? SW_SHOW : SW_HIDE);
+    MoveWindow(setup_notice, left, dip(18), std::max(available - dip(140), 1), dip(36), TRUE);
+    MoveWindow(setup_fix, width - dip(162), dip(16), dip(130), dip(34), TRUE);
+    MoveWindow(heading, left, dip(27 + setup_height), available, dip(38), TRUE);
+    MoveWindow(page_summary, left, dip(74 + setup_height), available, dip(38), TRUE);
     const bool has_tabs = surface == Surface::shortcuts || surface == Surface::reference ||
         std::any_of(input_pages.begin(), input_pages.end(), [this](const auto& page) { return page.first == surface; }) ||
         std::any_of(expression_pages.begin(), expression_pages.end(), [this](const auto& page) { return page.first == surface; });
     ShowWindow(tabs, has_tabs ? SW_SHOW : SW_HIDE);
-    MoveWindow(tabs, left, dip(124), available, dip(38), TRUE);
+    MoveWindow(tabs, left, dip(124 + setup_height), available, dip(38), TRUE);
     // 低分辨率下六个输入子页等宽排开，标题仍完整可读。
     const int tab_count = std::max(TabCtrl_GetItemCount(tabs), 1);
     TabCtrl_SetItemSize(tabs, std::min(dip(112), available / tab_count - dip(3)), dip(34));
-    const int body_top = has_tabs ? 184 : 130;
+    const int body_top = (has_tabs ? 184 : 130) + setup_height;
     MoveWindow(body, left, dip(body_top), available, std::max(height - dip(body_top + 66), 1), TRUE);
     MoveWindow(status, left, height - dip(45), std::max(available - dip(130), 1), dip(32), TRUE);
     MoveWindow(reload, width - dip(142), height - dip(48), dip(110), dip(30), TRUE);
@@ -2265,6 +2289,14 @@ struct SettingsWindow::State {
 
   void command(WPARAM command) {
     const int id = LOWORD(command);
+    if (id == setup_action && HIWORD(command) == BN_CLICKED) {
+      const bool changed = input_method_state == input_method::InputMethodState::missing
+          ? input_method::add_input_method() : input_method::make_input_method_default();
+      if (!changed) ShellExecuteW(window, L"open", L"control.exe", L"/name Microsoft.RegionAndLanguage", nullptr, SW_SHOWNORMAL);
+      refresh_setup();
+      layout();
+      return;
+    }
     if (id == VoiceModelsForm::cancel && HIWORD(command) == BN_CLICKED && voice_created) {
       if (voice_models_form.command(command).cancel_install && worker) worker->cancel_voice();
       return;
@@ -3054,6 +3086,9 @@ struct SettingsWindow::State {
       SelectObject(dc, previous); EndPaint(hwnd, &paint); return 0;
     }
     case WM_TIMER:
+      if (wparam == 73) {
+        if (self->refresh_setup()) self->layout();
+      }
       if (wparam == 72) self->poll_statistics();
       else if (wparam == 73) self->account_form.tick();
       else if (wparam == 74) {
@@ -3067,7 +3102,7 @@ struct SettingsWindow::State {
       return 0;
     // 激活可发生在按钮的按下与通知之间；延后刷新，不能在第一次点击中途禁用控件。
     case WM_ACTIVATE: if (LOWORD(wparam) != WA_INACTIVE) PostMessageW(hwnd, activated_message, 0, 0); break;
-    case activated_message: self->poll_statistics(); self->poll_clipboard(); self->poll_dictionary_updates(true); return 0;
+    case activated_message: if (self->refresh_setup()) self->layout(); self->poll_statistics(); self->poll_clipboard(); self->poll_dictionary_updates(true); return 0;
     case WM_SIZE: self->layout(); return 0;
     case WM_GETMINMAXINFO: {
       auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);

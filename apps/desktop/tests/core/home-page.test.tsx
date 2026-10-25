@@ -6,10 +6,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { HomePage, SettingsPage, type Snapshot } from "@msime/ui";
 import type {
   ImeSetupClient,
+  OobeClient,
   ImeSetupState,
 } from "../../../../packages/ui/src/core/host-contracts";
 import { ToastProvider } from "../../../../packages/ui/src/core/toast";
-import { SetupWarningStrip } from "../../../../packages/ui/src/keyboard/setup-status-card";
+import {
+  OobeStatusNotice,
+  SetupWarningStrip,
+} from "../../../../packages/ui/src/keyboard/setup-status-card";
 import {
   voiceLanguageTitle,
   type RootPage,
@@ -774,3 +778,58 @@ test.each([
     );
   },
 );
+
+test("资源失败使用资源修复入口，系统设置动作独立，返回前台重新查询", async () => {
+  const refresh = vi.fn();
+  const prepareResources = vi.fn().mockResolvedValue(undefined);
+  const openSetup = vi.fn().mockResolvedValue(undefined);
+  const stop = vi.fn();
+  const client: OobeClient = {
+    read: () => ({
+      resourcesReady: false,
+      systemEnabled: false,
+      systemCurrent: false,
+      preferencesSaved: true,
+      onboardingSeen: null,
+    }),
+    subscribe: () => stop,
+    refresh,
+    prepareResources,
+    openSetup,
+  };
+  const view = render(
+    <ToastProvider>
+      <OobeStatusNotice client={client} />
+    </ToastProvider>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "修复运行资源" }));
+  expect(prepareResources).toHaveBeenCalledOnce();
+  expect(openSetup).not.toHaveBeenCalled();
+  const before = refresh.mock.calls.length;
+  fireEvent(window, new Event("focus"));
+  expect(refresh).toHaveBeenCalledTimes(before + 1);
+  view.unmount();
+  expect(stop).toHaveBeenCalledOnce();
+  fireEvent(window, new Event("focus"));
+  expect(refresh).toHaveBeenCalledTimes(before + 1);
+});
+
+test("未知的桌面状态不显示虚假的失败提示", () => {
+  render(
+    <ToastProvider>
+      <OobeStatusNotice
+        client={{
+          read: () => ({
+            resourcesReady: null,
+            systemEnabled: null,
+            systemCurrent: null,
+            preferencesSaved: null,
+            onboardingSeen: null,
+          }),
+          subscribe: () => () => {},
+        }}
+      />
+    </ToastProvider>,
+  );
+  expect(screen.queryByRole("status")?.textContent ?? "").toBe("");
+});
