@@ -1514,6 +1514,12 @@ pub struct Preferences {
     pub frequency: FrequencyPreferences,
     #[serde(default)]
     pub mixed_input: MixedInputPreferences,
+    /// 连续多语言输入的语言集合；默认关闭，只有至少两种不同语言时才交给 Engine。
+    #[serde(
+        default,
+        skip_serializing_if = "MultilingualInputPreferences::is_default"
+    )]
+    pub multilingual_input: MultilingualInputPreferences,
     #[serde(default)]
     pub local_modes: LocalModePreferences,
     /// Sound packs, background music, achievements and the enabled command tables. Left out of the document while every part is at its default, so a build from before plugins still reads a document that never touched them; the packs themselves and the @ name list live under the plugins directory, not here.
@@ -2411,6 +2417,60 @@ pub struct AchievementPreferences {
 
 /// 中英混输默认的补全与英文领先门槛；26 键中更短的完整词仍可选。调低会让常见简拼被英文词抢走首选（见 `.agents/notes/implemented/feature/2026-10-12-mixed-english-leads-unsegmentable-input.md`）；不读偏好的宿主固定用它（`HostPlatform::reads_mixed_input_minimum_prefix`）。
 pub const DEFAULT_MIXED_INPUT_MINIMUM_PREFIX: u8 = 5;
+
+/// 连续多语言解码支持的语言；不依赖 Engine 或宿主的输入方案枚举。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MultilingualLanguage {
+    Chinese,
+    English,
+    Japanese,
+}
+
+/// 连续多语言输入的共享偏好。默认关闭，避免未完成接线的宿主改变行为。
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MultilingualInputPreferences {
+    pub enabled: bool,
+    pub languages: Vec<MultilingualLanguage>,
+}
+
+impl Default for MultilingualInputPreferences {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            languages: vec![
+                MultilingualLanguage::Chinese,
+                MultilingualLanguage::English,
+                MultilingualLanguage::Japanese,
+            ],
+        }
+    }
+}
+
+impl MultilingualInputPreferences {
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
+    /// 只返回已打开且至少包含两种不同语言的集合，并按用户配置顺序去重。
+    pub fn active_languages(&self) -> Vec<MultilingualLanguage> {
+        if !self.enabled {
+            return Vec::new();
+        }
+        let mut active = Vec::with_capacity(3);
+        for language in &self.languages {
+            if !active.contains(language) {
+                active.push(*language);
+            }
+        }
+        if active.len() >= 2 {
+            active
+        } else {
+            Vec::new()
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MixedInputPreferences {
@@ -3353,6 +3413,7 @@ impl Default for Preferences {
             escape_keeps_selected_word: false,
             frequency: FrequencyPreferences::default(),
             mixed_input: MixedInputPreferences::default(),
+            multilingual_input: MultilingualInputPreferences::default(),
             local_modes: LocalModePreferences::default(),
             plugins: PluginPreferences::default(),
             game_compatibility: GameCompatibilityPreferences::default(),
@@ -4302,7 +4363,9 @@ pub enum PreferencesError {
     InvalidFloatingToolbar,
     #[error("AI assistant provider or candidate limit is invalid")]
     InvalidAiAssistant,
-    #[error("网络代理地址必须是 host:port（可带 http:// 或 https:// 前缀），不能包含用户名、路径、查询或片段")]
+    #[error(
+        "网络代理地址必须是 host:port（可带 http:// 或 https:// 前缀），不能包含用户名、路径、查询或片段"
+    )]
     InvalidNetwork,
     #[error("voice recognition or polishing provider is not supported")]
     InvalidVoiceInput,
@@ -4334,7 +4397,9 @@ pub enum PreferencesError {
     InvalidCustomThemeBase,
     #[error("candidate font size must be between 12 and 32")]
     InvalidCandidateFontSize,
-    #[error("candidate window scale must be 50-200%, opacity 50-100%, corner radius 0-32 and padding 0-16")]
+    #[error(
+        "candidate window scale must be 50-200%, opacity 50-100%, corner radius 0-32 and padding 0-16"
+    )]
     InvalidCandidateWindowStyle,
     #[error("candidate text color must be #RRGGBB or omitted")]
     InvalidCandidateTextColor,
@@ -4350,7 +4415,9 @@ pub enum PreferencesError {
     InvalidCandidateSurfaceColor,
     #[error("candidate border color must be #RRGGBB or omitted")]
     InvalidCandidateBorderColor,
-    #[error("candidate font family must be non-empty, contain no control characters, and be at most 128 bytes")]
+    #[error(
+        "candidate font family must be non-empty, contain no control characters, and be at most 128 bytes"
+    )]
     InvalidCandidateFontFamily,
     #[error("custom theme candidate skin identifier is invalid")]
     InvalidCandidateSkin,
@@ -4366,15 +4433,25 @@ pub enum PreferencesError {
     InvalidMixedInput,
     #[error("plugin settings are invalid")]
     InvalidPlugins,
-    #[error("game compatibility process names must be distinct .exe base names of at most 64 characters, at most 32 in total")]
+    #[error(
+        "game compatibility process names must be distinct .exe base names of at most 64 characters, at most 32 in total"
+    )]
     InvalidGameCompatibility,
-    #[error("app input mode rules must use distinct application identifiers of at most 64 bytes without control characters or path separators, at most 32 in total")]
+    #[error(
+        "app input mode rules must use distinct application identifiers of at most 64 bytes without control characters or path separators, at most 32 in total"
+    )]
     InvalidAppInputModeRules,
-    #[error("vim mode app identifiers must be distinct of at most 64 bytes without control characters or path separators, at most 32 in total")]
+    #[error(
+        "vim mode app identifiers must be distinct of at most 64 bytes without control characters or path separators, at most 32 in total"
+    )]
     InvalidVimModeApps,
-    #[error("cross-commit spacing app identifiers must be distinct of at most 64 bytes without control characters or path separators, at most 32 in total")]
+    #[error(
+        "cross-commit spacing app identifiers must be distinct of at most 64 bytes without control characters or path separators, at most 32 in total"
+    )]
     InvalidCrossCommitSpacingApps,
-    #[error("cloud clipboard relay needs an https address (http only for loopback) without query, fragment or credentials, and a token of 16-256 printable ASCII characters")]
+    #[error(
+        "cloud clipboard relay needs an https address (http only for loopback) without query, fragment or credentials, and a token of 16-256 printable ASCII characters"
+    )]
     InvalidCloudClipboardRelay,
     #[error(
         "云候选配置无效：请检查地址、方法、请求头、JSON 模板、响应路径和超时（100–10000 毫秒）"
