@@ -90,6 +90,13 @@ static void FinishCandidateFrameAnimation(MSIMEInputController *controller) {
 @property(nonatomic, copy) NSArray<NSString *> *texts;
 @property(nonatomic) NSUInteger cursor;
 @property(nonatomic) NSUInteger selected;
+// 联想候选：视图带 prediction，翻页命令照 runtime 清掉联想。
+@property(nonatomic) BOOL prediction;
+@property(nonatomic) NSMutableArray<NSNumber *> *commands;
+// 最近一次报来的显示页座位；nil 表示没报过，空数组表示清掉。
+@property(nonatomic, copy) NSArray<NSNumber *> *displayPage;
+// 落进引擎的字符键：选词键该被宿主拦下时，这里应当是空的。
+@property(nonatomic) NSMutableString *typed;
 @end
 @implementation AdaptiveLayoutSession
 - (NSArray *)entries {
@@ -101,16 +108,33 @@ static void FinishCandidateFrameAnimation(MSIMEInputController *controller) {
 }
 - (NSDictionary *)viewWithError:(NSError **)error {
     (void)error;
+    if (!self.texts.count) return @{@"session":@1, @"generation":@7, @"focused":@YES, @"candidates":@[]};
     const NSUInteger start = self.cursor / 6 * 6;
-    return @{@"session":@1, @"generation":@7, @"focused":@YES, @"editing_text":@"synthetic",
+    NSMutableDictionary *view = [@{@"session":@1, @"generation":@7, @"focused":@YES, @"editing_text":@"synthetic",
         @"page":@(self.cursor / 6), @"page_count":@((self.texts.count + 5) / 6),
-        @"candidates":[[self entries] subarrayWithRange:NSMakeRange(start, MIN((NSUInteger)6, self.texts.count - start))]};
+        @"candidates":[[self entries] subarrayWithRange:NSMakeRange(start, MIN((NSUInteger)6, self.texts.count - start))]} mutableCopy];
+    if (self.prediction) view[@"prediction"] = @YES;
+    return view;
 }
 - (NSDictionary *)allCandidatesWithError:(NSError **)error {
     (void)error;
     return @{@"session":@1, @"generation":@7, @"candidates":[self entries]};
 }
+- (NSDictionary *)setDisplayPageGeneration:(uint64_t)generation indices:(NSArray<NSNumber *> *)indices error:(NSError **)error {
+    (void)error;
+    assert(generation == 7);
+    self.displayPage = indices;
+    return @{@"applied":@YES};
+}
 - (NSDictionary *)command:(uint32_t)command error:(NSError **)error {
+    [self.commands addObject:@(command)];
+    // runtime 对联想状态的翻页与移动高亮都会清掉联想。
+    if (self.prediction && (command == MSIME_NEXT_PAGE || command == MSIME_PREVIOUS_PAGE ||
+                            command == MSIME_NEXT_CANDIDATE || command == MSIME_PREVIOUS_CANDIDATE)) {
+        self.prediction = NO;
+        self.texts = @[];
+        return @{@"view":[self viewWithError:error], @"handled":@NO};
+    }
     if (command == MSIME_NEXT_CANDIDATE && self.cursor + 1 < self.texts.count) ++self.cursor;
     if (command == MSIME_PREVIOUS_CANDIDATE && self.cursor > 0) --self.cursor;
     return @{@"view":[self viewWithError:error], @"handled":@YES};
@@ -236,6 +260,163 @@ static void AssertNativeCandidateFrameAnimation(AdaptiveLayoutController *contro
     }
     [controller stopCandidateFrameAnimation];
     assert(NSEqualRects(panel.frame, target));
+}
+
+// 走完整按键入口用的替身：没实现的会话方法按真实会话的签名回零值并记下来；字符与标点记进 typed，
+// 用来确认选词键没有落进引擎。只给按键测试用，其余测试的替身仍然对缺失的方法直接报错。
+@interface AdaptiveKeySession : AdaptiveLayoutSession
+@property(nonatomic) NSMutableArray<NSString *> *forwarded;
+@end
+@implementation AdaptiveKeySession
+- (NSMethodSignature *)methodSignatureForSelector:(SEL)selector {
+    return [super methodSignatureForSelector:selector] ?: [MSIMEClientSession instanceMethodSignatureForSelector:selector];
+}
+- (void)forwardInvocation:(NSInvocation *)invocation {
+    [self.forwarded addObject:NSStringFromSelector(invocation.selector)];
+    char zero[64] = {};
+    if (invocation.methodSignature.methodReturnLength) [invocation setReturnValue:zero];
+}
+- (NSDictionary *)typeASCII:(uint8_t)character shift:(BOOL)shift error:(NSError **)error {
+    (void)shift; (void)error; [self.typed appendFormat:@"%c", character]; return nil;
+}
+- (NSDictionary *)punctuationASCII:(uint8_t)ascii error:(NSError **)error {
+    (void)error; [self.typed appendFormat:@"%c", ascii]; return nil;
+}
+- (NSDictionary *)punctuation:(uint8_t)ascii error:(NSError **)error {
+    (void)error; [self.typed appendFormat:@"%c", ascii]; return nil;
+}
+- (NSDictionary *)punctuation:(uint8_t)ascii preceding:(uint32_t)preceding error:(NSError **)error {
+    (void)preceding; (void)error; [self.typed appendFormat:@"%c", ascii]; return nil;
+}
+@end
+
+// 显示和收起都只改记下的可见状态，不真的上屏：收起后的按键路由要看到候选窗确实不在了。
+@interface TogglingRowLayoutPanel : RowLayoutPanel
+@property(nonatomic) BOOL shown;
+@end
+@implementation TogglingRowLayoutPanel
+- (BOOL)isVisible { return self.shown; }
+- (void)orderFrontRegardless { self.shown = YES; }
+- (void)orderOut:(id)sender { (void)sender; self.shown = NO; }
+@end
+
+// PR 审查补的边界：显示页上报、释义按显示行请求、收起后与联想状态的翻页、窄宽度大缩放的首行控件。
+static void TestAdaptiveReviewFixes(RowLayoutClient *client) {
+    NSString *suite = [@"app.msime.test.adaptive-review." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *appearance = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":@"adaptive",
+        @"candidate_max_width":@400}];
+    appearance.showsCandidatePreedit = NO;
+    appearance.showsCandidatePageNumber = NO;
+    appearance.showsAppLogo = NO;
+    appearance.expandCandidates = YES;
+    appearance.candidateTranslations = NO;
+    AdaptiveKeySession *session = [AdaptiveKeySession new];
+    session.forwarded = [NSMutableArray array];
+    session.commands = [NSMutableArray array];
+    session.typed = [NSMutableString string];
+    NSMutableArray *texts = [NSMutableArray array];
+    for (NSUInteger index = 0; index < 40; ++index) [texts addObject:@"合成词组"];
+    session.texts = texts;
+    AdaptiveLayoutController *controller = [[AdaptiveLayoutController alloc] init];
+    MSIMECandidatePanel *panel = [[TogglingRowLayoutPanel alloc] initWithContentRect:NSZeroRect
+        styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:NO];
+    [controller setValue:appearance forKey:@"appearance"];
+    [controller setValue:client forKey:@"activeClient"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:[session viewWithError:nil] forKey:@"view"];
+    [controller setValue:panel forKey:@"panel"];
+    auto indices = [](NSArray *candidates) {
+        NSMutableArray *seats = [NSMutableArray array];
+        for (NSDictionary *candidate in candidates) [seats addObject:candidate[@"id"][@"index"]];
+        return seats;
+    };
+
+    // 显示页：每次画出一行就把它的座位报给运行时；翻到第二行（跨过引擎每页 6 个的边界）跟着更新。
+    [controller renderCandidates];
+    NSArray *first = [controller valueForKey:@"adaptivePageCandidates"];
+    assert(first.count > 1 && first.count < 6);
+    assert([session.displayPage isEqual:indices(first)]);
+    NSDictionary *next = [controller candidateCommand:MSIME_NEXT_PAGE];
+    [controller setValue:next[@"view"] forKey:@"view"];
+    [controller renderCandidates];
+    NSArray *second = [controller valueForKey:@"adaptivePageCandidates"];
+    assert([session.displayPage isEqual:indices(second)]);
+    // 服务看到的视图换成显示的这一行：本地释义、目标语言词典、自定义翻译都按看得见的候选请求。
+    NSDictionary *serviceView = [controller serviceSnapshotView];
+    assert([indices(serviceView[@"candidates"]) isEqual:indices(second)]);
+    assert(![indices([session viewWithError:nil][@"candidates"]) isEqual:indices(second)]);
+    // 同一代里换回固定数量：清掉显示页，服务视图回到引擎的这一页。
+    [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":@"fixed"}];
+    [controller renderCandidates];
+    assert(session.displayPage && session.displayPage.count == 0);
+    assert([[controller serviceSnapshotView][@"candidates"] isEqual:[session viewWithError:nil][@"candidates"]]);
+    [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":@"adaptive",
+        @"candidate_max_width":@400}];
+
+    // 引擎每页 10 个、这一行只显示几个：`0` 仍归选词，这一行没有第十格就吞掉，不能落进引擎去选它固定页里看不见的第十个。
+    appearance.pageSize = 10;
+    session.cursor = 0;
+    session.selected = NSNotFound;
+    [controller setValue:[session viewWithError:nil] forKey:@"view"];
+    [controller renderCandidates];
+    assert([[controller valueForKey:@"adaptivePageCandidates"] count] < 10);
+    [session.commands removeAllObjects];
+    NSEvent *zero = [NSEvent keyEventWithType:NSEventTypeKeyDown location:NSZeroPoint modifierFlags:0 timestamp:0
+        windowNumber:0 context:nil characters:@"0" charactersIgnoringModifiers:@"0" isARepeat:NO keyCode:29];
+    assert([controller handleEvent:zero client:client]);
+    assert(session.selected == NSNotFound && session.typed.length == 0);
+    appearance.pageSize = 6;
+
+    // 候选窗收起后（上屏、取消），上一行留下的分页不能吞掉应用自己的翻页键：照原样交给引擎。
+    session.cursor = 0;
+    [controller setValue:[session viewWithError:nil] forKey:@"view"];
+    [controller renderCandidates];
+    [controller hideCandidatePanel:"test"];
+    [session.commands removeAllObjects];
+    [controller candidateCommand:MSIME_PREVIOUS_PAGE];
+    assert([session.commands isEqual:@[@(MSIME_PREVIOUS_PAGE)]]);
+
+    // 联想候选超过一行时翻页：runtime 清掉联想，用原来的单次命令，不逐个挪高亮。
+    session.prediction = YES;
+    [controller setValue:[session viewWithError:nil] forKey:@"view"];
+    [controller renderCandidates];
+    assert(panel.isVisible && [[controller valueForKey:@"adaptivePageCandidates"] count] < session.texts.count);
+    [session.commands removeAllObjects];
+    NSDictionary *cleared = [controller candidateCommand:MSIME_NEXT_PAGE];
+    assert([session.commands isEqual:@[@(MSIME_NEXT_PAGE)]]);
+    assert(cleared && [cleared[@"view"][@"candidates"] count] == 0);
+    session.texts = texts;
+
+    // 最大宽度 160pt、缩放 200%，首行同时有翻页、展开和 logo：控件都留在卡片里，互不重叠。
+    [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":@"adaptive",
+        @"candidate_max_width":@160}];
+    appearance.showsCandidatePageNumber = YES;
+    appearance.showsAppLogo = YES;
+    appearance.showsCandidateExpandButton = YES;
+    appearance.candidateScalePercent = 200;
+    session.cursor = 0;
+    [controller setValue:[session viewWithError:nil] forKey:@"view"];
+    [controller renderCandidates];
+    MSIMECandidateChromeView *chrome = (id)panel.contentView;
+    const NSRect card = chrome.cardBounds;
+    NSMutableArray<NSView *> *header = [NSMutableArray array];
+    for (NSView *view in MSIMECandidateControlSubviews(panel.contentView))
+        if ((view.tag == -1 || view.tag == -2 || view.tag == -3) && [view isKindOfClass:NSButton.class]) [header addObject:view];
+        else if ([view.identifier isEqual:@"candidate-logo"]) [header addObject:view];
+    assert(header.count >= 3);
+    for (NSView *view in header) {
+        const NSRect frame = [view convertRect:view.bounds toView:chrome];
+        assert(NSMinX(frame) >= NSMinX(card) - 0.5 && NSMaxX(frame) <= NSMaxX(card) + 0.5);
+        for (NSView *other in header) {
+            if (other == view) continue;
+            const NSRect otherFrame = [other convertRect:other.bounds toView:chrome];
+            assert(NSWidth(NSIntersectionRect(NSInsetRect(frame, 0.5, 0.5), otherFrame)) <= 0);
+        }
+    }
+    appearance.candidateScalePercent = 100;
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
 
 static void TestAdaptiveCandidateLayout(RowLayoutClient *client) {
@@ -2795,6 +2976,7 @@ int main(int argc, char **argv)
             const NSRect screen = NSScreen.mainScreen.visibleFrame;
             client.caret = NSMakeRect(NSMidX(screen), NSMidY(screen), 1, 20);
             TestAdaptiveCandidateLayout(client);
+            TestAdaptiveReviewFixes(client);
             return 0;
         }
         // 动效需要独立的主事件循环，避免大布局矩阵的旧窗口回调占用计时阶段。
