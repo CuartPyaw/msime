@@ -2084,17 +2084,27 @@ static void TestCharacterSetShortcut(void) {
     appearance.englishMode = NO;
     session.lastCommand = UINT32_MAX;
     NSEventModifierFlags flags = NSEventModifierFlagControl | NSEventModifierFlagShift;
+    // 从真实快捷键入口检查提示，不能只证明繁简偏好翻转。
+    appearance.inputModeHUD = YES;
+    MSIMEInputModeHUDPanel *hud = MSIMEInputModeHUDPanel.sharedPanel;
+    [hud orderOut:nil];
     assert([controller handleEvent:ModeKey(3, flags, NO) client:client]);
     assert(appearance.traditionalOutput != traditional);
+    assert(hud.visible && [hud.displayedText isEqual:appearance.traditionalOutput ? @"繁" : @"简"]);
+    [hud orderOut:nil];
     assert([controller handleEvent:ModeKey(3, flags, YES) client:client]);
     assert(appearance.traditionalOutput != traditional);
+    assert(!hud.visible);
     assert([[controller valueForKey:@"view"] isEqual:view]);
     assert(session.lastCommand == UINT32_MAX && client.committed == nil);
     assert([controller handleEvent:ModeKey(3, flags | NSEventModifierFlagCapsLock, NO) client:client]);
     assert(appearance.traditionalOutput == traditional);
+    assert(hud.visible && [hud.displayedText isEqual:traditional ? @"繁" : @"简"]);
+    [hud orderOut:nil];
     appearance.englishMode = YES;
     assert([controller handleEvent:ModeKey(3, flags, NO) client:client]);
     assert(appearance.traditionalOutput == traditional && appearance.englishMode);
+    assert(!hud.visible);
     for (NSUInteger mask = 0; mask < 16; ++mask) {
         NSEventModifierFlags mods = (mask & 1 ? NSEventModifierFlagControl : 0) |
             (mask & 2 ? NSEventModifierFlagShift : 0) | (mask & 4 ? NSEventModifierFlagOption : 0) |
@@ -2117,6 +2127,27 @@ static void TestCharacterSetShortcut(void) {
     assert(appearance.traditionalOutput != traditional);
     assert([controller handleEvent:LayoutKey(3, @"\u0430", flags) client:client]);
     assert(appearance.traditionalOutput == traditional);
+    // 关闭 HUD 仍能切换；菜单、工具栏与快捷键共用状态反馈，同值选择不提示。
+    appearance.inputModeHUD = NO;
+    [hud orderOut:nil];
+    assert([controller handleEvent:ModeKey(3, flags, NO) client:client]);
+    assert(appearance.traditionalOutput != traditional && !hud.visible);
+    appearance.inputModeHUD = YES;
+    [controller selectSimplifiedOutput:nil];
+    assert(hud.visible && [hud.displayedText isEqual:@"简"]);
+    [hud orderOut:nil];
+    [controller selectSimplifiedOutput:nil];
+    assert(!hud.visible);
+    [controller selectTraditionalOutput:nil];
+    assert(hud.visible && [hud.displayedText isEqual:@"繁"]);
+    [controller floatingToolbarDidRequestToggleTraditionalOutput:nil];
+    assert(hud.visible && [hud.displayedText isEqual:@"简"]);
+    [hud orderOut:nil];
+    [controller setValue:nil forKey:@"activeClient"];
+    [controller selectTraditionalOutput:nil];
+    assert(appearance.traditionalOutput && !hud.visible);
+    [controller selectSimplifiedOutput:nil];
+    [controller setValue:client forKey:@"activeClient"];
     appearance.englishMode = YES;
     [appearance applySharedInputPreferences:@{@"keybindings":keys}];
     assert(![controller handleEvent:ModeKey(3, flags, NO) client:client]);
@@ -12891,6 +12922,7 @@ int main(int argc, char **argv) {
             return 0;
         }
         if (argc == 2 && std::string(argv[1]) == "--toggle-hotkeys") {
+            @autoreleasepool { TestCharacterSetShortcut(); }
             TestToggleHotkeyRebinding();
             return 0;
         }

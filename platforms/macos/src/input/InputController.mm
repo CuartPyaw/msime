@@ -4860,10 +4860,15 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     [self hideCandidatePanel:"mode_switch"];
     [_keymapPanel orderOut:nil];
     [self syncSystemInputModeForClient:_activeClient ?: self.client];
-    if (changed && _appearance.inputModeHUD && _activeClient) {
+    if (changed) [self showInputStateHUDText:MSIMEInputModeHUDText(enabled)
+        announcement:enabled ? @"英文输入" : @"中文输入"];
+}
+
+- (void)showInputStateHUDText:(NSString *)text announcement:(NSString *)announcement {
+    if (_appearance.inputModeHUD && _activeClient) {
         NSRect caret = NSZeroRect;
         [(id<IMKTextInput>)_activeClient attributesForCharacterIndex:0 lineHeightRectangle:&caret];
-        // The badge takes the floating toolbar's palette in each appearance, so it follows the selected theme and skin.
+        // 切换提示与悬浮工具栏共用明暗调色板，跟随用户选择的主题和皮肤。
         const auto light = [_appearance toolbarSkinForDark:NO];
         const auto dark = [_appearance toolbarSkinForDark:YES];
         MSIMEInputModeHUDPanel *hud = [MSIMEInputModeHUDPanel sharedPanel];
@@ -4871,7 +4876,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
                  borderColor:MSIMEThemedSkinColor(@"MSIMEInputModeHUDBorder", light.border, dark.border)
                    textColor:MSIMEThemedSkinColor(@"MSIMEInputModeHUDText", light.text, dark.text)];
         [hud applySizingPreferences:@{@"show_app_logo": @(_appearance.showsAppLogo)}];
-        [hud showEnglishInputMode:enabled nearCaretRect:caret];
+        [hud showText:text announcement:announcement nearCaretRect:caret];
     }
 }
 // The HostOptions document the scheme checks read: the session's, or the one on disk before a session exists. Test sessions stand in without hostOptions, as MSIMEStatisticsHostOptions allows for.
@@ -5025,9 +5030,16 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     (void)sender;
     [self setDedicatedEnglishInputMode:_appearance.englishMode || !MSIMEStrictBoolean(_view[@"dedicated_english"])];
 }
-- (void)selectSimplifiedOutput:(id)sender { (void)sender; [self ensureAppearance]; _appearance.traditionalOutput = NO; }
-- (void)selectTraditionalOutput:(id)sender { (void)sender; [self ensureAppearance]; _appearance.traditionalOutput = YES; }
-- (void)toggleTraditionalOutput:(id)sender { (void)sender; [self ensureAppearance]; _appearance.traditionalOutput = !_appearance.traditionalOutput; }
+- (void)setTraditionalOutput:(BOOL)enabled {
+    [self ensureAppearance];
+    const BOOL changed = _appearance.traditionalOutput != enabled;
+    _appearance.traditionalOutput = enabled;
+    if (changed) [self showInputStateHUDText:enabled ? @"繁" : @"简"
+        announcement:enabled ? @"繁体输出" : @"简体输出"];
+}
+- (void)selectSimplifiedOutput:(id)sender { (void)sender; [self setTraditionalOutput:NO]; }
+- (void)selectTraditionalOutput:(id)sender { (void)sender; [self setTraditionalOutput:YES]; }
+- (void)toggleTraditionalOutput:(id)sender { (void)sender; [self ensureAppearance]; [self setTraditionalOutput:!_appearance.traditionalOutput]; }
 - (void)selectEnglishMode:(id)sender { (void)sender; [self setEnglishInputMode:YES]; }
 - (void)showSystemCharacterPalette { [NSApp orderFrontCharacterPalette:nil]; }
 - (void)checkForUpdates:(id)sender {
@@ -6655,7 +6667,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     [self syncCharacterWidth];
     [self refreshFloatingToolbarState];
 }
-- (void)floatingToolbarDidRequestToggleTraditionalOutput:(MSIMEFloatingToolbarPanel *)toolbar { (void)toolbar; _appearance.traditionalOutput = !_appearance.traditionalOutput; }
+- (void)floatingToolbarDidRequestToggleTraditionalOutput:(MSIMEFloatingToolbarPanel *)toolbar { (void)toolbar; [self toggleTraditionalOutput:nil]; }
 - (void)floatingToolbarDidRequestOpenCharacterPalette:(MSIMEFloatingToolbarPanel *)toolbar { (void)toolbar; [self openCharacterPalette:nil]; }
 - (void)floatingToolbarDidRequestOpenEmoji:(MSIMEFloatingToolbarPanel *)toolbar { (void)toolbar; [self showEmoji:nil]; }
 - (void)floatingToolbarDidRequestOpenHandwriting:(MSIMEFloatingToolbarPanel *)toolbar { (void)toolbar; [self showHandwriting:nil]; }
