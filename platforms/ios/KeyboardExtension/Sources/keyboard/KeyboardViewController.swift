@@ -180,6 +180,8 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
   private var candidatePanel: KeyboardCandidatePanelView?
   /// 面板正在显示的那一代候选。选择和长按菜单都按它里面的代次和全局序号找候选；九键面板换代时整份换掉。
   private var candidatePanelSnapshot: CandidatePanelSnapshot?
+  /// 面板里刚选了候选、这次选择的快照正在画：普通网格这时换代也不收起，而是换上新的一代，由 `selectPanelCandidate` 画完后决定面板留不留（#9193）。
+  private var candidatePanelFollowsSelection = false
   /// 全拼九键展开面板的左右两栏；不为 nil 时面板是三栏布局，换代时不关而是重建。
   private var nineKeyPanelColumns: KeyboardNineKeyPanelColumns?
   /// 九键面板左栏正显示笔画键。只是面板自己的状态，收起面板就回到拼音。
@@ -5190,7 +5192,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       guard !snapshot.entries.isEmpty else { return }
       let columns = opensNineKeyPanel ? makeNineKeyPanelColumns() : nil
       let panel = KeyboardCandidatePanelView(
-        candidates: snapshot.entries.map { chineseOutput($0.text, source: $0.source) }, preedit: snapshot.preedit,
+        candidates: candidatePanelTexts(snapshot), preedit: snapshot.preedit,
         annotations: candidatePanelAnnotations(snapshot),
         markers: candidatePanelMarkers(snapshot),
         aiPlaceholders: candidatePanelAIPlaceholders(snapshot),
@@ -5206,12 +5208,7 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
         },
         onSelect: { [weak self] index in
           guard let self, let snapshot = candidatePanelSnapshot, snapshot.entries.indices.contains(index) else { return }
-          // 先收起面板、暂不清九键筛选：清筛选会换一代候选，这次选择就成了过期的。选完组字还在的话再清。
-          closeCandidatePanel(clearingNineKeyFilter: false)
-          closeKeyboardPicker()
-          playInputClick()
-          render(session.selectAnyCandidate(generation: snapshot.generation, globalIndex: snapshot.entries[index].index))
-          clearNineKeyFilter()
+          selectPanelCandidate(generation: snapshot.generation, globalIndex: snapshot.entries[index].index)
         },
         onClose: { [weak self] in self?.closeKeyboardPicker() },
         columns: columns.map { ($0.leading, $0.trailing) })
@@ -5228,9 +5225,35 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
     }
   }
 
+  /// 面板里点中一个候选。只选掉前面一段、组字还在时面板留着，换上剩下组字的全部候选，用户接着在面板里往下选（#9193，规则在 `CandidatePanelSelectionPolicy`）；整句上屏、组字清空或引擎拒绝了这次选择就收起，组字还在的话照旧清掉九键筛选。九键面板开着笔画筛选时顺带清掉笔画：它比的是刚被选掉的那个字。
+  ///
+  /// 先选再决定收不收：先收起面板再清筛选会换一代候选，这次选择就成了过期的。画这次快照时 `candidatePanelFollowsSelection` 让普通网格也按新的一代原地重建，不在换代时先收起。
+  private func selectPanelCandidate(generation: UInt64, globalIndex: UInt64) {
+    playInputClick()
+    let nineKeyPanel = nineKeyPanelColumns != nil
+    let snapshot = session.selectAnyCandidate(generation: generation, globalIndex: globalIndex)
+    candidatePanelFollowsSelection = true
+    render(snapshot)
+    candidatePanelFollowsSelection = false
+    guard candidatePanel != nil,
+          CandidatePanelSelectionPolicy.keepsOpen(handled: snapshot.isHandled, editingText: snapshot.editingText) else {
+      closeKeyboardPicker()
+      return
+    }
+    if nineKeyPanel, nineKeyPanelColumns != nil,
+       let strokes = CandidatePanelSelectionPolicy.strokesAfterPartialSelection(currentNineKeyStrokes) {
+      setNineKeyFilter(singleCharacter: currentNineKeySingleCharacter, strokes: strokes)
+    }
+  }
+
   /// 全拼九键、14 键或 18 键正在组字时，展开的是三栏的九键面板（单字和笔画筛选照常可用）；其他方案、注音九键和本地模式使用铺满键区的候选网格，由顶部箭头收起。
   private var opensNineKeyPanel: Bool {
     (inputScheme.isMandarinNineKey || usesLetterGrid) && isChineseMode && hasComposition && !isInLocalMode
+  }
+
+  /// 面板格子上的字：打开和换代重建都按繁体输出偏好转换，换代后不能退回引擎原文（部分选词后普通网格也走换代重建，#9193）。
+  private func candidatePanelTexts(_ snapshot: CandidatePanelSnapshot) -> [String] {
+    snapshot.entries.map { chineseOutput($0.text, source: $0.source) }
   }
 
   private func candidatePanelAnnotations(_ snapshot: CandidatePanelSnapshot) -> [KeyboardCandidateAnnotation] {
@@ -7001,19 +7024,19 @@ final class KeyboardViewController: UIInputViewController, UIGestureRecognizerDe
       // AI 回答到达时也会换一代，但最多只有 AI 行变了（第一条插在第一页最后一格，多出来的接在末尾；回答的词都已在列表里时一行都没变）：面板留着、原地换上新的一代，不跳回开头。原来这里一换代就收起普通的候选网格，用户刚展开完整列表，AI 的结果一到它就没了（#6888）。
       if hasComposition, snapshot.onlyTheAISeatChanged(since: current) {
         candidatePanelSnapshot = snapshot
-        panel.reload(candidates: snapshot.entries.map(\.text), annotations: candidatePanelAnnotations(snapshot),
+        panel.reload(candidates: candidatePanelTexts(snapshot), annotations: candidatePanelAnnotations(snapshot),
                      markers: candidatePanelMarkers(snapshot), aiPlaceholders: candidatePanelAIPlaceholders(snapshot),
                      keepingScrollPosition: true)
         updateNineKeyPanelColumns()
         return
       }
-      // 九键面板里选拼音、退格和筛选都会换一代候选，面板留着、按新的一代重建，组字结束才收起。其他面板照旧在候选换代时收起。
-      guard nineKeyPanelColumns != nil, hasComposition else {
+      // 九键面板里选拼音、退格和筛选都会换一代候选，面板留着、按新的一代重建，组字结束才收起。面板里刚选了候选时普通网格也一样（`selectPanelCandidate`）；其他换代照旧收起普通网格。
+      guard nineKeyPanelColumns != nil || candidatePanelFollowsSelection, hasComposition else {
         closeKeyboardPicker()
         return
       }
       candidatePanelSnapshot = snapshot
-      panel.reload(candidates: snapshot.entries.map(\.text), annotations: candidatePanelAnnotations(snapshot),
+      panel.reload(candidates: candidatePanelTexts(snapshot), annotations: candidatePanelAnnotations(snapshot),
                    markers: candidatePanelMarkers(snapshot), aiPlaceholders: candidatePanelAIPlaceholders(snapshot))
       updateNineKeyPanelColumns()
       return
