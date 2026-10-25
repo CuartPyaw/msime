@@ -9,6 +9,10 @@ interface NativeOobeState {
   onboarding_seen: boolean | null;
 }
 
+function fact(value: unknown): boolean | null {
+  return typeof value === "boolean" ? value : null;
+}
+
 export const unknownOobeState = (): OobeState => ({
   resourcesReady: null,
   systemEnabled: null,
@@ -33,11 +37,11 @@ export function createDesktopOobeClient(
       .then(
         (value) => {
           cached = {
-            resourcesReady: value.resources_ready,
-            systemEnabled: value.system_enabled,
-            systemCurrent: value.system_current,
-            preferencesSaved: value.preferences_saved,
-            onboardingSeen: value.onboarding_seen,
+            resourcesReady: fact(value?.resources_ready),
+            systemEnabled: fact(value?.system_enabled),
+            systemCurrent: fact(value?.system_current),
+            preferencesSaved: fact(value?.preferences_saved),
+            onboardingSeen: fact(value?.onboarding_seen),
           };
         },
         () => {

@@ -73,6 +73,24 @@ test("查询失败清除旧的成功结果，后续刷新可以恢复", async ()
   expect(values).toHaveLength(3);
 });
 
+test.each([undefined, null, {}, { resources_ready: "true", system_enabled: 1 }])(
+  "原生快照缺失或字段无效时保留未知：%j",
+  async (reply) => {
+    const client = createDesktopOobeClient(
+      "linux",
+      async <T>() => reply as T,
+      async () => {},
+    )!;
+    const state = await new Promise<OobeState>((resolve) => {
+      const stop = client.subscribe((value) => {
+        stop();
+        resolve(value);
+      });
+    });
+    expect(Object.values(state)).toEqual([null, null, null, null, null]);
+  },
+);
+
 describe("跨平台 OOBE 状态契约", () => {
   test("完整快照才算系统和流程都完成", () => {
     const state = ready();

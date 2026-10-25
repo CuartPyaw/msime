@@ -230,7 +230,7 @@ struct KeyboardStatusCard: View {
         Text(scheme.shortLabel).font(.system(size: 17, weight: .semibold))
           .accessibilityIdentifier("keyboardStatusScheme")
       }
-      Text("请在系统设置中完成以下两步；iOS 不允许 App 自动确认键盘列表和完全访问状态。")
+      Text("请在系统设置中完成以下两步；iOS 无法自动确认键盘列表和完全访问状态。")
         .font(.system(size: 13))
         .foregroundStyle(MetasequoiaTheme.sub)
         .fixedSize(horizontal: false, vertical: true)

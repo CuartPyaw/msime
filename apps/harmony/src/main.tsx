@@ -1777,8 +1777,8 @@ function HarmonySettings({
           leaveFlow();
         }}
         onSkip={async (scheme, choices) => {
-          // 「跳过」是离开流程的出口，而流程后面的设置页才是报告和恢复无法读取的文档的地方。因此，已做选择写入失败（文档无法读取，或保存时与键盘发生竞争）不会把用户卡在这里：无论如何都离开流程，设置页加载文档时会报告文档无法读取。
-          await applyChoices(scheme, choices).catch(() => undefined);
+          // 保存失败由流程显示重试提示；保留当前选择，不能静默离开后丢失。
+          await applyChoices(scheme, choices);
           leaveFlow();
         }}
       />,
