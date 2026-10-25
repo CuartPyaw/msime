@@ -894,13 +894,14 @@ int wmain(int argc, wchar_t **argv) {
   try {
     const auto default_state = production_state_directory();
     std::unique_ptr<ProductionInstance> instance;
+    bool prepared_now = false;
     if (production) {
       instance = std::make_unique<ProductionInstance>();
       if (instance->already_running())
         return 0;
       if (!launch.supervised)
         start_watchdog(executable_directory());
-      const bool prepared_now = prepare_first_run(executable_directory(), default_state,
+      prepared_now = prepare_first_run(executable_directory(), default_state,
                        [](const std::string &request) {
         auto response = msime::host_api::own_string(
             msime_client_prepare_host(
@@ -1707,6 +1708,12 @@ int wmain(int argc, wchar_t **argv) {
       const auto executable = shell_executable(shell_directory, configured_shell, request);
       return executable && launch_shell_surface(*executable, request, shell_context);
     };
+    // 首次准备运行配置后立即打开设置首页。安装器只负责安装文件和启动 Server，
+    // 如果这里不接上，Windows 用户必须自己从开始菜单找到设置窗口，输入法的首次设置
+    // 就没有完成闭环。设置窗口顶部会继续显示“去添加/设为默认”的状态卡；已有状态的
+    // Server 启动（包括 TSF 按需拉起）不重复打扰用户。
+    if (prepared_now && settings_request)
+      (void)launch_shell(*settings_request);
     // 表情和屏幕键盘先找共享应用；它不在或起不来时打开系统自带的表情面板（Win+.）和屏幕键盘（osk.exe），与 macOS 退回系统字符面板和原生屏幕键盘一致，所以这两处入口总是可用。
     const auto open_emoji = [&] {
       const auto request = shell_surface_request(TrayMenuCommand::OpenEmojiPanel);

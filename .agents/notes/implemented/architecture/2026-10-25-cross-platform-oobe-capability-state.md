@@ -18,7 +18,7 @@ Status: implemented
 | 平台 | OOBE 入口 | 离开后仍需确认的系统能力 |
 | --- | --- | --- |
 | macOS | 独立安装页 | 输入源注册、词库运行配置，以及部分系统版本需要用户在系统设置或重新登录后生效的输入模式 |
-| Windows | 安装器询问数据目录和云候选；Server 首次启动写 `runtime-options.json` | 安装后没有统一的输入法可用性引导 |
+| Windows | 安装器询问数据目录和云候选；Server 首次启动写 `runtime-options.json`，首次准备成功后自动打开原生设置首页 | 设置页状态卡检查输入法是否已添加、是否为默认；失败时打开 Windows「语言和区域」 |
 | Linux | 缺配置或词库过期时进入设置页，校验、下载、准备并注册 IBus/Fcitx5 | 服务启用和当前输入法由桌面环境决定 |
 | Android | Splash 后的原生四步引导，`Bootstrap.prepare` 原子准备词库 | 系统输入法启用与当前输入法选择 |
 | iOS | SwiftUI 四步引导和长期状态卡 | 键盘列表、完全访问和当前输入法均需用户在系统界面确认 |
@@ -32,13 +32,14 @@ Status: implemented
 
 ## Consequences
 
-iOS 老用户的旧完成标记会迁移到 `hasSeenOnboarding`，不会再次被强制拉回引导；UI 测试使用的旧启动参数仍兼容。用户离开引导后，首页会继续显示两项系统设置动作和无法自动确认的说明，避免把“看过引导”误解为“键盘已经可用”。代价是 iOS 不能在首页给出自动化的完成勾选，系统能力验收仍需真实系统设置或输入框验证。其他平台暂不改变运行时行为，后续可按四类状态分别补齐资源、启用、偏好与权限的验收。
+iOS 老用户的旧完成标记会迁移到 `hasSeenOnboarding`，不会再次被强制拉回引导；UI 测试使用的旧启动参数仍兼容。用户离开引导后，首页会继续显示两项系统设置动作和无法自动确认的说明，避免把“看过引导”误解为“键盘已经可用”。Windows 首次准备成功后会通过现有 Shell 路由打开原生设置首页，设置页顶部的输入法状态卡负责添加和设为默认，已有状态的启动不会重复弹出。代价是 iOS 不能在首页给出自动化的完成勾选，系统能力验收仍需真实系统设置或输入框验证；桌面平台的系统能力仍由各自原生宿主报告，不能用一个共享布尔值替代。
 
 ## Verification
 
 - `git diff --check` 通过。
 - iOS UI 测试 `testKeyboardHomePrioritizesTryoutAndQuickAdjustments` 增加了状态卡说明的存在性和文案断言；现有首次引导测试继续使用 `-hasCompletedOnboarding YES`，覆盖旧标记迁移兼容路径。
 - 未启动完整 Xcode 构建：本机磁盘空间约 4.2 GB，不足以安全创建新的完整构建产物。
+- Windows 首次运行接线通过源码检查确认：仅 `prepare_first_run` 返回新准备状态时调用现有 `launch_shell_surface`，路由为默认设置页并携带同一份 `runtime-options.json`；已有状态和非生产预览不调用。未在本机启动 Windows 构建或安装器。
 
 ## Related decisions
 
