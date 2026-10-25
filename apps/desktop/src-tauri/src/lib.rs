@@ -5075,6 +5075,24 @@ async fn ios_onboarding_status(
 
 #[cfg(target_os = "ios")]
 #[tauri::command]
+async fn ios_oobe_status(
+    state: tauri::State<'_, msime_tauri_mobile_platform::MobilePlatform<tauri::Wry>>,
+) -> Result<Value, CommandError> {
+    let platform = state.inner().clone();
+    let seen = tauri::async_runtime::spawn_blocking(move || platform.onboarding_completed())
+        .await
+        .map_err(|_| CommandError { code: "oobe" })?
+        .map_err(|_| CommandError { code: "oobe" })?;
+    Ok(serde_json::json!({
+        "resources_ready": true,
+        "system_enabled": null,
+        "system_current": null,
+        "onboarding_seen": seen,
+    }))
+}
+
+#[cfg(target_os = "ios")]
+#[tauri::command]
 async fn ios_onboarding_complete(
     state: tauri::State<'_, msime_tauri_mobile_platform::MobilePlatform<tauri::Wry>>,
 ) -> Result<(), CommandError> {
@@ -5991,6 +6009,8 @@ pub fn run() {
             #[cfg(target_os = "android")]
             android_account::android_bootstrap_status,
             #[cfg(target_os = "android")]
+            android_account::android_oobe_status,
+            #[cfg(target_os = "android")]
             android_account::android_prepare_bootstrap,
             #[cfg(target_os = "android")]
             android_account::ai_models,
@@ -6106,6 +6126,8 @@ pub fn run() {
             open_system_keyboard_settings,
             #[cfg(target_os = "ios")]
             ios_onboarding_status,
+            #[cfg(target_os = "ios")]
+            ios_oobe_status,
             #[cfg(target_os = "ios")]
             ios_onboarding_complete,
             #[cfg(target_os = "ios")]

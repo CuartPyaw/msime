@@ -912,6 +912,20 @@ pub async fn android_bootstrap_status(
 }
 
 #[tauri::command]
+pub async fn android_oobe_status(
+    state: State<'_, AccountState>,
+) -> Result<Value, crate::CommandError> {
+    let plugin = state.platform.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        plugin
+            .run_mobile_plugin::<Value>("oobeStatus", ())
+            .map_err(|_| crate::CommandError { code: "oobe" })
+    })
+    .await
+    .map_err(|_| crate::CommandError { code: "oobe" })?
+}
+
+#[tauri::command]
 pub async fn android_prepare_bootstrap(
     state: State<'_, AccountState>,
 ) -> Result<(), crate::CommandError> {

@@ -12,6 +12,9 @@ import type {
   SettingsClient,
   SettingsSyncClient,
   MobileKeyboardFeedback,
+  OobeClient,
+  OobeState,
+  ImeSetupClient,
 } from "@msime/ui";
 
 export type MobileHostPlatform = "android" | "ios";
@@ -80,6 +83,50 @@ export function createMobileHostServices(
     platform === "ios"
       ? () => invoke("open_system_keyboard_settings").then(() => undefined)
       : () => invoke("android_open_input_method_settings").then(() => undefined);
+  let cachedOobe: OobeState | null = null;
+  const oobeListeners = new Set<(state: OobeState) => void>();
+  const refreshOobe = () => {
+    void Promise.all([
+      invoke<{
+        resources_ready: boolean;
+        system_enabled: boolean;
+        system_current: boolean;
+        onboarding_seen: boolean;
+      }>(platform === "android" ? "android_oobe_status" : "ios_oobe_status"),
+      invoke("load_preferences"),
+    ])
+      .then(([value]) => {
+        cachedOobe = {
+          resourcesReady: value.resources_ready,
+          systemEnabled: value.system_enabled,
+          systemCurrent: value.system_current,
+          preferencesSaved: true,
+          onboardingSeen: value.onboarding_seen,
+        };
+        for (const listener of oobeListeners) listener(cachedOobe);
+      })
+      .catch(() => undefined);
+  };
+  const mobileOobe: OobeClient = {
+    read: () => cachedOobe,
+    subscribe: (listener) => {
+      oobeListeners.add(listener);
+      refreshOobe();
+      return () => oobeListeners.delete(listener);
+    },
+    refresh: refreshOobe,
+  };
+  const setup: ImeSetupClient = {
+    read: () => {
+      const value = mobileOobe.read();
+      return value ? { enabled: value.systemEnabled, current: value.systemCurrent } : null;
+    },
+    subscribe: (listener) =>
+      mobileOobe.subscribe((value) =>
+        listener({ enabled: value.systemEnabled, current: value.systemCurrent }),
+      ),
+    refresh: mobileOobe.refresh,
+  };
 
   const common: Partial<SettingsClient> = {
     appIcon,
@@ -108,6 +155,7 @@ export function createMobileHostServices(
     },
     communityResources: createCommunityResourceClient(invoke, { includeReplyActions: true }),
     openSystemKeyboardSettings,
+    oobe: mobileOobe,
     ...(platform === "android"
       ? { openScreenKeyboard: () => invoke("android_open_keyboard_tryout").then(() => undefined) }
       : {}),
@@ -132,6 +180,11 @@ export function createMobileHostServices(
       openKeyboard: () => invoke("open_keyboard_panel"),
       openSystemKeyboardSettings: () => invoke("android_open_input_method_settings"),
       showInputMethodPicker: () => invoke("android_show_input_method_picker"),
+      setup,
+      oobe: mobileOobe,
+      ...(platform === "android"
+        ? { prepareResources: () => invoke("android_prepare_bootstrap").then(() => undefined) }
+        : {}),
     },
   };
 }

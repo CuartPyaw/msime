@@ -93,6 +93,8 @@ import type {
   HostChromeClient,
   ImeSetupClient,
   ImeSetupState,
+  OobeClient,
+  OobeState,
   MobileKeyboardFeedback,
   OnboardingChoices,
   OnboardingInputScheme,
@@ -445,6 +447,55 @@ function imeSetupClient(native: NativeBridge): ImeSetupClient | undefined {
       typeof native.refreshSetupStatus === "function"
         ? () => native.refreshSetupStatus()
         : undefined,
+  };
+}
+
+/** 把鸿蒙已有的实时系统状态、引导标记和已加载偏好汇成共享 OOBE 快照。 */
+function oobeClient(native: NativeBridge, setup: ImeSetupClient | undefined): OobeClient {
+  let cached: OobeState | null = null;
+  const listeners = new Set<(state: OobeState) => void>();
+  const refresh = () => {
+    const setupState = setup?.read();
+    let seen = true;
+    try {
+      const reply = JSON.parse(native.onboardingStatus()) as {
+        ok?: unknown;
+        ready?: unknown;
+        value?: unknown;
+      };
+      if (reply.ok === true && reply.ready === true && typeof reply.value === "boolean")
+        seen = !reply.value;
+    } catch {
+      seen = true;
+    }
+    cached = {
+      resourcesReady: true,
+      systemEnabled: setupState?.enabled ?? null,
+      systemCurrent: setupState?.current ?? null,
+      preferencesSaved: (() => {
+        try {
+          unwrap<Snapshot>(native.loadPreferences());
+          return true;
+        } catch {
+          return null;
+        }
+      })(),
+      onboardingSeen: seen,
+    };
+    for (const listener of listeners) listener(cached);
+  };
+  return {
+    read: () => cached,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      refresh();
+      const unsubscribeSetup = setup?.subscribe(() => refresh());
+      return () => {
+        listeners.delete(listener);
+        unsubscribeSetup?.();
+      };
+    },
+    refresh,
   };
 }
 
@@ -1261,6 +1312,7 @@ function makeClient(
   // 只读一次：能力记录在应用运行期间不会变化，下面的反馈报告据此写明版本。
   const host = unwrap<HostCapabilities>(native.hostCapabilities());
   const setup = imeSetupClient(native);
+  const oobe = oobeClient(native, setup);
   const chrome = hostChrome(native);
   // 「反馈」经账号桥接提交：有人登录时桥接附上已登录的会话，无人登录时附上设备的匿名账号会话（宿主在原生层持有，与 Android 一致）。只有两者都没有时（例如匿名注册还没成功）提交才会以 `account_unauthorized` 被拒绝，页面会如实提示。
   const feedback: FeedbackClient = {
@@ -1493,6 +1545,7 @@ function makeClient(
             },
       // 「设置」卡片各项检查背后的两项设置状态，在 2in1 上也是「输入」和「关于」页警告条的依据。2in1 没有首页要画，但仍需要这些操作：警告条调用的是同样两个。
       setup,
+      oobe,
     },
     appTheme: appThemeClient(native),
     chrome,
@@ -1586,6 +1639,7 @@ function HarmonyWelcomeFlow({
             : async () => {
                 native.showInputMethodPicker();
               },
+        oobe: client.home?.oobe,
       }}
       // 方案步骤只提供本版本和本宿主具备的键盘。
       edition={client.host?.edition}
