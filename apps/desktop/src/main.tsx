@@ -55,8 +55,6 @@ import {
   type OnboardingActions,
   type OnboardingChoices,
   type OnboardingInputScheme,
-  type OobeClient,
-  type OobeState,
   type LinuxSetupClient,
   type MacosInstallClient,
   type LinuxSetupLine,
@@ -97,65 +95,13 @@ import { testDesktopApiCredential } from "./account/credential-test-client";
 import { createAccountCommandClient } from "./account/account-command-client";
 import { isMobileHost } from "./input/mobile-host-capabilities";
 import { createMobileHostServices } from "./core/mobile-host-services";
+import { createDesktopOobeClient } from "./core/oobe-host";
 import {
   createDesktopCandidateSkinCommunity,
   createDesktopCommunityResources,
   createDesktopPluginCommunity,
   createDesktopSettingsSync,
 } from "./core/desktop-host-services";
-
-/** 把桌面宿主已有的首次安装/配置状态接到共享 OOBE 契约；系统查询不到的字段保留未知。 */
-function createDesktopOobeClient(platform: HostCapabilities["platform"]): OobeClient | undefined {
-  if (platform !== "linux" && platform !== "macos" && platform !== "windows") return undefined;
-  let cached: OobeState | null = null;
-  const listeners = new Set<(state: OobeState) => void>();
-  const refresh = () => {
-    const command =
-      platform === "linux"
-        ? "linux_setup_status"
-        : platform === "macos"
-          ? "input_source_startup_status"
-          : null;
-    if (!command) return;
-    void invoke<Record<string, unknown> | null>(command)
-      .then((value) => {
-        const prepared =
-          platform === "linux"
-            ? value?.prepared === true && value?.dictionaryOutdated !== true
-            : value !== null;
-        const enabled =
-          platform === "linux"
-            ? (value?.registration as { registered?: unknown } | null | undefined)?.registered ===
-              true
-              ? true
-              : value?.registration === null
-                ? false
-                : null
-            : typeof value?.enabled === "boolean"
-              ? value.enabled
-              : null;
-        cached = {
-          resourcesReady: prepared,
-          systemEnabled: enabled,
-          systemCurrent: null,
-          // 运行时配置就绪不等于用户偏好已经落盘；桌面状态命令没有可靠的单独答案时保留未知。
-          preferencesSaved: null,
-          onboardingSeen: prepared,
-        };
-        for (const listener of listeners) listener(cached!);
-      })
-      .catch(() => undefined);
-  };
-  return {
-    read: () => cached,
-    subscribe: (listener) => {
-      listeners.add(listener);
-      refresh();
-      return () => listeners.delete(listener);
-    },
-    refresh,
-  };
-}
 
 const dictionary: DictionaryClient = {
   browse: (offset, limit, kind, query) =>
@@ -507,6 +453,7 @@ function DesktopSettings() {
   const linuxHost = useRef(false);
   const linuxUpdateDeferred = useRef(false);
   const [macosInstall, setMacosInstall] = useState(false);
+  const [linuxRepair, setLinuxRepair] = useState(false);
   const [replayOnboarding, setReplayOnboarding] = useState(false);
   // 首启引导准备资源之后重新读到的版本：第一次启动时 HostOptions 由这一步写下，发现宿主能力时还读不到版本。
   const [preparedEdition, setPreparedEdition] = useState<HostCapabilities["edition"]>();
@@ -695,16 +642,25 @@ function DesktopSettings() {
       // 应用启动时补传一次打字统计；没打开上传、没登录或十分钟内传过时宿主什么也不做，失败也不打扰用户。
       if (host?.typing_statistics && isDesktopAccountHost(host.platform))
         void typingStatisticsUpload.sync().catch(() => undefined);
-      const desktopOobe = createDesktopOobeClient(host?.platform ?? "windows");
+      const desktopOobe = createDesktopOobeClient(
+        host?.platform,
+        invoke,
+        async () => {
+          if (host?.platform === "linux") await invoke("open_linux_input_method_settings");
+          else if (host?.platform === "macos") await invoke("open_input_source_settings");
+        },
+        async () => {
+          if (host?.platform === "linux") {
+            setLinuxRepair(true);
+            setLinuxSetup(await invoke<LinuxSetupStatus>("linux_setup_status"));
+          } else if (host?.platform === "macos") setMacosInstall(true);
+        },
+      );
       const hosted: SettingsClient = host
         ? {
             ...client,
             host,
             oobe: desktopOobe ?? client.oobe,
-            home: {
-              ...client.home,
-              ...(desktopOobe ? { oobe: desktopOobe } : {}),
-            },
             ...(applicationUpdater
               ? {
                   checkForApplicationUpdate: () => invoke<void>("application_update_check"),
@@ -1028,6 +984,7 @@ function DesktopSettings() {
     return (
       <LinuxSetupPage
         status={linuxSetup}
+        repair={linuxRepair}
         client={linuxSetupClient}
         edition={settingsClient?.host?.edition}
         onComplete={() => {
@@ -1035,7 +992,11 @@ function DesktopSettings() {
             linuxUpdateDeferred.current = true;
           void invoke("leave_linux_setup_window")
             .catch(() => undefined)
-            .then(() => setLinuxSetup(null));
+            .then(() => {
+              setLinuxSetup(null);
+              setLinuxRepair(false);
+              settingsClient?.oobe?.refresh?.();
+            });
         }}
       />
     );
@@ -1046,7 +1007,10 @@ function DesktopSettings() {
         onComplete={() => {
           void invoke("leave_first_install_window")
             .catch(() => undefined)
-            .then(() => setMacosInstall(false));
+            .then(() => {
+              setMacosInstall(false);
+              settingsClient?.oobe?.refresh?.();
+            });
         }}
       />
     );

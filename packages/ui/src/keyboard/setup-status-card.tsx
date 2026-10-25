@@ -41,9 +41,59 @@ export function useOobeState(oobe: OobeClient | undefined): OobeState | null {
     if (!oobe) return;
     const unsubscribe = oobe.subscribe((value) => setState({ client: oobe, value }));
     setState({ client: oobe, value: oobe.read() });
-    return unsubscribe;
+    const refresh = () => oobe.refresh?.();
+    const visible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    window.addEventListener("focus", refresh);
+    window.addEventListener("pageshow", refresh);
+    document.addEventListener("visibilitychange", visible);
+    refresh();
+    return () => {
+      unsubscribe();
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("pageshow", refresh);
+      document.removeEventListener("visibilitychange", visible);
+    };
   }, [oobe]);
   return state && state.client === oobe ? state.value : null;
+}
+
+/** 桌面设置页没有移动端首页卡片，未完成的准备仍需有持续可达的处理入口。 */
+export function OobeStatusNotice({ client }: { client?: OobeClient }) {
+  const state = useOobeState(client);
+  const run = useHostAction();
+  const message =
+    state?.resourcesReady === false
+      ? "运行资源尚未准备好"
+      : state?.preferencesSaved === false
+        ? "无法读取偏好设置"
+        : state?.systemEnabled === false
+          ? "水杉输入法尚未加入系统输入法列表"
+          : state?.systemCurrent === false
+            ? "当前使用的是其他输入法，可在系统输入法菜单中切换到水杉"
+            : null;
+  const repair = state?.resourcesReady === false || state?.preferencesSaved === false;
+  const action = repair ? client?.prepareResources : client?.openSetup;
+  if (!message) return null;
+  return (
+    <div
+      role="status"
+      className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-[var(--p-sep)] bg-[var(--p-card)] p-3 text-sm"
+    >
+      <span className="flex-1">{message}</span>
+      {action && (
+        <button type="button" onClick={() => run(action)}>
+          {repair ? "修复运行资源" : "检查设置"}
+        </button>
+      )}
+      {client?.refresh && (
+        <button type="button" onClick={() => client.refresh?.()}>
+          重新检查
+        </button>
+      )}
+    </div>
+  );
 }
 
 /** 把本输入法设为默认的操作。系统选择器只列出已启用的输入法，所以第一步完成前改为打开系统的输入法列表，与 Android 的 `ImeSetup.makeDefault` 一致。 */
@@ -134,8 +184,8 @@ export function SetupStatusCard({
   const oobe = useOobeState(actions?.oobe);
   const run = useHostAction();
   const reporting = Boolean(actions?.setup || actions?.oobe);
-  const enabled = oobe?.systemEnabled ?? state?.enabled ?? null;
-  const current = oobe?.systemCurrent ?? state?.current ?? null;
+  const enabled = oobe ? oobe.systemEnabled : (state?.enabled ?? null);
+  const current = oobe ? oobe.systemCurrent : (state?.current ?? null);
   const resources = oobe?.resourcesReady ?? null;
   const scheme = touchKeyboardSchemeTitle(preferences);
   const status =
@@ -145,14 +195,17 @@ export function SetupStatusCard({
         ? "已启用"
         : enabled === false || current === false
           ? "尚未完成设置"
-          : reporting
-            ? "检查中"
-            : null;
+          : oobe
+            ? "请在系统设置中确认"
+            : reporting
+              ? "检查中"
+              : null;
   // 检查待处理时提供对应步骤；宿主无法回答时始终提供。
-  const offered = (done: boolean | null) => done === false || (!reporting && done === null);
+  const offered = (done: boolean | null) =>
+    done === false || (done === null && (!reporting || Boolean(oobe)));
   const enable = actions?.openSystemKeyboardSettings;
   const makeDefault = makeDefaultAction(actions, { enabled, current });
-  const prepareResources = actions?.prepareResources;
+  const prepareResources = actions?.prepareResources ?? actions?.oobe?.prepareResources;
 
   return (
     <div

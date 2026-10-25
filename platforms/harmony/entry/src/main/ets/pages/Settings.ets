@@ -154,6 +154,19 @@ interface SetupStatusReply {
   value: SetupState;
 }
 
+interface OobeStatusValue {
+  resourcesReady: boolean | null;
+  systemEnabled: boolean | null;
+  systemCurrent: boolean | null;
+  preferencesSaved: boolean | null;
+  onboardingSeen: boolean;
+}
+
+interface OobeStatusReply {
+  ok: boolean;
+  value: OobeStatusValue;
+}
+
 /** 一次应用主题请求：`load`、带 id 的 `save`、带页面深色标志的 `resolve`，或 `catalog`。 */
 interface AppThemeAction {
   operation: string;
@@ -249,6 +262,7 @@ const BRIDGE_NAME: string = 'msimeHarmony';
 const PLATFORM: string = 'harmony';
 /** 欢迎开屏是否已播放过的标记，与应用主题文件同在状态目录。 */
 const SPLASH_SEEN_FILE: string = 'welcome-splash.json';
+const ONBOARDING_SEEN_FILE: string = 'onboarding-seen.json';
 // 页面一直没报告第一帧上屏时，启动画面最多盖这么久。
 const LAUNCH_COVER_LIMIT_MS: number = 4000;
 /** The settings page and native save bridge hold one complete export in memory. */
@@ -845,7 +859,7 @@ struct Settings {
                   'openSystemKeyboardSettings', 'listVoiceCaptureDevices', 'listFontFamilies',
                   'keyboardFeedback', 'onboardingStatus',
                   'showInputMethodPicker', 'importSkinFolder', 'startRequest', 'plugins',
-                  'setupStatus', 'refreshSetupStatus', 'appTheme', 'setSystemBars', 'splashSeen', 'markSplashSeen',
+                  'setupStatus', 'refreshSetupStatus', 'oobeStatus', 'retryOobeResources', 'appTheme', 'setSystemBars', 'splashSeen', 'markSplashSeen',
                   'onboardingStarted', 'onboardingFinished', 'pendingPage', 'launchPainted'],
                 []);
             } catch (error) {
@@ -890,6 +904,7 @@ class SettingsBridge {
   private onboardingReady: boolean = false;
   // 页面告知欢迎流程结束后置位，之后的设置状态读取不再压住通知卡片。
   private onboardingDone: boolean = false;
+  private resourcesReady: boolean | null = null;
   // 上次读到的两项设置状态；首次读取完成前都为 null。
   private setup: SetupState = { enabled: null, current: null } as SetupState;
   // 设置状态读取的计数，让先开始却后返回的读取不能覆盖更新的结果。
@@ -931,6 +946,7 @@ class SettingsBridge {
   attach(context: common.UIAbilityContext): void {
     this.context = context;
     this.stateDirectory = `${context.filesDir}/state`;
+    this.onboardingDone = this.readStateFile(ONBOARDING_SEEN_FILE, 64) !== null;
     SharedStateMirror.resolve(context).then((groupDir: string | null): void => {
       const sharedSandbox = HarmonySharedSandboxPolicy.status(groupDir);
       this.sharedSandboxAvailable = sharedSandbox.available;
@@ -944,7 +960,7 @@ class SettingsBridge {
     this.accountBridge = new HarmonyAccountCloudBridge(context);
     // The same copy the keyboard makes, by the same rule. The page reaches the dictionary through
     // it too, and two staging rules for one directory is how it came to hold a set matching neither.
-    StagedResources.stage(`${context.resourceDir}/engine`, `${context.filesDir}/engine`,
+    this.resourcesReady = StagedResources.stage(`${context.resourceDir}/engine`, `${context.filesDir}/engine`,
       `${context.filesDir}/engine.ready`);
     // Here as well as in the keyboard, so the page offers Cantonese, Zhuyin and Stroke (see hostCapabilities) before the keyboard has ever run.
     StagedResources.stageLanguageDictionaries(context.resourceDir, context.filesDir);
@@ -3113,7 +3129,7 @@ class SettingsBridge {
    */
   onboardingStatus(): string {
     return JSON.stringify({
-      ok: true, value: this.onboardingRequired, ready: this.onboardingReady, error: ''
+      ok: true, value: this.onboardingRequired && !this.onboardingDone, ready: this.onboardingReady, error: ''
     } as OnboardingReply);
   }
 
@@ -3127,6 +3143,30 @@ class SettingsBridge {
     return JSON.stringify(reply);
   }
 
+  /** 资源使用实际暂存结果，系统能力使用同一次系统查询；引导离开记录独立持久化。 */
+  oobeStatus(): string {
+    const preferences: RevisionReply = JSON.parse(client.loadPreferences(this.stateDirectory)) as RevisionReply;
+    const value: OobeStatusValue = {
+      resourcesReady: this.resourcesReady,
+      systemEnabled: this.setup.enabled,
+      systemCurrent: this.setup.current,
+      preferencesSaved: preferences.ok === true,
+      onboardingSeen: this.onboardingDone
+    };
+    const reply: OobeStatusReply = { ok: true, value };
+    return JSON.stringify(reply);
+  }
+
+  /** 设置页提供显式重试，不把暂存失败当成资源已经就绪。 */
+  retryOobeResources(): string {
+    if (this.context !== undefined) {
+      this.resourcesReady = StagedResources.stage(`${this.context.resourceDir}/engine`,
+        `${this.context.filesDir}/engine`, `${this.context.filesDir}/engine.ready`);
+    }
+    const reply: FlagReply = { ok: this.resourcesReady === true, value: this.resourcesReady === true };
+    return JSON.stringify(reply);
+  }
+
   /** 页面请求现在重读一次设置状态。从键盘的 🌐 菜单切换输入法不会触发 `imeChange`，页面的「设为默认」引导打开期间靠它轮询；读到变化时照常推给页面。 */
   refreshSetupStatus(): void {
     this.refreshSetupState();
@@ -3135,6 +3175,9 @@ class SettingsBridge {
   /** 页面的欢迎流程已结束（完成或跳过），通知卡片可以回来。 */
   onboardingFinished(): void {
     this.onboardingDone = true;
+    if (!this.writeStateFile(ONBOARDING_SEEN_FILE, '{"seen":true}')) {
+      KeyboardLog.error('onboarding flag not saved');
+    }
     this.onNoticeHold?.(false);
   }
 

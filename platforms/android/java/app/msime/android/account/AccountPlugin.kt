@@ -4,7 +4,6 @@ import android.app.Activity
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.ComponentName
-import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Vibrator
@@ -403,24 +402,6 @@ class AccountPlugin(activity: Activity) : Plugin(activity) {
             invoke.resolve(JSObject().put("ready", ready))
         } catch (_: Exception) {
             invoke.reject("bootstrap", "bootstrap")
-        }
-    }
-
-    @Command
-    fun oobeStatus(invoke: Invoke) {
-        try {
-            val enabled = app.msime.android.DeviceInfoCollector.keyboardEnabled(hostActivity)
-            val current = app.msime.android.DeviceInfoCollector.keyboardDefault(hostActivity)
-            val seen = hostActivity.getSharedPreferences("msime_onboarding_v1", Context.MODE_PRIVATE)
-                .getBoolean("seen", false)
-            val ready = File(hostActivity.filesDir, "runtime-options.json").isFile
-            invoke.resolve(JSObject()
-                .put("resources_ready", ready)
-                .put("system_enabled", enabled)
-                .put("system_current", current)
-                .put("onboarding_seen", seen))
-        } catch (_: Exception) {
-            invoke.reject("oobe", "oobe")
         }
     }
 

@@ -53,7 +53,7 @@ export interface OobeState {
   systemEnabled: boolean | null;
   systemCurrent: boolean | null;
   preferencesSaved: boolean | null;
-  onboardingSeen: boolean;
+  onboardingSeen: boolean | null;
 }
 
 export type OobeStep =
@@ -67,10 +67,18 @@ export interface OobeClient {
   read(): OobeState | null;
   subscribe(listener: (state: OobeState) => void): () => void;
   refresh?(): void;
+  /** 重试宿主的资源准备，桌面宿主可以打开自己的安装或配置页。 */
+  prepareResources?(): Promise<void>;
+  /** 打开宿主的安装或系统配置入口。 */
+  openSetup?(): Promise<void>;
 }
 
 export function oobeFlowComplete(state: OobeState): boolean {
-  return state.onboardingSeen && state.resourcesReady === true && state.preferencesSaved === true;
+  return (
+    state.onboardingSeen === true &&
+    state.resourcesReady === true &&
+    state.preferencesSaved === true
+  );
 }
 
 export function oobeSystemReady(state: OobeState): boolean {

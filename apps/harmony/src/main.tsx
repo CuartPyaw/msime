@@ -181,6 +181,10 @@ interface NativeBridge {
    * `{"ok":true,"ready":boolean,"value":{"enabled":boolean|null,"current":boolean|null}}`：本键盘是否已在系统中启用、是否为当前输入法。和 `onboardingStatus` 一样是同步调用，宿主第一次读取完成前 `ready` 一直为 false。
    */
   setupStatus(): string;
+  /** 实际资源准备结果、系统状态和独立引导离开记录。 */
+  oobeStatus(): string;
+  /** 显式重试资源暂存。 */
+  retryOobeResources(): string;
   /** 现在重新读一次设置状态，有变化时照常调用 `msimeHarmonySetupChanged`。从键盘的 🌐 菜单切换输入法不会触发宿主监听的 `imeChange`，引导打开期间靠它轮询。 */
   refreshSetupStatus(): void;
   /**
@@ -450,52 +454,51 @@ function imeSetupClient(native: NativeBridge): ImeSetupClient | undefined {
   };
 }
 
-/** 把鸿蒙已有的实时系统状态、引导标记和已加载偏好汇成共享 OOBE 快照。 */
+/** 从原生宿主读取真实快照；查询失败清掉旧结果，保留未知。 */
 function oobeClient(native: NativeBridge, setup: ImeSetupClient | undefined): OobeClient {
   let cached: OobeState | null = null;
   const listeners = new Set<(state: OobeState) => void>();
+  let unsubscribeSetup: (() => void) | undefined;
   const refresh = () => {
-    const setupState = setup?.read();
-    let seen = true;
     try {
-      const reply = JSON.parse(native.onboardingStatus()) as {
-        ok?: unknown;
-        ready?: unknown;
-        value?: unknown;
-      };
-      if (reply.ok === true && reply.ready === true && typeof reply.value === "boolean")
-        seen = !reply.value;
+      cached = unwrap<OobeState>(native.oobeStatus());
     } catch {
-      seen = true;
+      cached = {
+        resourcesReady: null,
+        systemEnabled: null,
+        systemCurrent: null,
+        preferencesSaved: null,
+        onboardingSeen: null,
+      };
     }
-    cached = {
-      resourcesReady: true,
-      systemEnabled: setupState?.enabled ?? null,
-      systemCurrent: setupState?.current ?? null,
-      preferencesSaved: (() => {
-        try {
-          unwrap<Snapshot>(native.loadPreferences());
-          return true;
-        } catch {
-          return null;
-        }
-      })(),
-      onboardingSeen: seen,
-    };
     for (const listener of listeners) listener(cached);
   };
   return {
     read: () => cached,
     subscribe: (listener) => {
       listeners.add(listener);
+      if (listeners.size === 1) unsubscribeSetup = setup?.subscribe(refresh);
       refresh();
-      const unsubscribeSetup = setup?.subscribe(() => refresh());
       return () => {
         listeners.delete(listener);
-        unsubscribeSetup?.();
+        if (listeners.size === 0) {
+          unsubscribeSetup?.();
+          unsubscribeSetup = undefined;
+        }
       };
     },
-    refresh,
+    refresh: () => {
+      setup?.refresh?.();
+      refresh();
+    },
+    prepareResources: async () => {
+      try {
+        unwrap<boolean>(native.retryOobeResources());
+      } finally {
+        refresh();
+      }
+    },
+    openSetup: async () => native.openSystemKeyboardSettings(),
   };
 }
 
@@ -1630,8 +1633,6 @@ function HarmonyWelcomeFlow({
       actions={{
         platform: "harmony",
         mobileSettings,
-        // 资源由键盘启动时就绪，这里没有单独的步骤要执行；流程需要的是这个 promise，而不是实际工作。
-        prepareResources: async () => {},
         openSystemKeyboardSettings: async () => native.openSystemKeyboardSettings(),
         showInputMethodPicker:
           mobileSettings !== false
@@ -1640,6 +1641,11 @@ function HarmonyWelcomeFlow({
                 native.showInputMethodPicker();
               },
         oobe: client.home?.oobe,
+        prepareResources: async () => {
+          const prepare = client.home?.oobe?.prepareResources;
+          if (!prepare) throw new Error("宿主未提供资源准备入口");
+          await prepare();
+        },
       }}
       // 方案步骤只提供本版本和本宿主具备的键盘。
       edition={client.host?.edition}

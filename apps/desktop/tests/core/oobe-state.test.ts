@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { createDesktopOobeClient } from "../../src/core/oobe-host";
 import {
   oobeComplete,
   oobeFlowComplete,
@@ -13,6 +14,63 @@ const ready = (): OobeState => ({
   systemCurrent: true,
   preferencesSaved: true,
   onboardingSeen: true,
+});
+
+test("桌面从原生真实快照读取，注册结果缺失不意味着未启用", async () => {
+  const client = createDesktopOobeClient(
+    "linux",
+    async <T>() =>
+      ({
+        resources_ready: true,
+        system_enabled: null,
+        system_current: null,
+        preferences_saved: true,
+        onboarding_seen: null,
+      }) as T,
+    async () => {},
+  )!;
+  const state = await new Promise<OobeState>((resolve) => {
+    const stop = client.subscribe((value) => {
+      resolve(value);
+      stop();
+    });
+  });
+  expect(state.systemEnabled).toBeNull();
+  expect(state.onboardingSeen).toBeNull();
+  expect(oobeComplete(state)).toBe(false);
+});
+
+test("查询失败清除旧的成功结果，后续刷新可以恢复", async () => {
+  let fails = false;
+  const client = createDesktopOobeClient(
+    "macos",
+    async <T>() => {
+      if (fails) throw new Error("synthetic failure");
+      return {
+        resources_ready: true,
+        system_enabled: true,
+        system_current: null,
+        preferences_saved: true,
+        onboarding_seen: null,
+      } as T;
+    },
+    async () => {},
+  )!;
+  const values: OobeState[] = [];
+  const stop = client.subscribe((value) => values.push(value));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(client.read()?.resourcesReady).toBe(true);
+  fails = true;
+  client.refresh?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(client.read()?.resourcesReady).toBeNull();
+  expect(client.read()?.systemEnabled).toBeNull();
+  fails = false;
+  client.refresh?.();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(client.read()?.systemEnabled).toBe(true);
+  stop();
+  expect(values).toHaveLength(3);
 });
 
 describe("跨平台 OOBE 状态契约", () => {

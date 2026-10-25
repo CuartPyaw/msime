@@ -19,7 +19,7 @@ pub struct OobeState {
     /// 首次流程选择的方案和偏好是否已保存。
     pub preferences_saved: Option<bool>,
     /// 用户是否已经离开首次流程；这不是系统输入法状态的替代品。
-    pub onboarding_seen: bool,
+    pub onboarding_seen: Option<bool>,
 }
 
 /// 当前可以直接处理的 OOBE 步骤。
@@ -34,7 +34,7 @@ pub enum OobeStep {
 impl OobeState {
     /// 资源和偏好已经就绪，且用户已经离开引导。系统输入法状态可能仍未知（例如 iOS）。
     pub fn flow_complete(&self) -> bool {
-        self.onboarding_seen
+        self.onboarding_seen == Some(true)
             && self.resources_ready == Some(true)
             && self.preferences_saved == Some(true)
     }
@@ -77,18 +77,21 @@ mod tests {
             system_enabled: Some(true),
             system_current: Some(true),
             preferences_saved: Some(true),
-            onboarding_seen: true,
+            onboarding_seen: Some(true),
         }
     }
 
     #[test]
-    fn all_platforms_share_the_same_completed_shape() {
-        for _platform in ["windows", "macos", "linux", "android", "ios", "harmony"] {
-            assert!(ready().flow_complete());
-            assert!(ready().system_ready());
-            assert!(ready().complete());
-            assert_eq!(ready().next_action(), None);
-        }
+    fn only_confirmed_facts_complete_the_flow() {
+        assert!(ready().complete());
+        let mut state = ready();
+        state.onboarding_seen = None;
+        assert!(!state.flow_complete());
+        state.onboarding_seen = Some(false);
+        assert!(!state.flow_complete());
+        state.onboarding_seen = Some(true);
+        state.preferences_saved = None;
+        assert!(!state.flow_complete());
     }
 
     #[test]

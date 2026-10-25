@@ -17770,6 +17770,36 @@ fn verification_accepts_resources_shipped_without_the_on_demand_pair() {
     assert!(dictionaries.join("msime-pinyin.db").is_file());
 }
 
+#[test]
+fn runtime_resources_status_is_read_only_and_rejects_damaged_resources() {
+    let root = tempfile::tempdir().unwrap();
+    let resources = root.path().join("resources");
+    let specification = synthetic_desktop_lock(&resources);
+    let state = root.path().join("unprepared-state");
+    assert!(runtime_resources_ready_with(
+        &resources,
+        &state,
+        &specification,
+        &[]
+    ));
+    assert!(!state.exists(), "只读查询不能创建状态目录或校验标记");
+    std::fs::write(
+        resources.join("msime-pinyin.db"),
+        b"synthetic damaged resource",
+    )
+    .unwrap();
+    assert!(!runtime_resources_ready_with(
+        &resources,
+        &state,
+        &specification,
+        &[]
+    ));
+    assert!(!runtime_resources_ready(&json!({"resources": "relative"})));
+    assert!(!runtime_resources_ready(
+        &json!({"resources": resources, "preferences_directory": state, "edition": "unknown"})
+    ));
+}
+
 /// 各目标的按需清单：macOS、Android 和 iOS 接受不含日文词典的发布包，Linux 和 Windows 仍要求完整的锁文件；本平台用的 `ON_DEMAND_ARTIFACTS` 就是本平台那一份。
 #[test]
 fn the_platform_shipping_rule_decides_whether_a_slim_bundle_prepares() {

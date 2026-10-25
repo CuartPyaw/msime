@@ -2473,6 +2473,54 @@ fn verify_resources_once(
     Ok(())
 }
 
+/// 只读检查已准备配置所指向的资源；沿用宿主的版本锁、按需资源分组和校验标记，不创建输入会话。
+pub fn runtime_resources_ready(document: &Value) -> bool {
+    let check = || -> Option<bool> {
+        let resources = Path::new(document.get("resources")?.as_str()?);
+        let state = Path::new(document.get("preferences_directory")?.as_str()?);
+        if !resources.is_absolute() || !state.is_absolute() {
+            return Some(false);
+        }
+        let baseline = Edition::of_host_options(document)?.resource_set().ok()?;
+        let selected = dictionary_updates::selected_resources(state, &baseline);
+        let specification = selected
+            .as_ref()
+            .filter(|(path, _)| path == resources)
+            .map(|(_, set)| set)
+            .unwrap_or(&baseline);
+        Some(runtime_resources_ready_with(
+            resources,
+            state,
+            specification,
+            ON_DEMAND_ARTIFACTS,
+        ))
+    };
+    check().unwrap_or(false)
+}
+
+fn runtime_resources_ready_with(
+    resources: &Path,
+    state: &Path,
+    specification: &ResourceSet,
+    on_demand: &[&[&str]],
+) -> bool {
+    if reject_symlinked_state_root(state).is_err() {
+        return false;
+    }
+    let shipped = shipped_specification(specification, resources, on_demand);
+    if let (Ok(Some(current)), Some(recorded)) = (
+        VerifiedMarker::describe(resources, &shipped),
+        VerifiedMarker::read(&state.join("verified-resources.json")),
+    ) {
+        if current == recorded {
+            return true;
+        }
+    }
+    ResourceStore::new(resources)
+        .verify(resources, &shipped)
+        .is_ok()
+}
+
 pub fn prepare_host_configuration(
     resources: &std::path::Path,
     state_root: &std::path::Path,

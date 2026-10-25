@@ -1272,6 +1272,39 @@ def active_host() -> str | None:
     return None
 
 
+def input_method_status() -> dict:
+    """只查询当前会话，不启用服务、不注册输入法，也不把查询失败当成未启用。"""
+    host = active_host()
+    result = {"host": host, "enabled": None, "current": None}
+    if host == "fcitx5":
+        try:
+            _, entries = fcitx5_group(fcitx5_current_group())
+            result["enabled"] = any(entry[0] == FCITX5_INPUT_METHOD for entry in entries)
+        except RegistrationFailed:
+            pass
+        try:
+            current = parse_gvariant(fcitx5_call("CurrentInputMethod"))
+            if isinstance(current, tuple) and len(current) == 1 and isinstance(current[0], str):
+                result["current"] = current[0] == FCITX5_INPUT_METHOD
+        except RegistrationFailed:
+            pass
+    elif host == "ibus":
+        try:
+            schema, key, entry = ibus_input_list()
+            entries = parse_gvariant(command_output(["gsettings", "get", schema, key]))
+            if isinstance(entries, list) and entries:
+                result["enabled"] = entry in entries
+        except RegistrationFailed:
+            pass
+        try:
+            current = command_output(["ibus", "engine"]).strip()
+            if current:
+                result["current"] = current == IBUS_ENGINE
+        except RegistrationFailed:
+            pass
+    return result
+
+
 # GNOME 的 Wayland 会话不让输入法自己弹出候选窗。GTK 程序设了 GTK_IM_MODULE=fcitx 时，候选窗由程序里的 fcitx5-gtk 客户端面板绘制，它在 GTK3 上移动弹窗必须先隐藏再显示，于是不停闪烁，也不用水杉的 Fcitx5 主题；不设时 GTK 走 text-input → GNOME Shell → Fcitx5 的 IBus 前端，候选窗由 Fcitx5 经典界面按水杉主题绘制。见 README「GNOME Wayland 下候选窗闪烁」。
 GNOME_WAYLAND_GTK_NOTE = (
     "提示：当前是 GNOME 的 Wayland 会话，且设置了 GTK_IM_MODULE=fcitx。这时 GTK 程序的候选窗由程序自己绘制，"
@@ -1478,6 +1511,7 @@ def main() -> int:
     parser.add_argument("--resources", type=Path, help="已备齐的词库目录（绝对路径）")
     parser.add_argument("--state", type=Path, help="要创建的状态目录，默认 $XDG_CONFIG_HOME/msime-client")
     parser.add_argument("--list-downloads", action="store_true", help="只显示本版本词库的下载链接、大小、SHA-256 和保存目录，不联网也不配置")
+    parser.add_argument("--status", action="store_true", help="只查询当前会话的启用及当前输入法状态，不配置、不重启服务")
     parser.add_argument("--json", action="store_true", help="与 --list-downloads 一起使用，输出 JSON 清单")
     parser.add_argument(
         "--download",
@@ -1516,8 +1550,13 @@ def main() -> int:
         help="已完成首次配置时，重新启用在线、语音和剪贴板服务，并把水杉输入法加回正在运行的 Fcitx5 或 IBus 的输入法列表，不检查词库也不改状态；还没有配置过时什么也不做。发行版仓库的包替换掉另一个同样内容的包（例如 msime 替换发布页的 msime-linux）之后自动执行：被替换的包卸载时撤销了这两样",
     )
     arguments = parser.parse_args()
-    if arguments.json and not arguments.list_downloads:
-        parser.error("--json 只能与 --list-downloads 一起使用")
+    if arguments.json and not (arguments.list_downloads or arguments.status):
+        parser.error("--json 只能与 --list-downloads 或 --status 一起使用")
+    if arguments.status and any((arguments.list_downloads, arguments.download, arguments.update,
+                                arguments.register, arguments.unregister, arguments.cloud_candidates,
+                                arguments.no_cloud_candidates, arguments.no_register,
+                                arguments.resources, arguments.state)):
+        parser.error("--status 只查询系统状态，不能与配置选项一起使用")
     if arguments.list_downloads and any((arguments.download, arguments.update, arguments.register,
                                        arguments.unregister, arguments.cloud_candidates,
                                        arguments.no_cloud_candidates, arguments.no_register,
@@ -1527,6 +1566,9 @@ def main() -> int:
         parser.error("--register 与 --unregister 不能同时使用")
     if arguments.edition and arguments.edition != installed_edition():
         delegate_to_edition(arguments.edition, without_edition_argument(sys.argv[1:]))
+    if arguments.status:
+        print(json.dumps(input_method_status(), ensure_ascii=False))
+        return 0
     if arguments.list_downloads:
         print_dictionary_downloads(read_dictionary_lock(install_prefix()), arguments.json)
         return 0

@@ -1661,6 +1661,43 @@ async fn load_preferences(
         .map_err(|_| CommandError { code: "storage" })?
 }
 
+/// 真实桌面设置宿主的 OOBE 快照；启用状态只在系统查询成功时提供。
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+#[tauri::command]
+async fn desktop_oobe_status(
+    runtime: tauri::State<'_, RuntimeOptionsState>,
+    store: tauri::State<'_, Arc<PreferencesStore>>,
+) -> Result<msime_client_core::oobe::OobeState, CommandError> {
+    let runtime = runtime.inner().clone();
+    let store = Arc::clone(store.inner());
+    tauri::async_runtime::spawn_blocking(move || {
+        let resources_ready = runtime
+            .snapshot()
+            .map(|document| msime_host_api::runtime_resources_ready(&document))
+            .unwrap_or(false);
+        let mut state = msime_client_core::oobe::OobeState {
+            resources_ready: Some(resources_ready),
+            preferences_saved: Some(store.load().is_ok()),
+            // 桌面安装器没有「看过欢迎页」的持久化事实，不从准备结果推断。
+            onboarding_seen: None,
+            ..Default::default()
+        };
+        #[cfg(target_os = "macos")]
+        {
+            state.system_enabled = macos_input_source::input_source_enabled();
+        }
+        #[cfg(target_os = "linux")]
+        {
+            let setup = linux_setup::input_method_status();
+            state.system_enabled = setup.0;
+            state.system_current = setup.1;
+        }
+        Ok(state)
+    })
+    .await
+    .map_err(|_| CommandError { code: "storage" })?
+}
+
 async fn save_preferences_impl(
     store: Arc<PreferencesStore>,
     runtime: RuntimeOptionsState,
@@ -5075,24 +5112,6 @@ async fn ios_onboarding_status(
 
 #[cfg(target_os = "ios")]
 #[tauri::command]
-async fn ios_oobe_status(
-    state: tauri::State<'_, msime_tauri_mobile_platform::MobilePlatform<tauri::Wry>>,
-) -> Result<Value, CommandError> {
-    let platform = state.inner().clone();
-    let seen = tauri::async_runtime::spawn_blocking(move || platform.onboarding_completed())
-        .await
-        .map_err(|_| CommandError { code: "oobe" })?
-        .map_err(|_| CommandError { code: "oobe" })?;
-    Ok(serde_json::json!({
-        "resources_ready": true,
-        "system_enabled": null,
-        "system_current": null,
-        "onboarding_seen": seen,
-    }))
-}
-
-#[cfg(target_os = "ios")]
-#[tauri::command]
 async fn ios_onboarding_complete(
     state: tauri::State<'_, msime_tauri_mobile_platform::MobilePlatform<tauri::Wry>>,
 ) -> Result<(), CommandError> {
@@ -5809,6 +5828,8 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             ai_test,
             load_preferences,
+            #[cfg(any(target_os = "macos", target_os = "linux"))]
+            desktop_oobe_status,
             restored_default_preferences,
             #[cfg(not(target_os = "ios"))]
             recover_preferences,
@@ -6000,6 +6021,8 @@ pub fn run() {
             linux_setup::leave_linux_setup_window,
             #[cfg(target_os = "linux")]
             linux_setup::open_fcitx5_configtool,
+            #[cfg(target_os = "linux")]
+            linux_setup::open_linux_input_method_settings,
             #[cfg(target_os = "android")]
             android_account::android_open_input_method_settings,
             #[cfg(target_os = "android")]
@@ -6127,7 +6150,6 @@ pub fn run() {
             #[cfg(target_os = "ios")]
             ios_onboarding_status,
             #[cfg(target_os = "ios")]
-            ios_oobe_status,
             #[cfg(target_os = "ios")]
             ios_onboarding_complete,
             #[cfg(target_os = "ios")]

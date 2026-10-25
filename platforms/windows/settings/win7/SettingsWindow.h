@@ -15,7 +15,7 @@ namespace msime::settings::win7 {
 enum ControlId {
   page_body = 99, language_switch = 100, caps_lock, japanese_toggle, traditional_toggle, fullwidth_toggle,
   reload_settings, page_tabs, status_text, reference_text, page_selector,
-  page_navigation = 120, page_heading, page_description,
+  page_navigation = 120, page_heading, page_description, setup_state, setup_action,
   toolbar_enabled = 200, toolbar_language, toolbar_scheme, toolbar_fullwidth,
   toolbar_punctuation, toolbar_character_set, toolbar_emoji, toolbar_handwriting,
   toolbar_keyboard, toolbar_voice, toolbar_settings, toolbar_size, toolbar_summary,
