@@ -78,6 +78,7 @@ struct MetasequoiaImeApp: App {
     }
     .onChange(of: scenePhase) { _, phase in
       guard phase == .active else { return }
+      OnboardingChoices.shared.sync()
       // 「水杉四季」跟随月份，所以启动或从后台返回时会重新解析季节；季节变化时发出 `AppThemePalette.didChange`。
       AppThemePalette.refresh()
       applyAppearance()

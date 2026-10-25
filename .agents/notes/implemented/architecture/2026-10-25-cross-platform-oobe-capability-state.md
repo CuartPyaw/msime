@@ -13,16 +13,20 @@ Status: implemented
 - iOS 没有公开 API 判断键盘是否添加到系统列表或是否获得完全访问；私有的 AppleKeyboards 读取和键盘写入标记都不作为状态来源。因此 `hasSeenOnboarding` 只记录“已看过/已离开首次引导”，并兼容迁移旧的 `hasCompletedOnboarding` 偏好。设置首页的 `KeyboardStatusCard` 长期保留两步操作，并明确告知用户 iOS 无法自动确认状态，不显示伪造的成功或失败图标。
 - iOS 的“稍后再说”、跳过和 iPad 卡片关闭仍然可以离开首次流程；离开后用户可从设置页重新打开引导，系统能力由用户在系统设置中确认。
 
-六个平台的现状核对如下；共享状态契约已接入移动端和桌面设置宿主能查询的入口：
+六个平台的现状核对如下；各原生宿主按自身能力报告事实，不把开发壳当成移动端产品：
 
 | 平台 | OOBE 入口 | 离开后仍需确认的系统能力 |
 | --- | --- | --- |
-| macOS | 独立安装页；`input_source_startup_status` 映射资源和输入源启用事实 | 输入源注册、词库运行配置，以及部分系统版本需要用户在系统设置或重新登录后生效的输入模式 |
+| macOS | 独立安装页；`desktop_oobe_status` 校验运行资源、读取偏好并查询输入源启用状态 | 输入源注册、词库运行配置，以及部分系统版本需要用户在系统设置或重新登录后生效的输入模式 |
 | Windows | 安装器询问数据目录和云候选；Server 首次启动写 `runtime-options.json`，首次准备成功后自动打开原生设置首页 | 设置页状态卡检查输入法是否已添加、是否为默认；失败时打开 Windows「语言和区域」 |
-| Linux | 缺配置或词库过期时进入设置页；`linux_setup_status` 映射资源和注册事实 | 服务启用和当前输入法由桌面环境决定 |
-| Android | Splash 后的原生四步引导，`Bootstrap.prepare` 原子准备词库；设置桥报告 `OobeState` | 系统输入法启用与当前输入法选择 |
-| iOS | SwiftUI 四步引导和长期状态卡；Tauri 桥报告资源已随包就绪、系统状态未知 | 键盘列表、完全访问和当前输入法均需用户在系统界面确认 |
-| HarmonyOS | 按“未启用 / 已启用但非当前 / 已完成”实时推进 | 麦克风和剪贴板权限仍在功能触发时处理 |
+| Linux | 缺配置或词库过期时进入设置页；`desktop_oobe_status` 校验资源、读取偏好，`msime-linux-setup --status --json` 只读查询 Fcitx5/IBus | 服务启用和当前输入法由桌面环境决定 |
+| Android | Splash 后的原生四步引导，`Bootstrap.prepare` 原子准备词库；原生首页在返回前台后重查系统状态，失败的引导选择保留到写入成功 | 系统输入法启用与当前输入法选择 |
+| iOS | SwiftUI 四步引导和长期状态卡；调用共享宿主准备资源，独立持久队列保留未保存选择；系统状态未知 | 键盘列表、完全访问和当前输入法均需用户在系统界面确认 |
+| HarmonyOS | ArkTS 原生桥报告实际资源暂存结果和系统状态，独立保存离开标记，失败可重试 | 麦克风和剪贴板权限仍在功能触发时处理 |
+
+### 保存与重试边界
+
+Android 和 iOS 将引导中未写成的方案、译文选择保留在主应用的待保存队列中；只有共享偏好确认成功才清除对应字段，离开引导不清空队列。首页继续提供重试入口。HarmonyOS 的离开标记独立于系统输入法启用状态，跳过不伪造完成。桌面状态查询失败会清除旧的成功快照，返回前台重新查询。
 
 ## Alternatives considered
 
@@ -36,12 +40,11 @@ iOS 老用户的旧完成标记会迁移到 `hasSeenOnboarding`，不会再次�
 
 ## Verification
 
-- `git diff --check` 通过。
-- iOS UI 测试 `testKeyboardHomePrioritizesTryoutAndQuickAdjustments` 增加了状态卡说明的存在性和文案断言；现有首次引导测试继续使用 `-hasCompletedOnboarding YES`，覆盖旧标记迁移兼容路径。
-- 未启动完整 Xcode 构建：本机磁盘空间约 4.2 GB，不足以安全创建新的完整构建产物。
-- Windows 首次运行接线通过源码检查确认：仅 `prepare_first_run` 返回新准备状态时调用现有 `launch_shell_surface`，路由为默认设置页并携带同一份 `runtime-options.json`；已有状态和非生产预览不调用。未在本机启动 Windows 构建或安装器。
-- `msime-client-core::oobe` 纯逻辑测试 5 项通过，覆盖六个平台同一完成形状、资源、启用、默认、偏好和未知状态。
-- `pnpm --filter @msime/desktop typecheck` 通过；Android/iOS 桥接和桌面 Linux/macOS 状态映射已完成源码接线。Windows 原生设置状态仍由原生窗口自己的状态卡消费，未伪造为可查询值。
+- 共享 Rust OOBE 纯逻辑测试 5 项通过；它们验证状态语义，不代表六个平台设备验收。
+- `msime-host-api` 的只读资源状态测试通过，覆盖正确资源、损坏资源、相对路径和未知版本拒绝，以及查询不创建状态目录。
+- 桌面与鸿蒙 TypeScript 类型检查通过；5 个 vitest 文件共 104 项通过。
+- Linux 配置脚本测试通过，覆盖 Fcitx5/IBus 只读状态查询、部分查询失败和注册流程；鸿蒙桥调用一致性检查通过。
+- Android Java/API/manifest 检查通过，尚不代表 APK 或设备运行。iOS 原生 App 构建正在远端执行；Windows 共用系统查询头文件通过 MinGW 语法检查，Win7 完整窗口和各平台设备流程仍需后续实际验证。
 
 ## Related decisions
 

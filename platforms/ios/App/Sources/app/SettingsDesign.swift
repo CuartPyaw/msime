@@ -210,6 +210,9 @@ struct SettingsSearchPill: View {
 ///
 /// 宿主 app 无法判断键盘是否已添加、是否已获得完全访问权限 —— iOS 对这两者都没有公开 API，而由键盘写入的标记在用户撤销权限后仍会保留 —— 所以每一步都显示中性的序号标记，而不是设计稿的 ✓ / ! 状态，两个 去开启 链接也始终显示。
 struct KeyboardStatusCard: View {
+  @State private var choicesPending = OnboardingChoices.shared.hasPending
+  @State private var resourcesReady: Bool?
+  @State private var preparingResources = false
   let scheme: ChineseInputScheme
   /// 试用键盘 的行为。试用页是设置导航栈里的 AI 对话二级页，手机和 iPad 都由 `AppNavigation.openChat` 压入。
   let tryout: () -> Void
@@ -227,7 +230,7 @@ struct KeyboardStatusCard: View {
         Text(scheme.shortLabel).font(.system(size: 17, weight: .semibold))
           .accessibilityIdentifier("keyboardStatusScheme")
       }
-      Text("请在系统设置中完成上面两步；iOS 不允许 App 自动确认键盘列表和完全访问状态。")
+      Text("请在系统设置中完成以下两步；iOS 不允许 App 自动确认键盘列表和完全访问状态。")
         .font(.system(size: 13))
         .foregroundStyle(MetasequoiaTheme.sub)
         .fixedSize(horizontal: false, vertical: true)
@@ -237,11 +240,36 @@ struct KeyboardStatusCard: View {
         setupRow(2, "允许完全访问", identifier: "openFullAccessSettingsButton", hint: "云候选、云剪贴板和同步需要它，日常输入不联网")
       }
       tryoutButton.padding(.top, 4)
+      if resourcesReady == false {
+        Button("运行资源准备失败，重试准备") { prepareResources() }
+          .disabled(preparingResources)
+          .accessibilityIdentifier("retryOnboardingResources")
+      } else if preparingResources {
+        ProgressView("正在准备运行资源")
+      }
+      if choicesPending {
+        Button("引导选择尚未保存，重试保存") {
+          choicesPending = !OnboardingChoices.shared.sync()
+        }.accessibilityIdentifier("retryPendingOnboardingChoices")
+      }
     }
     .padding(.vertical, 18)
     .padding(.horizontal, 20)
     .frame(maxWidth: .infinity, alignment: .leading)
     .background(MetasequoiaTheme.surface, in: RoundedRectangle(cornerRadius: MetasequoiaTheme.cardRadius, style: .continuous))
+    .reloadOnAppearAndActive { prepareResources() }
+  }
+
+  private func prepareResources() {
+    guard !preparingResources else { return }
+    preparingResources = true
+    Task { @MainActor in
+      resourcesReady = await Task.detached(priority: .userInitiated) {
+        MetasequoiaInputSessionBridge.prepareOnboardingResources()
+      }.value
+      preparingResources = false
+      choicesPending = !OnboardingChoices.shared.sync()
+    }
   }
 
   private func setupRow(_ number: Int, _ label: String, identifier: String, hint: String) -> some View {

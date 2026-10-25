@@ -168,6 +168,8 @@ public final class OnboardingActivity extends AppCompatActivity {
     }
 
     private void finishFlow() {
+        // 离开只记「看过」，后台继续保存；首页显示未完成的资源和待保存选择。
+        OnboardingChoices.sync(this, null);
         markSeen(this);
         finish();
     }
@@ -443,9 +445,18 @@ public final class OnboardingActivity extends AppCompatActivity {
                 syncRetries = 0;
             }
             if (choices && result.outcome() == OnboardingChoices.Outcome.FAILED) {
-                note = steps[page] == STEP_SCHEMES ? "保存失败，键盘保留当前方案" : "保存失败，保留原来的设置";
+                note = "暂未保存，选择已保留；点击重试或返回首页继续保存。";
             }
-            if (choices) render(false);
+            if (choices) {
+                render(false);
+                if (result.outcome() == OnboardingChoices.Outcome.FAILED
+                        || result.outcome() == OnboardingChoices.Outcome.ERROR) {
+                    TextView retry = ViewPolicy.label(this, "重试保存", 15, ThemeColorPolicy.accent(this));
+                    ViewPolicy.setMinimumHeightDp(this, retry, 48);
+                    ViewPolicy.bindClick(retry, () -> { syncRetries = 0; syncChoices(); });
+                    ((LinearLayout) findViewById(R.id.onboarding_page)).addView(retry);
+                }
+            }
         });
     }
 

@@ -53,6 +53,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         if (focused && isAdded() && !isHidden()) renderStatus();
     };
     private boolean loaded;
+    @Nullable private TextView pendingChoices;
     private boolean prepared = true;
     @Nullable private FirstRunPreparation.Listener preparationListener;
     /** 首页的一行和搜索按什么文字匹配它。 */
@@ -78,6 +79,15 @@ public final class KeyboardFragment extends HomeTabFragment {
         TextView system = view.findViewById(R.id.keyboard_system_settings);
         system.setText("系统输入法设置 ›");
         ViewPolicy.bindClick(system, this::openInputMethodSettings);
+
+        pendingChoices = ViewPolicy.label(requireContext(), "", 14, ThemeColorPolicy.accent(requireContext()));
+        ViewPolicy.setMinimumHeightDp(requireContext(), pendingChoices, 48);
+        ((LinearLayout) card).addView(pendingChoices);
+        ViewPolicy.bindClick(pendingChoices, () -> OnboardingChoices.sync(requireContext(), result -> {
+            if (!isAdded() || getView() == null) return;
+            reload();
+        }));
+        ViewPolicy.hide(pendingChoices);
 
         // The system's input method picker is a dialog over this window, so there is no resume when it closes; the returning focus is the only sign the default may have changed.
         view.getViewTreeObserver().addOnWindowFocusChangeListener(focusWatch);
@@ -169,6 +179,7 @@ public final class KeyboardFragment extends HomeTabFragment {
     // the user is in the keyboard rather than in here.
     // Notices are fetched when the app home comes on screen; the shared store caches the feed for a minute.
     @Override protected void onBecameVisible() {
+        OnboardingChoices.sync(requireContext(), null);
         reload();
         View view = getView();
         if (view != null) NoticeBanner.load(this, view.findViewById(R.id.keyboard_notices));
@@ -184,6 +195,7 @@ public final class KeyboardFragment extends HomeTabFragment {
         }, result -> {
             if (result != null) {
                 prepared = Boolean.TRUE.equals(result[0]);
+                snapshot = result[1] instanceof JSONObject value ? value : null;
                 if (result[2] instanceof AndroidLocalSettings.Snapshot settings) local = settings;
                 if (result[1] instanceof JSONObject value) {
                     snapshot = value;
@@ -338,9 +350,15 @@ public final class KeyboardFragment extends HomeTabFragment {
     private void renderStatus() {
         View view = getView();
         if (view == null) return;
+        if (pendingChoices != null) {
+            boolean pending = OnboardingChoices.hasPending(requireContext());
+            pendingChoices.setText("引导中的选择尚未保存，点此重试");
+            ViewPolicy.setVisible(pendingChoices, pending);
+        }
         boolean enabled = ImeSetup.enabled(requireContext());
         boolean current = enabled && ImeSetup.isDefault(requireContext());
-        String state = getString(prepared && current
+        String state = !loaded ? "检查中…" : !prepared ? "需要准备运行资源"
+            : snapshot == null ? "无法读取偏好设置" : OnboardingChoices.hasPending(requireContext()) ? "引导选择尚未保存" : getString(current
             ? R.string.settings_status_ready : R.string.settings_status_incomplete);
         ((TextView) view.findViewById(R.id.keyboard_status_title)).setText(state);
         TextView scheme = view.findViewById(R.id.keyboard_status_line);

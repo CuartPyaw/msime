@@ -886,6 +886,13 @@ final class MetasequoiaInputSessionBridge: @unchecked Sendable {
     return (try? callDirectory(msimeClientLoadPreferences, directory))?["preferences"] as? [String: Any]
   }
 
+  /// 首次引导也准备键盘实际使用的宿主资源和偏好；只校验、准备，不创建输入会话，不要求完全访问。
+  static func prepareOnboardingResources() -> Bool {
+    guard let resources = PersonalDictionaryBridge.packagedResources else { return false }
+    return (try? callOptions(msimeClientPrepareHost,
+      bootstrapOptions(resources: resources, stateRoot: nil))) != nil
+  }
+
   /// Change fields of the shared document from the settings app.
   ///
   /// The keyboard picks the change up the next time it appears (`reloadSharedPreferences`). A write that loses the compare-and-swap to the keyboard returns false and changes nothing.
