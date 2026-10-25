@@ -62,12 +62,21 @@
     (void)error; ++self.commands; self.lastCommand = command; return @{};
 }
 @end
+static void FinishCandidateFrameAnimation(MSIMEInputController *controller) {
+    NSViewAnimation *animation = [controller valueForKey:@"candidateFrameAnimation"];
+    [animation setCurrentProgress:1];
+    [controller stopCandidateFrameAnimation];
+}
 @interface PagerTestController : MSIMEInputController
 @property(nonatomic) NSUInteger pointerReports;
 @end
 @implementation PagerTestController
 - (void)reportPointerToLifecycle { ++self.pointerReports; }
 - (void)apply:(NSDictionary *)transition { (void)transition; }
+- (void)applyCandidateFrame:(NSRect)frame {
+    [super applyCandidateFrame:frame];
+    FinishCandidateFrameAnimation(self);
+}
 @end
 
 // 专门模拟正在显示的窗口，检查同次组字的历史宽度不会覆盖收紧开关。
@@ -75,6 +84,54 @@
 @end
 @implementation VisibleRowLayoutPanel
 - (BOOL)isVisible { return YES; }
+@end
+
+@interface AdaptiveLayoutSession : NSObject
+@property(nonatomic, copy) NSArray<NSString *> *texts;
+@property(nonatomic) NSUInteger cursor;
+@property(nonatomic) NSUInteger selected;
+@end
+@implementation AdaptiveLayoutSession
+- (NSArray *)entries {
+    NSMutableArray *entries = [NSMutableArray array];
+    for (NSUInteger index = 0; index < self.texts.count; ++index)
+        [entries addObject:@{@"text":self.texts[index], @"highlighted":@(index == self.cursor),
+            @"id":@{@"session":@1, @"generation":@7, @"index":@(index)}}];
+    return entries;
+}
+- (NSDictionary *)viewWithError:(NSError **)error {
+    (void)error;
+    const NSUInteger start = self.cursor / 6 * 6;
+    return @{@"session":@1, @"generation":@7, @"focused":@YES, @"editing_text":@"synthetic",
+        @"page":@(self.cursor / 6), @"page_count":@((self.texts.count + 5) / 6),
+        @"candidates":[[self entries] subarrayWithRange:NSMakeRange(start, MIN((NSUInteger)6, self.texts.count - start))]};
+}
+- (NSDictionary *)allCandidatesWithError:(NSError **)error {
+    (void)error;
+    return @{@"session":@1, @"generation":@7, @"candidates":[self entries]};
+}
+- (NSDictionary *)command:(uint32_t)command error:(NSError **)error {
+    if (command == MSIME_NEXT_CANDIDATE && self.cursor + 1 < self.texts.count) ++self.cursor;
+    if (command == MSIME_PREVIOUS_CANDIDATE && self.cursor > 0) --self.cursor;
+    return @{@"view":[self viewWithError:error], @"handled":@YES};
+}
+- (NSDictionary *)selectAnyCandidateGeneration:(uint64_t)generation index:(NSUInteger)index error:(NSError **)error {
+    (void)error;
+    assert(generation == 7 && index < self.texts.count);
+    self.selected = index;
+    return nil;
+}
+@end
+
+@interface AdaptiveLayoutController : MSIMEInputController
+@property(nonatomic) BOOL animatesWindowFrame;
+@end
+@implementation AdaptiveLayoutController
+- (void)reportPointerToLifecycle {}
+- (void)applyCandidateFrame:(NSRect)frame {
+    [super applyCandidateFrame:frame];
+    if (!self.animatesWindowFrame) FinishCandidateFrameAnimation(self);
+}
 @end
 
 static MSIMECandidateButton *CandidateButton(NSView *content, NSInteger tag)
@@ -88,6 +145,355 @@ static NSRect CandidateFrame(NSView *view) {
     NSView *chrome = view.superview;
     while (chrome && ![chrome isKindOfClass:MSIMECandidateChromeView.class]) chrome = chrome.superview;
     return chrome ? [view convertRect:view.bounds toView:MSIMECandidateControlsView(chrome)] : view.frame;
+}
+
+static void AssertNoCandidateLayoutAnimation(NSView *content) {
+    assert(![content.layer.mask animationForKey:@"candidate-expand-size"]);
+    for (NSView *view in MSIMECandidateControlSubviews(content))
+        if ([view isKindOfClass:MSIMECandidateButton.class] && view.tag >= 0)
+            assert(![view.layer animationForKey:@"candidate-layout-move"]);
+}
+
+static void AssertNativeCandidateFrameAnimation(AdaptiveLayoutController *controller, NSWindow *panel,
+                                                NSRect start, BOOL expanding) {
+    NSViewAnimation *animation = [controller valueForKey:@"candidateFrameAnimation"];
+    assert(animation);
+    NSDictionary *transition = animation.viewAnimations.firstObject;
+    assert(transition[NSViewAnimationTargetKey] == panel);
+    assert(NSEqualRects([transition[NSViewAnimationStartFrameKey] rectValue], start));
+    const NSRect target = [transition[NSViewAnimationEndFrameKey] rectValue];
+    const NSInteger windowNumber = panel.windowNumber;
+    MSIMECandidateMotion *motion = [controller valueForKey:@"candidateMotion"];
+    CGFloat previousHeight = NSHeight(start);
+    for (NSNumber *progress in @[@0.25, @0.75]) {
+        [animation setCurrentProgress:progress.doubleValue];
+        assert(panel.windowNumber == windowNumber && panel.alphaValue == 1);
+        assert(!motion.exiting && !motion.exitWindow.isVisible);
+        if (expanding)
+            assert(NSHeight(panel.frame) > previousHeight && NSHeight(panel.frame) < NSHeight(target));
+        else
+            assert(NSHeight(panel.frame) < previousHeight && NSHeight(panel.frame) > NSHeight(target));
+        [panel.contentView layoutSubtreeIfNeeded];
+        MSIMECandidateChromeView *content = (id)panel.contentView;
+        assert(fabs(NSMaxY(content.candidateContentView.bounds) - content.resizingCandidateContentHeight) < 0.1);
+        for (NSDictionary *item in animation.viewAnimations) {
+            if (item[NSViewAnimationTargetKey] == panel) continue;
+            MSIMECandidateButton *button = item[NSViewAnimationTargetKey];
+            assert([button isKindOfClass:MSIMECandidateButton.class] && button.candidateID);
+            const NSRect from = [item[NSViewAnimationStartFrameKey] rectValue];
+            const NSRect to = [item[NSViewAnimationEndFrameKey] rectValue];
+            assert(NSMinX(button.frame) >= MIN(NSMinX(from), NSMinX(to)) - 1);
+            assert(NSMinX(button.frame) <= MAX(NSMinX(from), NSMinX(to)) + 1);
+            assert(NSMinY(button.frame) >= MIN(NSMinY(from), NSMinY(to)) - 1);
+            assert(NSMinY(button.frame) <= MAX(NSMinY(from), NSMinY(to)) + 1);
+            assert(!NSEqualPoints(button.frame.origin, to.origin));
+        }
+        previousHeight = NSHeight(panel.frame);
+    }
+    [animation setCurrentProgress:1];
+    for (NSDictionary *item in animation.viewAnimations) {
+        if (item[NSViewAnimationTargetKey] == panel) continue;
+        NSView *view = item[NSViewAnimationTargetKey];
+        const NSRect end = [item[NSViewAnimationEndFrameKey] rectValue];
+        assert(fabs(NSMinX(view.frame) - NSMinX(end)) <= 1 && fabs(NSMinY(view.frame) - NSMinY(end)) <= 1);
+    }
+    [controller stopCandidateFrameAnimation];
+    assert(NSEqualRects(panel.frame, target));
+}
+
+static void TestAdaptiveCandidateLayout(RowLayoutClient *client) {
+    NSString *suite = [@"app.msime.test.adaptive." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *appearance = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":@"adaptive"}];
+    appearance.showsCandidatePreedit = NO;
+    appearance.showsCandidatePageNumber = NO;
+    appearance.showsAppLogo = NO;
+    appearance.expandCandidates = YES;
+    appearance.candidateTranslations = NO;
+    AdaptiveLayoutSession *session = [AdaptiveLayoutSession new];
+    NSMutableArray *texts = [NSMutableArray array];
+    for (NSUInteger index = 0; index < 30; ++index)
+        [texts addObject:index == 2 ? @"合成较长候选" : [NSString stringWithFormat:@"%C", (unichar)(0x4e00 + index)]];
+    texts[1] = texts[0];
+    session.texts = texts;
+    AdaptiveLayoutController *controller = [[AdaptiveLayoutController alloc] init];
+    MSIMECandidatePanel *panel = [[VisibleRowLayoutPanel alloc] initWithContentRect:NSZeroRect
+        styleMask:NSWindowStyleMaskBorderless | NSWindowStyleMaskNonactivatingPanel backing:NSBackingStoreBuffered defer:NO];
+    [controller setValue:appearance forKey:@"appearance"];
+    [controller setValue:client forKey:@"activeClient"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:[session viewWithError:nil] forKey:@"view"];
+    auto width = [&] { return NSWidth(((MSIMECandidateChromeView *)panel.contentView).cardBounds); };
+    [controller setValue:panel forKey:@"panel"];
+    auto assertTightColumns = [&] {
+        NSArray *page = [controller valueForKey:@"adaptivePageCandidates"];
+        for (NSUInteger index = 0; index < page.count; ++index) {
+            MSIMECandidateButton *cell = CandidateButton(panel.contentView, index);
+            const CGFloat right = cell.hasSkinLayout ? cell.textRightInset : MSIMECandidateTextRight * MSIMECandidateScale(appearance);
+            assert(fabs(NSWidth(cell.frame) - cell.contentLeft - cell.itemLayout.textWidth - right) <= 1);
+        }
+    };
+    CGFloat firstWidth = 0;
+    for (NSUInteger count : {3, 30, 300}) {
+        NSMutableArray *synthetic = [NSMutableArray array];
+        for (NSUInteger index = 0; index < count; ++index) [synthetic addObject:@"合成词组"];
+        session.texts = synthetic;
+        [controller setValue:[session viewWithError:nil] forKey:@"view"];
+        [controller renderCandidates];
+        assertTightColumns();
+        const CGFloat cellWidth = NSWidth(CandidateButton(panel.contentView, 0).frame);
+        if (firstWidth) assert(fabs(cellWidth - firstWidth) < 0.1);
+        firstWidth = cellWidth;
+    }
+    const NSUInteger originalFontSize = appearance.fontSize;
+    NSString *originalFontFamily = appearance.fontFamily;
+    NSString *originalEnglishFont = appearance.candidateEnglishFont;
+    NSArray *originalFallbackFonts = appearance.fallbackFonts;
+    appearance.fontFamily = @"MSIME Synthetic Missing Font";
+    appearance.candidateEnglishFont = nil;
+    appearance.fallbackFonts = @[];
+    for (NSString *mode in @[@"adaptive", @"fixed"])
+    for (NSUInteger fontSize : {18, 32}) for (NSUInteger scale : {50, 100, 200}) {
+        [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":mode}];
+        appearance.fontSize = fontSize;
+        appearance.candidateScalePercent = scale;
+        CGFloat firstContentLeft = 0;
+        for (NSUInteger count = 1; count <= 9; ++count) {
+            NSMutableArray *synthetic = [NSMutableArray array];
+            for (NSUInteger index = 0; index < count; ++index) [synthetic addObject:@"合成"];
+            session.texts = synthetic;
+            [controller setValue:[session viewWithError:nil] forKey:@"view"];
+            [controller renderCandidates];
+            assertTightColumns();
+            const CGFloat contentLeft = CandidateButton(panel.contentView, 0).contentLeft;
+            if (firstContentLeft) assert(fabs(contentLeft - firstContentLeft) < 0.01);
+            firstContentLeft = contentLeft;
+        }
+    }
+    appearance.fontSize = originalFontSize;
+    appearance.fontFamily = originalFontFamily;
+    appearance.candidateEnglishFont = originalEnglishFont;
+    appearance.fallbackFonts = originalFallbackFonts;
+    appearance.candidateScalePercent = 100;
+    [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":@"adaptive"}];
+    NSMutableArray *fourCharacterCandidates = [NSMutableArray array];
+    for (NSUInteger index = 0; index < 30; ++index) [fourCharacterCandidates addObject:@"合成词组"];
+    session.texts = fourCharacterCandidates;
+    [controller setValue:[session viewWithError:nil] forKey:@"view"];
+    [appearance applySharedCandidatePreferences:@{@"candidate_count_mode":@"adaptive", @"candidate_max_width":@600}];
+    [controller renderCandidates];
+    const NSRect firstCell = CandidateButton(panel.contentView, 0).frame;
+    const CGFloat gap = NSMinX(CandidateButton(panel.contentView, 1).frame) - NSMaxX(firstCell);
+    NSView *expandButton = CandidateButton(panel.contentView, -3);
+    assert(expandButton);
+    const NSUInteger fourCandidateWidth = (NSUInteger)ceil(2 * NSMinX(firstCell) +
+        4 * NSWidth(firstCell) + 3 * gap + NSWidth(expandButton.frame));
+    [appearance applySharedCandidatePreferences:@{@"candidate_count_mode":@"adaptive", @"candidate_max_width":@(fourCandidateWidth)}];
+    [controller renderCandidates];
+    assert([[controller valueForKey:@"adaptivePageCandidates"] count] >= 4);
+    assert(NSMaxX(CandidateButton(panel.contentView, 3).frame) <=
+        NSMinX(CandidateButton(panel.contentView, -3).frame) + 0.5);
+    [appearance applySharedCandidatePreferences:@{@"candidate_count_mode":@"adaptive", @"candidate_max_width":@(fourCandidateWidth - 1)}];
+    [controller renderCandidates];
+    assert([[controller valueForKey:@"adaptivePageCandidates"] count] == 3);
+    for (NSUInteger maximum : {400, 420, 430}) {
+        [appearance applySharedCandidatePreferences:@{@"candidate_count_mode":@"adaptive", @"candidate_max_width":@(maximum)}];
+        [controller renderCandidates];
+        const NSUInteger expected = (NSUInteger)floor((maximum - 2 * NSMinX(firstCell) -
+            NSWidth(expandButton.frame) + gap) / (NSWidth(firstCell) + gap));
+        assert([[controller valueForKey:@"adaptivePageCandidates"] count] == expected);
+    }
+    [appearance applySharedCandidatePreferences:@{@"candidate_count_mode":@"adaptive", @"candidate_max_width":@400}];
+    session.texts = texts;
+    [controller setValue:[session viewWithError:nil] forKey:@"view"];
+    [controller renderCandidates];
+    assert(fabs(width() - 400) < 1);
+    NSArray *first = [controller valueForKey:@"adaptivePageCandidates"];
+    assert(first.count > 1 && first.count < session.texts.count);
+    assert(CandidateButton(panel.contentView, (NSInteger)first.count) == nil);
+    assertTightColumns();
+    NSDictionary *next = [controller candidateCommand:MSIME_NEXT_PAGE];
+    assert(session.cursor == first.count);
+    [controller setValue:next[@"view"] forKey:@"view"];
+    [controller renderCandidates];
+    MSIMECandidateButton *button = CandidateButton(panel.contentView, 0);
+    [controller selectCandidate:button];
+    assert(session.selected == first.count);
+    session.selected = NSNotFound;
+    NSMutableDictionary *staleID = [button.candidateID mutableCopy];
+    staleID[@"generation"] = @6;
+    button.candidateID = staleID;
+    [controller selectCandidate:button];
+    assert(session.selected == NSNotFound);
+    [controller candidateCommand:MSIME_PREVIOUS_PAGE];
+    [controller renderCandidates];
+    assert(session.cursor == 0);
+    const NSRect collapsedFrame = panel.frame;
+    NSMutableDictionary<NSDictionary *, NSValue *> *collapsedCandidates = [NSMutableDictionary dictionary];
+    for (NSView *view in MSIMECandidateControlSubviews(panel.contentView))
+        if ([view isKindOfClass:MSIMECandidateButton.class] && view.tag >= 0) {
+            MSIMECandidateButton *button = (id)view;
+            NSRect old = [panel convertRectToScreen:[view convertRect:view.bounds toView:nil]];
+            old.origin.x -= NSMinX(panel.frame);
+            old.origin.y -= NSMaxY(panel.frame);
+            collapsedCandidates[button.candidateID] = [NSValue valueWithRect:old];
+        }
+    controller.animatesWindowFrame = YES;
+    assert([controller openExpandedCandidates]);
+    if (!NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
+        NSViewAnimation *expansion = [controller valueForKey:@"candidateFrameAnimation"];
+        assert(expansion.viewAnimations.count > 1);
+        [expansion setCurrentProgress:0];
+        [panel.contentView layoutSubtreeIfNeeded];
+        for (NSDictionary *item in expansion.viewAnimations) {
+            if (item[NSViewAnimationTargetKey] == panel) continue;
+            MSIMECandidateButton *button = item[NSViewAnimationTargetKey];
+            const NSRect old = [collapsedCandidates[button.candidateID] rectValue];
+            NSRect current = [panel convertRectToScreen:[button convertRect:button.bounds toView:nil]];
+            current.origin.x -= NSMinX(panel.frame);
+            current.origin.y -= NSMaxY(panel.frame);
+            assert(fabs(NSMinX(old) - NSMinX(current)) <= 1 && fabs(NSMinY(old) - NSMinY(current)) <= 1);
+        }
+        AssertNativeCandidateFrameAnimation(controller, panel, collapsedFrame, YES);
+    }
+    controller.animatesWindowFrame = NO;
+    assert(fabs(width() - 400) < 1);
+    MSIMEExpandedCandidateScrollView *viewport = [controller valueForKey:@"expandedScrollView"];
+    assert(viewport);
+    MSIMECandidateButton *wide = CandidateButton(panel.contentView, 2);
+    MSIMECandidateButton *shortWord = CandidateButton(panel.contentView, 0);
+    assert(wide && shortWord && NSWidth(wide.frame) >= 2 * NSWidth(shortWord.frame) - 1);
+    const auto chrome = (MSIMECandidateChromeView *)panel.contentView;
+    assert(NSMaxX(chrome.candidateRowsRect) <= NSWidth(chrome.cardBounds) - MSIMEExpandedCandidateScrollerPadding(1));
+    AssertNoCandidateLayoutAnimation(panel.contentView);
+    [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":@"adaptive",
+        @"candidate_max_width":@500}];
+    [controller renderCandidates];
+    assert(fabs(width() - 500) < 1);
+    AssertNoCandidateLayoutAnimation(panel.contentView);
+    assert(![controller valueForKey:@"candidateFrameAnimation"]);
+    [controller setValue:@20 forKey:@"expandedCursor"];
+    [controller renderCandidates];
+    AssertNoCandidateLayoutAnimation(panel.contentView);
+    assert(![controller valueForKey:@"candidateFrameAnimation"]);
+    [controller setValue:@0 forKey:@"expandedCursor"];
+    [controller renderCandidates];
+    AssertNoCandidateLayoutAnimation(panel.contentView);
+    assert(![controller valueForKey:@"candidateFrameAnimation"]);
+    const NSRect expandedFrame = panel.frame;
+    NSMutableDictionary<NSDictionary *, NSValue *> *expandedCandidateFrames = [NSMutableDictionary dictionary];
+    for (NSView *view in MSIMECandidateControlSubviews(panel.contentView))
+        if ([view isKindOfClass:MSIMECandidateButton.class] && view.tag >= 0) {
+            MSIMECandidateButton *button = (id)view;
+            NSRect rect = [panel convertRectToScreen:[view convertRect:view.bounds toView:nil]];
+            rect.origin.x -= NSMinX(panel.frame);
+            rect.origin.y -= NSMaxY(panel.frame);
+            expandedCandidateFrames[button.candidateID] = [NSValue valueWithRect:rect];
+        }
+    MSIMECandidateMotion *layoutMotion = [controller valueForKey:@"candidateMotion"];
+    controller.animatesWindowFrame = YES;
+    [controller closeExpandedCandidates];
+    if (!NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
+        NSViewAnimation *closing = [controller valueForKey:@"candidateFrameAnimation"];
+        assert(closing.viewAnimations.count > 1);
+        [closing setCurrentProgress:0];
+        [panel.contentView layoutSubtreeIfNeeded];
+        for (NSDictionary *item in closing.viewAnimations) {
+            if (item[NSViewAnimationTargetKey] == panel) continue;
+            MSIMECandidateButton *button = item[NSViewAnimationTargetKey];
+            assert(expandedCandidateFrames[button.candidateID]);
+            const NSRect old = [expandedCandidateFrames[button.candidateID] rectValue];
+            NSRect current = [panel convertRectToScreen:[button convertRect:button.bounds toView:nil]];
+            current.origin.x -= NSMinX(panel.frame);
+            current.origin.y -= NSMaxY(panel.frame);
+            assert(fabs(NSMinX(old) - NSMinX(current)) <= 1 && fabs(NSMinY(old) - NSMinY(current)) <= 1);
+        }
+        AssertNativeCandidateFrameAnimation(controller, panel, expandedFrame, NO);
+    }
+    controller.animatesWindowFrame = NO;
+    [texts exchangeObjectAtIndex:0 withObjectAtIndex:2];
+    session.texts = texts;
+    NSMutableDictionary *typingView = [[session viewWithError:nil] mutableCopy];
+    typingView[@"editing_text"] = @"synthetic-update";
+    [controller setValue:typingView forKey:@"view"];
+    [controller renderCandidates];
+    AssertNoCandidateLayoutAnimation(panel.contentView);
+    assert(!layoutMotion.exiting && !layoutMotion.exitWindow.isVisible);
+    if (!NSWorkspace.sharedWorkspace.accessibilityDisplayShouldReduceMotion) {
+        assert([controller openExpandedCandidates]);
+        controller.animatesWindowFrame = YES;
+        [controller closeExpandedCandidates];
+        // 锁屏或熄屏时 NSAnimation 不前进，不等真实时间，直接走完成回调。
+        NSViewAnimation *finishing = [controller valueForKey:@"candidateFrameAnimation"];
+        assert(finishing);
+        [finishing setCurrentProgress:1];
+        [controller animationDidEnd:finishing];
+        assert(![controller valueForKey:@"candidateFrameAnimation"]);
+        controller.animatesWindowFrame = NO;
+        assert([controller openExpandedCandidates]);
+        controller.animatesWindowFrame = YES;
+        [controller closeExpandedCandidates];
+        NSViewAnimation *closing = [controller valueForKey:@"candidateFrameAnimation"];
+        [closing setCurrentProgress:0.4];
+        const NSRect interrupted = panel.frame;
+        assert([controller openExpandedCandidates]);
+        AssertNativeCandidateFrameAnimation(controller, panel, interrupted, YES);
+        [controller closeExpandedCandidates];
+        [controller renderCandidates];
+        assert(![controller valueForKey:@"candidateFrameAnimation"]);
+        controller.animatesWindowFrame = NO;
+        assert([controller openExpandedCandidates]);
+        controller.animatesWindowFrame = YES;
+        layoutMotion.reduceMotion = YES;
+        [controller closeExpandedCandidates];
+        assert(![controller valueForKey:@"candidateFrameAnimation"]);
+        layoutMotion.reduceMotion = NO;
+        controller.animatesWindowFrame = NO;
+        assert([controller openExpandedCandidates]);
+        controller.animatesWindowFrame = YES;
+        [controller closeExpandedCandidates];
+        [controller hideCandidatePanel:"deactivate"];
+        assert(![controller valueForKey:@"candidateFrameAnimation"]);
+        controller.animatesWindowFrame = NO;
+        [controller renderCandidates];
+    }
+    for (NSNumber *maximum in @[@160, @400, @600]) {
+        for (NSNumber *scale in @[@50, @100, @200]) {
+            for (NSNumber *columns in @[@3, @6, @10]) {
+                appearance.candidateScalePercent = scale.integerValue;
+                [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":@"adaptive",
+                    @"candidate_max_width":maximum, @"candidate_columns":columns}];
+                [controller renderCandidates];
+                assert(fabs(width() - maximum.doubleValue) < 1);
+                for (NSView *cell in MSIMECandidateControlSubviews(panel.contentView))
+                    if ([cell isKindOfClass:MSIMECandidateButton.class] && cell.tag >= 0)
+                        assert(NSMinX(cell.frame) >= 0 && NSMaxX(cell.frame) <= width() + 0.5);
+                assert([controller openExpandedCandidates]);
+                assert(fabs(width() - maximum.doubleValue) < 1);
+                for (NSView *cell in MSIMECandidateControlSubviews(panel.contentView))
+                    if ([cell isKindOfClass:MSIMECandidateButton.class] && cell.tag >= 0)
+                        assert(NSMinX(cell.frame) >= 0 && NSMaxX(cell.frame) <= width() + 0.5);
+                [controller closeExpandedCandidates];
+            }
+        }
+    }
+    appearance.candidateScalePercent = 100;
+    [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"horizontal", @"candidate_count_mode":@"adaptive"}];
+    session.texts = @[@"甲"];
+    [controller setValue:[session viewWithError:nil] forKey:@"view"];
+    [controller renderCandidates];
+    assert(width() < 160);
+    const CGFloat shortWidth = width();
+    [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"vertical", @"candidate_count_mode":@"adaptive"}];
+    [controller renderCandidates];
+    const CGFloat verticalWidth = width();
+    [appearance applySharedCandidatePreferences:@{@"candidate_layout":@"vertical", @"candidate_count_mode":@"fixed"}];
+    [controller renderCandidates];
+    assert(fabs(width() - verticalWidth) < 0.1 && width() > shortWidth);
+    [layoutMotion stop];
+    [panel orderOut:nil];
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
 
 // 直接检查真实绘制方法的四条直边，布局矩形贴边不能代替背景像素贴边。
@@ -685,8 +1091,7 @@ static void TestFactoryFitAndJustify(RowLayoutClient *client)
                                       : @[@{@"text": @"甲", @"highlighted": @YES}]} forKey:@"view"];
         [controller renderCandidates];
         const CGFloat initialWidth = NSWidth(((MSIMECandidateChromeView *)panel.contentView).cardBounds);
-        if (!compact) assert(initialWidth >= 159);
-        else assert(initialWidth < 140);
+        assert(initialWidth < 160);
         NSDictionary *initialView = [controller valueForKey:@"view"];
         [controller setValue:@{@"focused": @YES, @"editing_text": @"ce", @"page": @0, @"page_count": @1,
             @"candidates": @[@{@"text": @"合成候选窗口宽度回归测试合成候选窗口宽度回归测试", @"highlighted": @YES}]} forKey:@"view"];
@@ -699,15 +1104,15 @@ static void TestFactoryFitAndJustify(RowLayoutClient *client)
         assert(first && first.hasSkinLayout);
         const CGFloat width = NSWidth(((MSIMECandidateChromeView *)panel.contentView).cardBounds);
         if (compact) {
-            assert(width < regularWidth - 20 && fabs(width - initialWidth) < 1);
+            assert(fabs(width - regularWidth) < 1 && fabs(width - initialWidth) < 1);
             assert(fabs(first.textLeftInset - first.textRightInset) < 0.1);
         } else if (justified) {
             MSIMECandidateButton *last = CandidateButton(panel.contentView, 1);
             assert(last && fabs(NSMaxX(last.frame) - (width - NSMinX(first.frame))) < 1);
-            assert(NSWidth(first.frame) > 100 && NSWidth(last.frame) > 100);
+            assert(NSWidth(first.frame) < 100 && NSWidth(last.frame) < 100);
         } else {
             regularWidth = width;
-            assert(width >= 159 && fabs(width - initialWidth) < 1);
+            assert(width < 160 && fabs(width - initialWidth) < 1);
         }
         if (!justified) {
             [controller setValue:@{@"focused": @YES, @"editing_text": @"ce", @"page": @0, @"page_count": @1,
@@ -715,7 +1120,7 @@ static void TestFactoryFitAndJustify(RowLayoutClient *client)
             [controller renderCandidates];
             first = CandidateButton(panel.contentView, 0);
             MSIMECandidateButton *second = CandidateButton(panel.contentView, 1);
-            assert(first && second && fabs(NSMinX(second.frame) - NSMaxX(first.frame) - (compact ? 11 : 17)) < 0.1);
+            assert(first && second && fabs(NSMinX(second.frame) - NSMaxX(first.frame) - 11) < 0.1);
         }
         // 可见行数来自同一份共享皮肤；末行仍能滚入视口，点击按钮只为可见行创建。
         appearance.pageSize = 3;
@@ -1027,7 +1432,10 @@ static void TestFactoryPreeditMargins(RowLayoutClient *client)
                         identifier, scale, (unsigned long)vertical, (unsigned long)expanded, top, before.top, marginTop * scale);
                 assert(fabs(top - before.top - marginTop * scale) <= edgeTolerance);
                 assert(fabs(bottom - before.bottom - marginBottom * scale + (canvas ? 2 * scale : 0)) < 0.1);
-                assert(NSWidth(label.frame) + 0.1 >= [preedit sizeWithAttributes:@{NSFontAttributeName:label.font}].width);
+                if (vertical || expanded)
+                    assert(NSWidth(label.frame) + 0.1 >= [preedit sizeWithAttributes:@{NSFontAttributeName:label.font}].width);
+                else
+                    assert(NSWidth(label.frame) >= 0);
             }
         if (!plain && !canvas) {
             // 首行翻页和展开收起控件在外边距以内居中，不跟着总高度再次偏移。
@@ -2163,6 +2571,13 @@ int main(int argc, char **argv)
     @autoreleasepool
     {
         [NSApplication sharedApplication];
+        if (argc == 2 && std::string(argv[1]) == "--adaptive") {
+            RowLayoutClient *client = [RowLayoutClient new];
+            const NSRect screen = NSScreen.mainScreen.visibleFrame;
+            client.caret = NSMakeRect(NSMidX(screen), NSMidY(screen), 1, 20);
+            TestAdaptiveCandidateLayout(client);
+            return 0;
+        }
         // 动效需要独立的主事件循环，避免大布局矩阵的旧窗口回调占用计时阶段。
         if (argc == 2 && std::string(argv[1]) == "--declared-motion") {
             RowLayoutClient *client = [RowLayoutClient new];
@@ -2266,12 +2681,12 @@ int main(int argc, char **argv)
 
         const CGFloat halfScreen = MAX(80, floor(screen.size.width * 0.5));
 
-        // A one-character page still gets a card at least seven times the candidate font wide, as the Windows card and the source skins' `min-width: 7em` do.
+        // 固定数量横排不再补最小宽度；竖排保留原来的 7em 下限。
         NSMutableDictionary *oneCharacterView = [singleView mutableCopy];
         oneCharacterView[@"candidates"] = @[@{@"text": @"的", @"highlighted": @YES}];
         [controller setValue:[oneCharacterView copy] forKey:@"view"];
         [controller renderCandidates];
-        assert(panel.contentView.frame.size.width >= MIN(halfScreen, 7 * rowFont.pointSize) - 0.5);
+        assert(panel.contentView.frame.size.width < MIN(halfScreen, 7 * rowFont.pointSize) - 0.5);
         appearance.vertical = YES;
         [controller renderCandidates];
         assert(panel.contentView.frame.size.width >= MIN(halfScreen, 7 * rowFont.pointSize) - 0.5);

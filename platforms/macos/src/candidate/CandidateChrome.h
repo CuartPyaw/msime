@@ -461,6 +461,8 @@ static CGPathRef MSIMECreateCandidateCornerPath(NSRect rect, std::array<double, 
 @property(nonatomic) BOOL liquidGlassEnabled;
 @property(nonatomic, readonly) BOOL liquidGlassActive;
 @property(nonatomic, strong, readonly) NSView *candidateContentView;
+// 原窗口变高、变矮时，候选内容保持顶部对齐；零表示正常布局。
+@property(nonatomic) CGFloat resizingCandidateContentHeight;
 @property(nonatomic) msime::mac::SkinInsets canvasOuterInsets;
 @property(nonatomic) msime::mac::SkinInsets shadowOuterInsets;
 @property(nonatomic) msime::mac::CandidateShadow candidateShadow;
@@ -586,6 +588,8 @@ static CGPathRef MSIMECreateCandidateCornerPath(NSRect rect, std::array<double, 
 {
     [super layout];
     [self updateGlassBackground];
+    [_candidateContentView setBoundsOrigin:NSMakePoint(0, self.resizingCandidateContentHeight > 0
+        ? self.resizingCandidateContentHeight - NSHeight(_candidateContentView.bounds) : 0)];
     if (self.clipsCandidateContent) {
         const CGFloat halfBorder = MAX(0.0, self.lineWidth) / 2.0;
         const NSRect bounds = NSInsetRect(_candidateContentView.bounds, halfBorder, halfBorder);
@@ -598,6 +602,14 @@ static CGPathRef MSIMECreateCandidateCornerPath(NSRect rect, std::array<double, 
         _candidateContentView.layer.mask = mask;
     } else {
         _candidateContentView.layer.mask = nil;
+    }
+}
+- (void)setFrameSize:(NSSize)size
+{
+    [super setFrameSize:size];
+    if (self.resizingCandidateContentHeight > 0) {
+        [self setNeedsLayout:YES];
+        [self layoutSubtreeIfNeeded];
     }
 }
 - (BOOL)isOpaque { return NO; }

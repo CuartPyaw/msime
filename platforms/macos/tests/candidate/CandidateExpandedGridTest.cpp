@@ -1,4 +1,5 @@
 #include "../../../../shared/candidate/CandidateExpandedGrid.h"
+#include "../../src/candidate/AdaptiveCandidateLayout.h"
 
 #include <cassert>
 
@@ -9,6 +10,32 @@ using msime::candidate::StepExpandedGrid;
 
 int main()
 {
+    const auto collapsed = msime::mac::LayoutAdaptiveCandidates({40, 40, 40, 200, 500, 20}, 300, 5);
+    assert((collapsed.starts == std::vector<std::size_t>{0, 3, 4, 5, 6}));
+    assert(collapsed.widths[2][0] == 300);
+    const auto many = msime::mac::LayoutAdaptiveCandidates(std::vector<double>(30, 10), 400, 0);
+    assert(many.widths.size() == 1 && many.widths[0].size() == 30);
+    std::vector<double> numbers(300, 15);
+    std::fill_n(numbers.begin(), 9, 5);
+    std::fill(numbers.begin() + 9, numbers.begin() + 99, 10);
+    const auto numbered = msime::mac::LayoutAdaptiveCandidates(std::vector<double>(300, 30), 120, 0, 0, numbers);
+    assert(numbered.starts[1] == 3 && numbered.widths[0][0] == 35 && numbered.widths[1][0] == 35);
+    const auto twoDigits = msime::mac::LayoutAdaptiveCandidates(std::vector<double>(30, 10), 200, 0, 0, numbers);
+    assert(twoDigits.starts[1] == 10 && twoDigits.widths[0][0] == 20);
+    const auto numberBoundary = msime::mac::LayoutAdaptiveCandidates(std::vector<double>(30, 10), 195, 0, 0, numbers);
+    assert(numberBoundary.starts[1] == 9 && numberBoundary.widths[0][0] == 15);
+    const auto minimum = msime::mac::LayoutAdaptiveCandidates({10, 40}, 100, 0, 0, numbers, 30);
+    assert(minimum.widths[0][0] == 30 && minimum.widths[0][1] == 45);
+    const auto expanded = msime::mac::LayoutAdaptiveCandidates({40, 90, 40, 40, 40, 200, 40, 40}, 300, 0, 6);
+    assert((expanded.starts == std::vector<std::size_t>{0, 5, 8}));
+    assert(expanded.widths[0][0] == 50 && expanded.widths[0][1] == 100);
+    assert(expanded.rowFor(4) == 0 && expanded.rowFor(5) == 1);
+    assert(msime::mac::StepAdaptiveCandidates(expanded, 2, 5, ExpandedGridMove::Down, 0).cursor == 5);
+    assert(msime::mac::StepAdaptiveCandidates(expanded, 6, 5, ExpandedGridMove::Up, 0).cursor == 3);
+    assert(msime::mac::StepAdaptiveCandidates(expanded, 0, 5, ExpandedGridMove::Up, 0).close);
+    assert(msime::mac::LayoutAdaptiveCandidates({}, 0, 0).widths.empty());
+    const auto exact = msime::mac::LayoutAdaptiveCandidates({45, 45, 45, 45, 45, 45, 45}, 295, 5, 6);
+    assert(exact.starts[1] == 6);
     // 23 个候选、每行 5 个：5 行，最后一行只有 3 个（20、21、22）。
     constexpr std::size_t count = 23, columns = 5, pageRows = 2;
     static_assert(ExpandedGridRows(count, columns) == 5);

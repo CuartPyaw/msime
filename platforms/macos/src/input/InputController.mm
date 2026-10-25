@@ -52,6 +52,7 @@
 #include "../../../../shared/candidate/CandidateWheelRouting.h"
 #include "../candidate/CandidatePageSize.h"
 #include "../../../../shared/candidate/CandidateExpandedGrid.h"
+#include "../candidate/AdaptiveCandidateLayout.h"
 #import "../core/ChineseTextConversion.h"
 #include "../core/CandidateTranslationDisplay.h"
 #include "../core/CandidateBadgePolicy.h"
@@ -495,6 +496,9 @@ static NSString *CandidateAnnotationRun(NSDictionary *candidate, BOOL traditiona
 struct MSIMECandidatePageGeometry {
     std::vector<msime::candidate::CandidateRowLayout> rows;
     std::vector<double> naturalColumns;
+    std::vector<double> unnumberedColumns;
+    std::vector<double> numberWidths;
+    CGFloat minimumColumnWidth = 0;
     CGFloat columnGap = 0;
     NSArray<NSString *> *texts = @[];
     NSArray<NSString *> *annotations = @[];
@@ -1535,7 +1539,7 @@ static constexpr uint64_t MSIMESessionRecoveryNoticeInterval = 60 * NSEC_PER_SEC
 - (void)later:(id)sender { [self.recoveryDelegate dismissSessionRecoveryNotice:sender]; }
 @end
 
-@interface MSIMEInputController : IMKInputController <MSIMEFloatingToolbarDelegate, MSIMEInputSessionRecoveryDelegate>
+@interface MSIMEInputController : IMKInputController <MSIMEFloatingToolbarDelegate, MSIMEInputSessionRecoveryDelegate, NSAnimationDelegate>
 - (MSIMECustomTranslationBatch *)aiBatchForItems:(NSArray<NSDictionary *> *)items
                                        completion:(void (^)(NSArray<NSDictionary *> *))completion;
 - (NSDictionary *)recoverPreferencesInDirectory:(NSString *)directory error:(NSError **)error;
@@ -1645,6 +1649,17 @@ static NSImage *MSIMECandidateLogoImage() {
     // deleting document text even though the user never released the key.
     BOOL _backspaceHoldArmed;
     NSUInteger _requestedPageSize;
+    NSArray<NSDictionary *> *_adaptiveCandidates;
+    NSArray<NSDictionary *> *_adaptivePageCandidates;
+    msime::mac::AdaptiveCandidateRows _adaptivePages;
+    msime::mac::AdaptiveCandidateRows _adaptiveExpandedRows;
+    CGFloat _adaptiveExpandedGap;
+    NSUInteger _adaptivePage;
+    NSViewAnimation *_candidateFrameAnimation;
+    NSDictionary<NSDictionary *, NSValue *> *_candidateTransitionFrames;
+    NSSize _candidateLayoutSize;
+    BOOL _candidatePreviousExpanded;
+    BOOL _candidatePreviousVisible;
     BOOL _skinShowsSelectedBar;
     std::optional<msime::mac::SkinLayoutGeometry> _candidateLayoutGeometry;
     BOOL _candidateLayoutFitContent;
@@ -2483,6 +2498,8 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
 
 - (BOOL)expandedCandidatesOffered {
     if (![self expandedCandidatesAllowed]) return NO;
+    if (_appearance.adaptiveCandidateCount && _adaptiveCandidates.count)
+        return _adaptivePages.widths.size() > 1;
     NSUInteger pageCount = 0;
     return MSIMEStrictUnsignedIntegerValue(_view[@"page_count"], &pageCount) && pageCount > 1;
 }
@@ -2561,7 +2578,8 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
 - (BOOL)openExpandedCandidatesAfterSelection:(BOOL)afterSelection {
     if (_expandedCandidates || !(afterSelection ? [self expandedCandidatesAllowed] : [self expandedCandidatesOffered])) return NO;
     NSArray<NSDictionary *> *entries = [self expandedCandidatesFromSnapshot:[_session allCandidatesWithError:nil]];
-    NSArray *page = [_view[@"candidates"] isKindOfClass:NSArray.class] ? _view[@"candidates"] : @[];
+    NSArray *page = [self usesAdaptiveCandidates] ? _adaptivePageCandidates
+        : ([_view[@"candidates"] isKindOfClass:NSArray.class] ? _view[@"candidates"] : @[]);
     if (!entries.count || (!afterSelection && entries.count <= page.count)) return NO;
     const NSUInteger columns = MAX((NSUInteger)1, (NSUInteger)_appearance.pageSize);
     // 没有高亮时停在当前这一页的第一个。
@@ -2653,10 +2671,17 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
     if (!count || ![_expandedScrollView scrollByRowBackwards:backwards]) return;
     const NSRange visible = _expandedScrollView.visibleRowRange;
     _expandedScrollsViewport = YES;
-    const NSUInteger row = _expandedCursor / columns;
-    const NSUInteger column = _expandedCursor % columns;
+    const BOOL adaptive = [self usesAdaptiveCandidates] && !_adaptiveExpandedRows.widths.empty();
+    const NSUInteger row = adaptive ? _adaptiveExpandedRows.rowFor(_expandedCursor) : _expandedCursor / columns;
+    const NSUInteger column = adaptive ? _expandedCursor - _adaptiveExpandedRows.starts[row] : _expandedCursor % columns;
     const NSUInteger target = std::clamp(row, visible.location, NSMaxRange(visible) - 1);
-    _expandedCursor = MIN(target * columns + column, count - 1);
+    if (adaptive) {
+        double x = 0;
+        for (NSUInteger slot = 0; slot < column; ++slot) x += _adaptiveExpandedRows.widths[row][slot] + _adaptiveExpandedGap;
+        _expandedCursor = msime::mac::AdaptiveCandidateAtColumn(_adaptiveExpandedRows, target, x, _adaptiveExpandedGap);
+    } else {
+        _expandedCursor = MIN(target * columns + column, count - 1);
+    }
     [self renderCandidates];
 }
 
@@ -2671,16 +2696,19 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
     const NSEventModifierFlags modifiers = event.modifierFlags &
         (NSEventModifierFlagShift | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand);
     const NSUInteger count = _expandedCandidates.count;
-    const NSUInteger columns = MAX((NSUInteger)1, (NSUInteger)_appearance.pageSize);
+    const NSUInteger columns = MAX((NSUInteger)1, [self usesAdaptiveCandidates] ? _appearance.candidateColumns : _appearance.pageSize);
     std::optional<msime::candidate::ExpandedGridMove> move;
     if (modifiers == 0) {
         // 数字键选高亮那一行里的第几个，和普通候选窗选当前页一样；数字是正在拼写的输入（Unicode、表达式模式）或九键组字时不是选词键。
         const int slot = msime::mac::CandidateDigitSlotOnPage(msime::mac::PhysicalCandidateDigitSlot(event.keyCode), columns);
         if (slot >= 0 && !MSIMEStrictBoolean(_view[@"nine_key"]) &&
             !MSIMESpellingSymbol(_view, (unichar)msime::mac::PhysicalCandidateDigitCharacter(slot))) {
-            const NSUInteger index = (_expandedCursor / columns) * columns + (NSUInteger)slot;
+            const BOOL adaptive = [self usesAdaptiveCandidates] && !_adaptiveExpandedRows.widths.empty();
+            const NSUInteger row = adaptive ? _adaptiveExpandedRows.rowFor(_expandedCursor) : _expandedCursor / columns;
+            const NSUInteger index = (adaptive ? _adaptiveExpandedRows.starts[row] : row * columns) + (NSUInteger)slot;
             // 这一行没有的序号（最后一行不满）留在网格里，不当作输入。
-            if (index < count) [self selectExpandedCandidateAtIndex:index pointer:NO];
+            if (index < (adaptive ? _adaptiveExpandedRows.starts[row + 1] : count))
+                [self selectExpandedCandidateAtIndex:index pointer:NO];
             return YES;
         }
         switch (event.keyCode) {
@@ -2725,7 +2753,9 @@ static const char *MSIMESmartPunctuationScalarClass(uint32_t scalar) {
         [self closeExpandedCandidates];
         return NO;
     }
-    const auto step = msime::candidate::StepExpandedGrid(_expandedCursor, count, columns, MAX((NSUInteger)1, _expandedVisibleRows), *move);
+    const auto step = [self usesAdaptiveCandidates]
+        ? msime::mac::StepAdaptiveCandidates(_adaptiveExpandedRows, _expandedCursor, _expandedVisibleRows, *move, _adaptiveExpandedGap)
+        : msime::candidate::StepExpandedGrid(_expandedCursor, count, columns, MAX((NSUInteger)1, _expandedVisibleRows), *move);
     if (step.close) {
         [self closeExpandedCandidates];
         return YES;
@@ -4228,6 +4258,60 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
         _requestedPageSize = size;
         _view = result[@"view"];
     }
+
+}
+- (BOOL)usesAdaptiveCandidates {
+    return _appearance.adaptiveCandidateCount && ![self glossSensePageActive] && !MSIMECandidateListOpen(_view);
+}
+
+- (NSUInteger)highlightedEngineCandidateIndex {
+    for (NSDictionary *candidate in _view[@"candidates"])
+        if (MSIMEStrictBoolean(candidate[@"highlighted"])) return [candidate[@"id"][@"index"] unsignedIntegerValue];
+    return 0;
+}
+
+// 展示分页不改变 runtime 的固定分页协议；先同步真实高亮，后续空格、标点仍由引擎处理。
+- (NSDictionary *)candidateCommand:(uint32_t)command {
+    if (![self usesAdaptiveCandidates] || _expandedCandidates || !_adaptivePages.widths.size() ||
+        (command != MSIME_NEXT_PAGE && command != MSIME_PREVIOUS_PAGE))
+        return [_session command:command error:nil];
+    const NSUInteger count = _adaptivePages.widths.size();
+    const NSUInteger page = command == MSIME_NEXT_PAGE ? MIN(_adaptivePage + 1, count - 1)
+                                                       : (_adaptivePage ? _adaptivePage - 1 : 0);
+    const NSUInteger target = [_adaptiveCandidates[_adaptivePages.starts[page]][@"id"][@"index"] unsignedIntegerValue];
+    return [self moveEngineHighlightToIndex:target];
+}
+
+- (NSDictionary *)moveEngineHighlightToIndex:(NSUInteger)target {
+    NSUInteger current = [self highlightedEngineCandidateIndex];
+    NSDictionary *transition = nil;
+    for (NSUInteger attempts = 0; current != target && attempts <= _adaptiveCandidates.count; ++attempts) {
+        transition = [_session command:current < target ? MSIME_NEXT_CANDIDATE : MSIME_PREVIOUS_CANDIDATE error:nil];
+        if (!transition) {
+            msime_macos_diagnostic_write("adaptive_candidate_navigation_failed");
+            return nil;
+        }
+        _view = transition[@"view"];
+        const NSUInteger next = [self highlightedEngineCandidateIndex];
+        if (next == current) break;
+        current = next;
+    }
+    if (current != target) {
+        msime_macos_diagnostic_write("adaptive_candidate_navigation_incomplete");
+        return nil;
+    }
+    return transition ?: @{@"view": _view, @"handled": @YES};
+}
+
+- (NSDictionary *)synchronizeAdaptiveCandidateIdentity:(NSDictionary *)identifier {
+    if (![self usesAdaptiveCandidates]) return identifier;
+    if (!MSIMECurrentCandidateIdentity(identifier, _view)) return nil;
+    const NSUInteger target = [identifier[@"index"] unsignedIntegerValue];
+    if (![self moveEngineHighlightToIndex:target]) return nil;
+    for (NSDictionary *candidate in _view[@"candidates"])
+        if ([candidate[@"id"][@"index"] unsignedIntegerValue] == target) return candidate[@"id"];
+    msime_macos_diagnostic_write("adaptive_candidate_identity_sync_failed");
+    return nil;
 }
 - (void)syncPunctuation {
     if (!_session) return;
@@ -5104,6 +5188,7 @@ static __weak MSIMEInputController *MSIMEQueuedPreferenceSaver;
     return (!MSIMEVoiceProviderSocket() && [provider.lowercaseString isEqual:@"doubao"]) || [self usesLocalModelVoice];
 }
 - (void)dealloc {
+    [self stopCandidateFrameAnimation];
     [MSIMEInputSessionRecoveryPanel dismissForDelegate:self];
     [self stopEditableShiftMouseMonitoring];
     [self stopSettledScoring];
@@ -7440,6 +7525,8 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         if (event.isARepeat) return YES;
         NSDictionary *identifier = MSIMERenderedCandidateIdentity(_panel, (NSInteger)deletionSlot);
         if (!MSIMECurrentCandidateIdentity(identifier, _view)) return YES;
+        identifier = [self synchronizeAdaptiveCandidateIdentity:identifier];
+        if (!identifier) { NSBeep(); return YES; }
         NSError *error = nil;
         uint64_t generation = 0; NSUInteger index = 0;
         if (!MSIMEStrictUnsignedInteger(identifier[@"generation"], &generation) || !MSIMEStrictUnsignedIntegerValue(identifier[@"index"], &index)) return YES;
@@ -7453,8 +7540,10 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     // characters.  Let nine-key mode and modified chords reach the Engine.
     const NSEventModifierFlags candidateDigitModifiers = NSEventModifierFlagShift | NSEventModifierFlagControl |
                                                           NSEventModifierFlagOption | NSEventModifierFlagCommand;
-    const int physicalDigit = msime::mac::CandidateDigitSlotOnPage(msime::mac::PhysicalCandidateDigitSlot(event.keyCode), _appearance.pageSize);
-    NSArray *visibleCandidates = [_view[@"candidates"] isKindOfClass:NSArray.class] ? _view[@"candidates"] : @[];
+    const int physicalDigit = msime::mac::CandidateDigitSlotOnPage(msime::mac::PhysicalCandidateDigitSlot(event.keyCode),
+        [self usesAdaptiveCandidates] ? _adaptivePageCandidates.count : _appearance.pageSize);
+    NSArray *visibleCandidates = [self usesAdaptiveCandidates] ? _adaptivePageCandidates
+        : ([_view[@"candidates"] isKindOfClass:NSArray.class] ? _view[@"candidates"] : @[]);
     const NSEventModifierFlags glossModifiers = event.modifierFlags &
         (NSEventModifierFlagShift | NSEventModifierFlagControl | NSEventModifierFlagOption | NSEventModifierFlagCommand);
     if (_panel.isVisible && physicalDigit >= 0 &&
@@ -7488,7 +7577,9 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
             if (!MSIMECurrentCandidateIdentity(identifier, _view)) return YES;
             uint64_t generation = 0; NSUInteger index = 0;
             if (!MSIMEStrictUnsignedInteger(identifier[@"generation"], &generation) || !MSIMEStrictUnsignedIntegerValue(identifier[@"index"], &index)) return YES;
-            NSDictionary *selected = [_session selectGeneration:generation index:index error:nil];
+            NSDictionary *selected = [self usesAdaptiveCandidates]
+                ? [_session selectAnyCandidateGeneration:generation index:index error:nil]
+                : [_session selectGeneration:generation index:index error:nil];
             if (selected) [self apply:selected];
             return YES;
         }
@@ -7612,7 +7703,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         if (!(event.modifierFlags & NSEventModifierFlagShift) &&
             _appearance.expandCandidates && [self openExpandedCandidates]) return YES;
         if ([_appearance navigationEnabled:@"tab"]) {
-            [self apply:[_session command:(event.modifierFlags & NSEventModifierFlagShift) ? MSIME_PREVIOUS_PAGE : MSIME_NEXT_PAGE error:nil]];
+            [self apply:[self candidateCommand:(event.modifierFlags & NSEventModifierFlagShift) ? MSIME_PREVIOUS_PAGE : MSIME_NEXT_PAGE]];
             return YES;
         }
         // With candidates visible, a disabled Tab paging shortcut is still owned by the IME:
@@ -7653,7 +7744,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
              (event.keyCode == 47 && [_appearance navigationEnabled:@"comma_period"]) ||
              (event.keyCode == 121 && [_appearance navigationEnabled:@"page_up_down"]));
         if (previous || next) {
-            [self apply:[_session command:previous ? MSIME_PREVIOUS_PAGE : MSIME_NEXT_PAGE error:nil]];
+            [self apply:[self candidateCommand:previous ? MSIME_PREVIOUS_PAGE : MSIME_NEXT_PAGE]];
             return YES;
         }
     }
@@ -7897,7 +7988,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         case 125: if (![_appearance navigationEnabled:@"arrows"]) return _panel.isVisible; command = MSIME_NEXT_CANDIDATE; break;
     }
     NSDictionary *transition = nil;
-    if (command != UINT32_MAX) transition = [_session command:command error:nil];
+    if (command != UINT32_MAX) transition = [self candidateCommand:command];
     else if (event.characters.length == 1 && [event.characters characterAtIndex:0] <= 127) {
         const BOOL shift = (event.modifierFlags & NSEventModifierFlagShift) != 0;
         unichar typed = [event.characters characterAtIndex:0];
@@ -8325,6 +8416,14 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     CGFloat candidateRow = MAX(rowFloor, MSIMECandidateTextHeight(@"", font) + rowPadding);
     geometry.hasSkinLayout = layout.has_value() || userStyle.itemPaddingHorizontal.has_value();
     geometry.hidesNumber = numberScale == 0.0;
+    CGFloat numberDigitWidth = 0;
+    if (!vertical && !geometry.hidesNumber) {
+        // 比例数字也按稳定的位数留栏，不能让 3 项变成 4 项时文字起点跟着最宽字形移动。
+        for (NSUInteger digit = 0; digit < 10; ++digit) {
+            NSString *label = [NSString stringWithFormat:@"%lu", (unsigned long)digit];
+            numberDigitWidth = MAX(numberDigitWidth, [label sizeWithAttributes:@{NSFontAttributeName:numberFont}].width);
+        }
+    }
     CGFloat numberWidth = 0;
     NSUInteger index = 0;
     for (NSDictionary *candidate in candidates) {
@@ -8359,7 +8458,11 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         NSString *tip = MSIMECandidateGlossWithScriptAnnotation(gloss, scriptAnnotation);
         [tooltips addObject:tip.length ? [NSString stringWithFormat:@"%@\n%@", hanjaReadings ? text : display, tip] : display];
         NSString *number = [NSString stringWithFormat:@"%lu", (unsigned long)++index];
-        numberWidth = MAX(numberWidth, geometry.hidesNumber ? 0.0 : [number sizeWithAttributes:@{NSFontAttributeName: numberFont}].width);
+        const CGFloat labelWidth = geometry.hidesNumber ? 0.0 : vertical
+            ? [number sizeWithAttributes:@{NSFontAttributeName:numberFont}].width
+            : number.length * numberDigitWidth;
+        numberWidth = MAX(numberWidth, labelWidth);
+        geometry.numberWidths.push_back(ceil(layout ? MAX(9.0 * scale, numberWidth) : numberWidth));
         // Fallback glyphs can stand taller than the primary font; a one-line row is as tall as its tallest.
         candidateRow = MAX(candidateRow, MSIMECandidateTextHeight([text stringByAppendingString:annotation], font) + rowPadding);
     }
@@ -8372,7 +8475,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     geometry.tooltips = tooltips;
     if (columnCount && !geometry.hidesNumber) {
         NSString *number = [NSString stringWithFormat:@"%lu", (unsigned long)columnCount];
-        numberWidth = MAX(numberWidth, [number sizeWithAttributes:@{NSFontAttributeName:numberFont}].width);
+        numberWidth = MAX(numberWidth, number.length * numberDigitWidth);
     }
     const CGFloat textLeft = userStyle.itemPaddingHorizontal ? *userStyle.itemPaddingHorizontal * scale
         : layout && layout->numberInset ? MAX(5.0 * scale, MSIMESkinLengthValue(layout->numberInset, font.pointSize, scale))
@@ -8398,6 +8501,10 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
     if (userStyle.itemPaddingVertical) metrics.paddingVertical = *userStyle.itemPaddingVertical * scale;
     if (userStyle.itemSpacing) metrics.itemGap = metrics.columnGap = *userStyle.itemSpacing * scale;
     geometry.columnGap = metrics.columnGap > 0 ? metrics.columnGap : metrics.itemGap;
+    geometry.minimumColumnWidth = ceil(metrics.itemMinWidth);
+    auto unnumberedMetrics = metrics;
+    unnumberedMetrics.chrome -= ceil(numberWidth);
+    unnumberedMetrics.itemMinWidth = 0;
     std::vector<msime::candidate::CandidateItemWidths> items;
     items.reserve(candidates.count);
     CGFloat natural = 0;
@@ -8405,6 +8512,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         items.push_back(MSIMECandidateItemWidths(texts[i], annotations[i], translations[i], font, glossFont, scale));
         const CGFloat itemWidth = ceil(msime::candidate::CandidateItemNaturalWidth(items.back(), metrics, !vertical));
         geometry.naturalColumns.push_back(itemWidth);
+        geometry.unnumberedColumns.push_back(ceil(msime::candidate::CandidateItemNaturalWidth(items.back(), unnumberedMetrics, !vertical)));
         natural = vertical ? MAX(natural, itemWidth) : natural + itemWidth;
     }
     if (!vertical && items.size() > 1) natural += metrics.columnGap * static_cast<CGFloat>(items.size() - 1);
@@ -8417,12 +8525,15 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         const CGFloat screenCap = MAX(widthCap, floor(visible.size.width - 2 * MSIMECandidateScreenMargin));
         if (ceil(msime::candidate::SingleLineMinimumWidth(items, metrics)) + 2 * inset + pagerWidth <= screenCap)
             widthCap = MAX(widthCap, MIN(screenCap, natural + 2 * inset + pagerWidth));
+        if (_appearance.adaptiveCandidateCount)
+            widthCap = MIN(_appearance.candidateMaxWidth, MAX(1.0, visible.size.width - 2 * MSIMECandidateScreenMargin));
     }
     width = MIN(width, widthCap);
     if (paging) width = MAX(width, 76 * scale);
     // 共享版式用固定 160 DIP 下限，收紧取消下限；原生主题保留 7em。包与装饰的下限始终参与。
-    width = MAX(width, msime::candidate::CandidateCardMinimumWidth(font.pointSize, minimumWidth, widthCap,
-        layout ? std::optional<bool>(_candidateLayoutFitContent) : std::nullopt, scale));
+    if (vertical)
+        width = MAX(width, msime::candidate::CandidateCardMinimumWidth(font.pointSize, minimumWidth, widthCap,
+            layout ? std::optional<bool>(_candidateLayoutFitContent) : std::nullopt, scale));
     geometry.width = width;
     geometry.lineWidth = MAX(1, width - 2 * inset - pagerWidth);
     const msime::candidate::CandidatePageMeasure measure = [texts, annotations, translations, font, glossFont, scale, rowPadding](std::size_t row, msime::candidate::CandidateRun run, double runWidth) {
@@ -8532,7 +8643,7 @@ static BOOL MSIMEClaimPreferenceRecovery(NSString *directory) {
         preeditExtra = margin.top + margin.bottom + (preeditVisible && skin.canvas ? skin.canvas->lineGap.value_or(0) : 0);
         bodyRowGap = MSIMECandidateBodyRowGap(skin, preeditVisible, scale);
         _candidateLayoutGeometry = skin.layout;
-        _candidateLayoutFitContent = skin.fitContent || _appearance.candidateWindowFitContent;
+        _candidateLayoutFitContent = !_appearance.vertical || skin.fitContent || _appearance.candidateWindowFitContent;
         _skinShowsSelectedBar = skin.tokens.showSelectedBar;
         if (skin.layout && skin.layout->padding)
             skin.tokens.pad = static_cast<float>(MSIMESkinLengthValue(skin.layout->padding, font.pointSize, scale, skin.tokens.pad));
@@ -8605,6 +8716,8 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
 
 // 候选窗同步显隐：_panel.isVisible 立即是新状态，键盘和指针路由从不等动画。皮肤包写了的动效只加在图层上，见 MSIMECandidateMotion。
 - (void)hideCandidatePanel:(const char *)reason {
+    _candidateTransitionFrames = nil;
+    [self stopCandidateFrameAnimation];
     if (msime_macos_diagnostic_enabled() && _panel.isVisible) msime_macos_diagnostic_writef("candidate hide reason=%s", reason);
     _animatedHighlightSlot = 0;
     _animatedHighlightContext = nil;
@@ -8637,6 +8750,86 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     if (_canvasAnimationAnchor <= 0) _canvasAnimationAnchor = CACurrentMediaTime();
     if ([_panel.contentView isKindOfClass:MSIMECandidateChromeView.class])
         [(MSIMECandidateChromeView *)_panel.contentView setCanvasPlaybackVisible:YES anchor:_canvasAnimationAnchor];
+}
+
+- (void)setCandidateLayoutSize:(NSSize)size {
+    _candidateLayoutSize = size;
+    if (!_candidatePreviousVisible || _appearance.vertical) [_panel setContentSize:size];
+}
+
+- (NSSize)candidatePanelSize {
+    return [_panel frameRectForContentRect:NSMakeRect(0, 0, _candidateLayoutSize.width, _candidateLayoutSize.height)].size;
+}
+
+- (void)stopCandidateFrameAnimation {
+    NSViewAnimation *animation = _candidateFrameAnimation;
+    _candidateFrameAnimation = nil;
+    animation.delegate = nil;
+    [animation stopAnimation];
+    if ([_panel.contentView isKindOfClass:MSIMECandidateChromeView.class]) {
+        MSIMECandidateChromeView *content = (id)_panel.contentView;
+        content.resizingCandidateContentHeight = 0;
+        [content setNeedsLayout:YES];
+        [content layoutSubtreeIfNeeded];
+    }
+}
+
+- (void)animationDidEnd:(NSAnimation *)animation {
+    if (animation == _candidateFrameAnimation) [self stopCandidateFrameAnimation];
+}
+
+- (void)applyCandidateFrame:(NSRect)frame {
+    const BOOL animate = _candidatePreviousVisible && !_appearance.vertical &&
+        _candidatePreviousExpanded != (_expandedCandidates != nil) && !_candidateMotion.reduceMotion &&
+        !NSEqualRects(_panel.frame, frame);
+    MSIMECandidateChromeView *content = (id)_panel.contentView;
+    if (!animate) {
+        _candidateTransitionFrames = nil;
+        [_panel setFrame:frame display:YES];
+        [content layoutSubtreeIfNeeded];
+        return;
+    }
+    // NSViewAnimation 按整点更新窗口，目标也对齐整点，避免完成时再跳半点。
+    frame.origin.x = floor(frame.origin.x);
+    frame.origin.y = floor(frame.origin.y);
+    frame.size.width = ceil(frame.size.width);
+    frame.size.height = ceil(frame.size.height);
+    // 先完成目标布局，但不提前改变窗口。动画直接改变原窗口的 frame，背景、边框和阴影一起收放。
+    [content layoutSubtreeIfNeeded];
+    content.resizingCandidateContentHeight = NSHeight(content.candidateContentView.bounds);
+    content.frame = [_panel contentRectForFrameRect:_panel.frame];
+    [content setFrameOrigin:NSZeroPoint];
+    [content layoutSubtreeIfNeeded];
+    NSMutableArray<NSDictionary *> *animations = [NSMutableArray arrayWithObject:@{
+        NSViewAnimationTargetKey:_panel,
+        NSViewAnimationStartFrameKey:[NSValue valueWithRect:_panel.frame],
+        NSViewAnimationEndFrameKey:[NSValue valueWithRect:frame]}];
+    // 同一身份的候选从展开前的位置移到新位置；新出现的候选直接在目标位置。
+    for (NSView *view in MSIMECandidateControlSubviews(content)) {
+        if (![view isKindOfClass:MSIMECandidateButton.class] || view.tag < 0) continue;
+        MSIMECandidateButton *button = (id)view;
+        NSValue *previous = button.candidateID ? _candidateTransitionFrames[button.candidateID] : nil;
+        if (!previous) continue;
+        const NSRect current = [_panel convertRectToScreen:[button convertRect:button.bounds toView:nil]];
+        const NSRect old = previous.rectValue;
+        // 内容随窗口顶部移动；只补偿格子相对窗口顶部的位置，不能再次叠加整窗移动。
+        const CGFloat dx = NSMinX(old) - (NSMinX(current) - NSMinX(_panel.frame));
+        const CGFloat dy = NSMinY(old) - (NSMinY(current) - NSMaxY(_panel.frame));
+        if (fabs(dx) < 0.5 && fabs(dy) < 0.5) continue;
+        const NSPoint origin = [button.superview convertPoint:button.frame.origin toView:nil];
+        NSRect start = button.frame;
+        start.origin = [button.superview convertPoint:NSMakePoint(origin.x + dx, origin.y + dy) fromView:nil];
+        [animations addObject:@{NSViewAnimationTargetKey:button,
+            NSViewAnimationStartFrameKey:[NSValue valueWithRect:start],
+            NSViewAnimationEndFrameKey:[NSValue valueWithRect:button.frame]}];
+    }
+    _candidateTransitionFrames = nil;
+    _candidateFrameAnimation = [[NSViewAnimation alloc] initWithViewAnimations:animations];
+    _candidateFrameAnimation.duration = 0.2;
+    _candidateFrameAnimation.animationCurve = NSAnimationEaseOut;
+    _candidateFrameAnimation.animationBlockingMode = NSAnimationNonblocking;
+    _candidateFrameAnimation.delegate = self;
+    [_candidateFrameAnimation startAnimation];
 }
 
 - (MSIMEDecorationFrames *)decorationFramesForImage:(NSImage *)image path:(const std::string &)path {
@@ -8722,7 +8915,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
             }
             // 指针翻页先开一轮，见 msime_client.h 的顺序契约。
             [controller reportPointerToLifecycle];
-            [controller apply:[controller->_session command:previous ? MSIME_PREVIOUS_PAGE : MSIME_NEXT_PAGE error:nil]];
+            [controller apply:[controller candidateCommand:previous ? MSIME_PREVIOUS_PAGE : MSIME_NEXT_PAGE]];
         };
         panel.scrollHandler = nil;
         _panel = panel;
@@ -8926,7 +9119,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     size.width += deltaWidth + canvas.outer.left + canvas.outer.right + extra.left + extra.right;
     size.height += deltaHeight + canvas.outer.top + canvas.outer.bottom + extra.top + extra.bottom;
     content.frame = NSMakeRect(0, 0, size.width, size.height);
-    [_panel setContentSize:size];
+    [self setCandidateLayoutSize:size];
     [content layoutSubtreeIfNeeded];
     if (skin.canvas) [content configureCanvas:canvas assets:assets];
 }
@@ -8956,7 +9149,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     const BOOL skinDark = [currentTheme isEqual:NSAppearanceNameDarkAqua];
     auto skin = [_appearance candidateWindowSkinForDark:skinDark];
     _candidateLayoutGeometry = skin.layout;
-    _candidateLayoutFitContent = skin.fitContent || _appearance.candidateWindowFitContent;
+    _candidateLayoutFitContent = !_appearance.vertical || skin.fitContent || _appearance.candidateWindowFitContent;
     if (_renderedCandidateSkin != skin.candidateSkin) _canvasAnimationAnchor = 0;
     _renderedCandidateSkin = skin.candidateSkin;
     _renderedCandidateAnimation = skin.animation;
@@ -8992,22 +9185,40 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
 
     const NSUInteger count = _expandedCandidates.count;
     const NSUInteger columns = MAX((NSUInteger)1, (NSUInteger)_appearance.pageSize);
-    const NSUInteger rows = msime::candidate::ExpandedGridRows(count, columns);
+    // 共享卷轴的收起入口留在候选右侧；原生主题保留首行行号及其开关。
+    const BOOL skinToggle = skin.expandPanel.value_or(false) && _appearance.showsCandidateExpandButton;
+    const auto toggle = skinToggle ? [self candidateExpandToggleForSkin:skin font:font scale:scale]
+                                  : msime::mac::CandidateExpandToggleMetrics{};
+    const CGFloat scrollerPadding = MSIMEExpandedCandidateScrollerPadding(scale);
+    NSRect rowVisible = visible;
+    const CGFloat canvasExtra = skin.canvas ? msime::mac::CanvasExtraWidth(*skin.canvas, inset) : 0;
+    const auto shadowInsets = msime::mac::CandidateShadowExtraInsets([self candidateShadowForSkin:skin dark:skinDark],
+        skin.canvas ? skin.canvas->outer : msime::mac::SkinInsets{}, decorationImage ? skin.decorationTopDip : 0);
+    rowVisible.size.width = MAX(0.0, rowVisible.size.width - canvasExtra - 2 * (shadowInsets.left + shadowInsets.right));
+    // 自动适应的网格固定为最大宽度，按 `candidate_columns` 等分列，长词向上取整占多列。
+    const BOOL adaptive = [self usesAdaptiveCandidates];
+    const CGFloat adaptiveWidth = MIN(_appearance.candidateMaxWidth - canvasExtra, rowVisible.size.width - 2 * MSIMECandidateScreenMargin);
+    if (adaptive) {
+        const auto measured = [self candidatePageGeometry:_expandedCandidates font:font glossFont:glossFont
+            showSelectedBar:tokens.showSelectedBar inset:inset paging:NO visible:rowVisible
+            preeditWidth:0 minimumWidth:0 reservesGloss:NO];
+        _adaptiveExpandedRows = msime::mac::LayoutAdaptiveCandidates(measured.unnumberedColumns,
+            adaptiveWidth - 2 * inset - toggle.column() - scrollerPadding, measured.columnGap,
+            _appearance.candidateColumns, measured.numberWidths, measured.minimumColumnWidth);
+        _adaptiveExpandedGap = measured.columnGap;
+    }
+    const NSUInteger rows = adaptive ? _adaptiveExpandedRows.widths.size() : msime::candidate::ExpandedGridRows(count, columns);
     if (!rows) return NO;
     // 双拼键位图按普通候选窗一页的高度让开候选窗（updateKeymapPanel），网格比那高，会压在它上面；网格开着时先收起键位图，收起网格后的下一次重画再放回来。
     [_keymapPanel orderOut:nil];
     _expandedCursor = MIN(_expandedCursor, count - 1);
-    const NSUInteger cursorRow = _expandedCursor / columns;
+    const NSUInteger cursorRow = adaptive ? _adaptiveExpandedRows.rowFor(_expandedCursor) : _expandedCursor / columns;
     // 来源的 expand_rows 只数首行之后的网格；原生网格把当前页也计入视口。
     const NSUInteger windowRows = MIN(rows, skin.expandRows ? 1 + *skin.expandRows : msime::candidate::kExpandedGridVisibleRows);
     if (!_expandedScrollsViewport)
         _expandedFirstRow = msime::candidate::ExpandedGridFirstRow(_expandedFirstRow, cursorRow, rows, windowRows);
     _expandedFirstRow = MIN(_expandedFirstRow, rows - 1);
 
-    // 共享卷轴的收起入口留在候选右侧；原生主题保留首行行号及其开关。
-    const BOOL skinToggle = skin.expandPanel.value_or(false) && _appearance.showsCandidateExpandButton;
-    const auto toggle = skinToggle ? [self candidateExpandToggleForSkin:skin font:font scale:scale]
-                                  : msime::mac::CandidateExpandToggleMetrics{};
     const BOOL pageControls = !skin.expandPanel.value_or(false) && _appearance.showsCandidatePageNumber;
     NSFont *indicatorFont = [NSFont monospacedDigitSystemFontOfSize:MSIMECandidatePageIndicatorPointSize * scale weight:NSFontWeightRegular];
     NSString *rowIndicator = [NSString stringWithFormat:@"%lu / %lu", (unsigned long)(cursorRow + 1), (unsigned long)rows];
@@ -9019,29 +9230,26 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     const CGFloat headerHeight = headerContentHeight + preeditMargin.top + preeditMargin.bottom;
     const CGFloat preeditWidth = preedit.length ? ceil([preedit sizeWithAttributes:@{NSFontAttributeName:preeditFont}].width) + 4 * scale + MSIMEPreeditCaretGap + preeditMargin.left + preeditMargin.right : 0;
     const CGFloat headerWidth = 2 * inset + logoWidth + preeditWidth + (preedit.length && pageControls ? indicatorGap : 0) + controlsWidth;
-    const CGFloat scrollerPadding = MSIMEExpandedCandidateScrollerPadding(scale);
 
-    NSRect rowVisible = visible;
-    const CGFloat canvasExtra = skin.canvas ? msime::mac::CanvasExtraWidth(*skin.canvas, inset) : 0;
-    const auto shadowInsets = msime::mac::CandidateShadowExtraInsets([self candidateShadowForSkin:skin dark:skinDark],
-        skin.canvas ? skin.canvas->outer : msime::mac::SkinInsets{}, decorationImage ? skin.decorationTopDip : 0);
-    rowVisible.size.width = MAX(0.0, rowVisible.size.width - canvasExtra - 2 * (shadowInsets.left + shadowInsets.right));
     auto geometryForRow = [&](NSUInteger row, const std::vector<double> *sharedColumns = nullptr) {
-        const NSUInteger start = row * columns;
-        NSArray<NSDictionary *> *slice = [_expandedCandidates subarrayWithRange:NSMakeRange(start, MIN(columns, count - start))];
+        const NSUInteger start = adaptive ? _adaptiveExpandedRows.starts[row] : row * columns;
+        const NSUInteger length = adaptive ? _adaptiveExpandedRows.starts[row + 1] - start : MIN(columns, count - start);
+        NSArray<NSDictionary *> *slice = [_expandedCandidates subarrayWithRange:NSMakeRange(start, length)];
+        if (adaptive) sharedColumns = &_adaptiveExpandedRows.widths[row];
         return [self candidatePageGeometry:slice font:font glossFont:glossFont showSelectedBar:tokens.showSelectedBar
                                       inset:inset paging:NO visible:rowVisible preeditWidth:0
                                minimumWidth:MAX(0.0, MAX(skin.minWidthDip, skin.decorationWidthDip) - canvasExtra)
-                               reservesGloss:NO pagerWidth:toggle.column() expandedColumns:columns sharedColumns:sharedColumns];
+                               reservesGloss:NO pagerWidth:toggle.column() expandedColumns:adaptive ? length : columns sharedColumns:sharedColumns];
     };
     auto layouts = std::make_shared<std::vector<MSIMECandidatePageGeometry>>();
     layouts->reserve(rows);
     std::vector<CGFloat> rowOffsets{0};
     rowOffsets.reserve(rows + 1);
-    CGFloat width = headerWidth;
+    CGFloat width = adaptive ? adaptiveWidth : headerWidth;
     std::vector<double> sharedColumns(columns, 0);
     for (NSUInteger row = 0; row < rows; ++row) {
         layouts->push_back(geometryForRow(row));
+        if (adaptive) continue;
         width = MAX(width, layouts->back().width + scrollerPadding);
         for (NSUInteger slot = 0; slot < layouts->back().naturalColumns.size(); ++slot)
             sharedColumns[slot] = MAX(sharedColumns[slot], layouts->back().naturalColumns[slot]);
@@ -9060,8 +9268,10 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     }
     for (double &column : sharedColumns) column = MIN(column, cap);
     for (NSUInteger row = 0; row < rows; ++row) {
-        (*layouts)[row] = geometryForRow(row, &sharedColumns);
-        width = MAX(width, (*layouts)[row].width + scrollerPadding);
+        if (!adaptive) {
+            (*layouts)[row] = geometryForRow(row, &sharedColumns);
+            width = MAX(width, (*layouts)[row].width + scrollerPadding);
+        }
         rowOffsets.push_back(rowOffsets.back() + (*layouts)[row].rowsHeight + (row + 1 < rows ? rowGap : 0));
     }
     width = ceil(width);
@@ -9093,13 +9303,15 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     [viewport configureRowOffsets:rowOffsets width:NSWidth(viewport.frame)];
     _expandedScrollView = viewport;
     NSArray<NSDictionary *> *entries = _expandedCandidates;
+    const auto rowStarts = _adaptiveExpandedRows.starts;
     viewport.makeRow = ^NSArray<NSView *> *(NSUInteger row, CGFloat top, CGFloat documentHeight) {
         MSIMEInputController *controller = weakSelf;
         if (!controller || controller->_expandedCandidates != entries) return @[];
         const MSIMECandidatePageGeometry &geometry = (*layouts)[row];
-        const NSUInteger start = row * columns;
+        const NSUInteger start = adaptive ? rowStarts[row] : row * columns;
+        const NSUInteger length = adaptive ? rowStarts[row + 1] - start : MIN(columns, count - start);
         NSMutableArray<NSView *> *buttons = [NSMutableArray array];
-        for (NSUInteger slot = 0; slot < MIN(columns, count - start); ++slot) {
+        for (NSUInteger slot = 0; slot < length; ++slot) {
             const NSUInteger index = start + slot;
             const msime::candidate::CandidateRowLayout &cell = geometry.rows[slot];
             NSString *number = row == cursorRow ? [NSString stringWithFormat:@"%lu", (unsigned long)(slot + 1)] : @"";
@@ -9121,7 +9333,11 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     };
     viewport.manualScrollBegan = ^{
         MSIMEInputController *controller = weakSelf;
-        if (controller) controller->_expandedScrollsViewport = YES;
+        if (controller) {
+            [controller->_candidateFrameAnimation setCurrentProgress:1];
+            [controller stopCandidateFrameAnimation];
+            controller->_expandedScrollsViewport = YES;
+        }
     };
     viewport.lineScrollHandler = ^(BOOL previous) {
         [weakSelf scrollExpandedCandidatesBackwards:previous];
@@ -9188,7 +9404,11 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         [content addSubview:decoration];
     }
     [self configureCanvasForContent:content skin:skin dark:skinDark inset:inset preeditVisible:preedit.length > 0];
-    if (_panel.contentView != content) _panel.contentView = content;
+    if (_panel.contentView != content) {
+        const NSRect layoutFrame = content.frame;
+        _panel.contentView = content;
+        content.frame = layoutFrame;
+    }
     [viewport scrollToTopOffset:initialScrollTop];
     // 网格不是 Engine 的一页：清掉记下的那一页，收起后第一次重画走完整的重建，而不是在网格的按钮上原地改释义。
     _renderedCandidateView = nil;
@@ -9197,12 +9417,12 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     [self refreshCandidateSkin];
     // refreshCandidateSkin 发现明暗换了包时会整个重画一次，那一次已经把面板摆好了。
     if (_panel.contentView != content) return YES;
-    const NSSize panelSize = _panel.frame.size;
+    const NSSize panelSize = [self candidatePanelSize];
     _tallestVerticalCandidateHeight = MSIMETallestCandidateHeight(_tallestVerticalCandidateHeight, panelSize.height, false, _panel.isVisible);
     const NSPoint origin = MSIMECandidateOrigin(cursor, panelSize, visible, 0, [self candidateCardTopInset],
                                                 content.canvasOuterInsets.left + content.shadowOuterInsets.left,
                                                 content.canvasOuterInsets.bottom + content.shadowOuterInsets.bottom);
-    [_panel setFrameOrigin:origin];
+    [self applyCandidateFrame:NSMakeRect(origin.x, origin.y, panelSize.width, panelSize.height)];
     const BOOL wasVisible = _panel.isVisible;
     [self claimCandidatePanel];
     [self showCandidatePanel];
@@ -9216,8 +9436,28 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
 }
 
 - (void)renderCandidates {
+    [self stopCandidateFrameAnimation];
     const bool timed = msime_macos_diagnostic_enabled();
     const uint64_t buildStarted = timed ? clock_gettime_nsec_np(CLOCK_UPTIME_RAW) : 0;
+    _candidatePreviousVisible = _panel.isVisible;
+    _candidateLayoutSize = [_panel contentRectForFrameRect:_panel.frame].size;
+    _candidatePreviousExpanded = NO;
+    for (NSView *subview in MSIMECandidateControlsView(_panel.contentView).subviews)
+        if ([subview isKindOfClass:MSIMEExpandedCandidateScrollView.class]) _candidatePreviousExpanded = YES;
+    _candidateTransitionFrames = nil;
+    if (_candidatePreviousVisible && _candidatePreviousExpanded != (_expandedCandidates != nil) && !_appearance.vertical) {
+        NSMutableDictionary<NSDictionary *, NSValue *> *frames = [NSMutableDictionary dictionary];
+        for (NSView *view in MSIMECandidateControlSubviews(_panel.contentView)) {
+            if (![view isKindOfClass:MSIMECandidateButton.class] || view.tag < 0) continue;
+            NSDictionary *identifier = ((MSIMECandidateButton *)view).candidateID;
+            if (!identifier) continue;
+            NSRect rect = [_panel convertRectToScreen:[view convertRect:view.bounds toView:nil]];
+            rect.origin.x -= NSMinX(_panel.frame);
+            rect.origin.y -= NSMaxY(_panel.frame);
+            frames[identifier] = [NSValue valueWithRect:rect];
+        }
+        _candidateTransitionFrames = frames;
+    }
     NSDictionary *previousRenderedView = _renderedCandidateView;
     _candidateMenuToken = [NSObject new];
     [self updateKeymapPanel];
@@ -9259,7 +9499,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     const BOOL skinDark = [currentTheme isEqual:NSAppearanceNameDarkAqua];
     auto skin = [_appearance candidateWindowSkinForDark:skinDark];
     _candidateLayoutGeometry = skin.layout;
-    _candidateLayoutFitContent = skin.fitContent || _appearance.candidateWindowFitContent;
+    _candidateLayoutFitContent = !_appearance.vertical || skin.fitContent || _appearance.candidateWindowFitContent;
     if (_renderedCandidateSkin != skin.candidateSkin) _canvasAnimationAnchor = 0;
     _renderedCandidateSkin = skin.candidateSkin;
     _renderedCandidateAnimation = skin.animation;
@@ -9276,14 +9516,59 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     _skinShowsSelectedBar = geometry.showSelectedBar;
     const CGFloat inset = msime::mac::CandidateInset(geometry);
     const CGFloat verticalInset = msime::mac::CandidateVerticalInset(geometry);
+    NSFont *glossFont = [_appearance candidateFontOfSize:_appearance.translationFontSize * scale englishFirst:YES];
     id preeditValue = _view[@"preedit"];
     if (![preeditValue isKindOfClass:NSString.class]) preeditValue = _view[@"editing_text"];
     NSString *preedit = _appearance.showsCandidatePreedit && [preeditValue isKindOfClass:NSString.class] ? preeditValue : @"";
+    NSRect rowVisible = visible;
+    const CGFloat canvasExtra = skin.canvas ? msime::mac::CanvasExtraWidth(*skin.canvas, inset) : 0;
+    const auto shadowInsets = msime::mac::CandidateShadowExtraInsets([self candidateShadowForSkin:skin dark:skinDark],
+        skin.canvas ? skin.canvas->outer : msime::mac::SkinInsets{}, decorationImage ? skin.decorationTopDip : 0);
+    rowVisible.size.width = MAX(0.0, rowVisible.size.width - canvasExtra - 2 * (shadowInsets.left + shadowInsets.right));
+    // 自动适应：整份候选按宽度排成若干行，显示高亮所在的一行；`controls` 是这一行要给翻页、展开按钮让出的宽度。
+    const BOOL adaptive = [self usesAdaptiveCandidates];
+    const CGFloat adaptiveWidth = MIN(_appearance.candidateMaxWidth - canvasExtra, rowVisible.size.width - 2 * MSIMECandidateScreenMargin);
+    MSIMECandidatePageGeometry adaptiveMeasure;
+    auto paginate = [&](CGFloat controls) {
+        _adaptivePages = msime::mac::LayoutAdaptiveCandidates(adaptiveMeasure.unnumberedColumns, adaptiveWidth - 2 * inset - controls,
+            adaptiveMeasure.columnGap, 0, adaptiveMeasure.numberWidths, adaptiveMeasure.minimumColumnWidth);
+        NSUInteger highlight = 0;
+        for (NSUInteger index = 0; index < _adaptiveCandidates.count; ++index)
+            if (MSIMEStrictBoolean(_adaptiveCandidates[index][@"highlighted"])) { highlight = index; break; }
+        _adaptivePage = _adaptivePages.rowFor(highlight);
+        const NSUInteger start = _adaptivePages.starts[_adaptivePage];
+        _adaptivePageCandidates = candidates =
+            [_adaptiveCandidates subarrayWithRange:NSMakeRange(start, _adaptivePages.starts[_adaptivePage + 1] - start)];
+    };
+    if (adaptive) {
+        NSError *error = nil;
+        NSDictionary *snapshot = [_session allCandidatesWithError:&error];
+        if (snapshot && ![snapshot[@"generation"] isEqual:_view[@"generation"]]) {
+            NSDictionary *updated = [_session viewWithError:&error];
+            if (updated) _view = updated;
+        }
+        NSArray *entries = [self expandedCandidatesFromSnapshot:snapshot];
+        if (!entries.count) {
+            msime_macos_diagnostic_write("adaptive_candidates_snapshot_failed");
+            [self hideCandidatePanel:"adaptive_snapshot_failed"];
+            return;
+        }
+        _adaptiveCandidates = entries;
+        adaptiveMeasure = [self candidatePageGeometry:entries font:font glossFont:glossFont
+            showSelectedBar:geometry.showSelectedBar inset:inset paging:NO visible:visible
+            preeditWidth:0 minimumWidth:0 reservesGloss:YES];
+        paginate(0);
+    } else {
+        _adaptiveCandidates = nil;
+        _adaptivePageCandidates = nil;
+        _adaptivePages = {};
+    }
     NSFont *preeditFont = MSIMECandidatePreeditFont(_appearance);
     CGFloat preeditHeight = preedit.length ? MAX(22.0 * scale, MSIMECandidateTextHeight(preedit, preeditFont) + 6.0 * scale) : 0;
     NSUInteger page = 0; NSUInteger pageCount = 0;
     MSIMEStrictUnsignedIntegerValue(_view[@"page"], &page);
     MSIMEStrictUnsignedIntegerValue(_view[@"page_count"], &pageCount);
+    if (adaptive) { page = _adaptivePage; pageCount = _adaptivePages.widths.size(); }
     const BOOL paging = pageCount > 1;
     // 用户开关控制所有鼠标翻页按钮；共享版式把它们放进列表，显式关闭时也不回退到首行。
     const BOOL pageControls = paging && _appearance.showsCandidatePageNumber && !skin.pageArrows.has_value();
@@ -9298,15 +9583,21 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     const CGFloat headerRow = MSIMECandidateHeaderHeight * scale;
     const CGFloat arrowWidth = MSIMECandidatePageArrowWidth * scale;
     const CGFloat indicatorGap = MSIMECandidatePageIndicatorGap * scale;
-    NSFont *pageIndicatorFont = [NSFont monospacedDigitSystemFontOfSize:MSIMECandidatePageIndicatorPointSize * scale weight:NSFontWeightRegular];
-    NSString *pageIndicator = pageControls ? [NSString stringWithFormat:@"%lu / %lu", (unsigned long)(page + 1), (unsigned long)pageCount] : @"";
-    const CGFloat pageIndicatorWidth = pageControls ? ceil([pageIndicator sizeWithAttributes:@{NSFontAttributeName: pageIndicatorFont}].width) : 0;
     // 共享卷轴固定占候选右侧窄列；原生主题的首行与紧凑按钮保持既有规则。
     const BOOL expandable = _appearance.showsCandidateExpandButton && [self expandedCandidatesOffered];
     const BOOL skinExpand = expandable && skin.expandPanel.value_or(false);
     const auto toggle = skinExpand ? [self candidateExpandToggleForSkin:skin font:font scale:scale]
                                   : msime::mac::CandidateExpandToggleMetrics{};
     const BOOL compactExpand = expandable && !skinExpand && !pageControls && !preedit.length && !logo;
+    // 要翻页才知道行内得让出哪些按钮，让出后只会更窄、页数不会变少，所以再排一次即可。
+    if (adaptive && paging) {
+        paginate(listPager.column + toggle.column() + (compactExpand ? arrowWidth : 0));
+        page = _adaptivePage;
+        pageCount = _adaptivePages.widths.size();
+    }
+    NSFont *pageIndicatorFont = [NSFont monospacedDigitSystemFontOfSize:MSIMECandidatePageIndicatorPointSize * scale weight:NSFontWeightRegular];
+    NSString *pageIndicator = pageControls ? [NSString stringWithFormat:@"%lu / %lu", (unsigned long)(page + 1), (unsigned long)pageCount] : @"";
+    const CGFloat pageIndicatorWidth = pageControls ? ceil([pageIndicator sizeWithAttributes:@{NSFontAttributeName: pageIndicatorFont}].width) : 0;
     const CGFloat pageControlsWidth = (pageControls ? pageIndicatorWidth + indicatorGap + 2 * arrowWidth : 0) + (expandable && !skinExpand && !compactExpand ? arrowWidth : 0);
     const auto preeditMargin = MSIMECandidatePreeditMargins(skin, preedit.length > 0, scale);
     const CGFloat bodyRowGap = MSIMECandidateBodyRowGap(skin, preedit.length > 0, scale);
@@ -9316,7 +9607,6 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         ? static_cast<CGFloat>(std::clamp(*skin.layout->numberScale, 0.0, 2.0))
         : MSIMECandidateNumberScale;
     NSFont *numberFont = MSIMECandidateNumberFont(font, numberScale);
-    NSFont *glossFont = [_appearance candidateFontOfSize:_appearance.translationFontSize * scale englishFirst:YES];
     const CGFloat preeditWidth = preedit.length ? ceil([preedit sizeWithAttributes:@{NSFontAttributeName:preeditFont}].width) + 4 * scale + MSIMEPreeditCaretGap + preeditMargin.left + preeditMargin.right : 0;
     // 首行在拼音之后接一段输入状态（竖线隔开），右侧在翻页控件之前放云候选预览和一枝小装饰；三样都只在显示拼音时出现。
     NSString *statusText = preedit.length ? MSIMECandidateStatusText([self schemeTitleForScheme:[self viewSchemeName]], _view,
@@ -9338,17 +9628,24 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     const CGFloat ornamentGap = 8 * scale;
     // 这三样只占卡片已有的宽度，不计入最小宽度：云候选是异步到的，算进去的话回答一到卡片就突然变宽，中英切换也会让卡片跟着伸缩。
     const CGFloat headerWidth = preedit.length || pageControls || logo ? 2 * inset + logoWidth + preeditWidth + (preedit.length && pageControlsWidth ? indicatorGap : 0) + pageControlsWidth : 0;
-    NSRect rowVisible = visible;
-    const CGFloat canvasExtra = skin.canvas ? msime::mac::CanvasExtraWidth(*skin.canvas, inset) : 0;
-    const auto shadowInsets = msime::mac::CandidateShadowExtraInsets([self candidateShadowForSkin:skin dark:skinDark],
-        skin.canvas ? skin.canvas->outer : msime::mac::SkinInsets{}, decorationImage ? skin.decorationTopDip : 0);
-    rowVisible.size.width = MAX(0.0, rowVisible.size.width - canvasExtra - 2 * (shadowInsets.left + shadowInsets.right));
     if (compactExpand) rowVisible.size.width = MAX(0.0, rowVisible.size.width - arrowWidth);
-    const MSIMECandidatePageGeometry pageGeometry =
-        [self candidatePageGeometry:candidates font:font glossFont:glossFont showSelectedBar:geometry.showSelectedBar inset:inset
-                             paging:pageControls visible:rowVisible preeditWidth:headerWidth
+    MSIMECandidatePageGeometry pageGeometry;
+    if (adaptive) {
+        // 列宽已在分页时量好（超宽的单项已收窄到整行）；需要翻页时固定为最大宽度，一行放得下时收紧到内容。
+        std::vector<double> columns = _adaptivePages.widths[_adaptivePage];
+        pageGeometry = [self candidatePageGeometry:candidates font:font glossFont:glossFont
+            showSelectedBar:geometry.showSelectedBar inset:inset paging:NO visible:rowVisible preeditWidth:0
+            minimumWidth:0 reservesGloss:YES pagerWidth:listPager.column + toggle.column()
+            expandedColumns:columns.size() sharedColumns:&columns];
+        const CGFloat cap = adaptiveWidth - (compactExpand ? arrowWidth : 0);
+        pageGeometry.width = paging ? cap : MIN(cap, pageGeometry.width);
+    } else {
+        pageGeometry = [self candidatePageGeometry:candidates font:font glossFont:glossFont showSelectedBar:geometry.showSelectedBar inset:inset
+                             paging:pageControls visible:rowVisible
+                       preeditWidth:vertical ? headerWidth : (pageControlsWidth + logoWidth > 0 ? 2 * inset + pageControlsWidth + logoWidth : 0)
                        minimumWidth:MAX(0.0, MAX(skin.minWidthDip, skin.decorationWidthDip) - canvasExtra)
                        reservesGloss:YES pagerWidth:listPager.column + toggle.column()];
+    }
     // 共享窄列可含半点 DIP，先取整总宽，避免 AppKit 调整内容宽度后按钮离右边多出半点。
     const CGFloat width = skinExpand ? ceil(pageGeometry.width) : pageGeometry.width + (compactExpand ? arrowWidth : 0);
     MSIMECandidatePanel *candidatePanel = [self candidatePanelWithAppearance:candidateAppearance];
@@ -9429,7 +9726,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
             content.needsDisplay = YES;
             _renderedCandidateView = [_view copy];
             [self refreshCandidateSkin];
-            const NSSize panelSize = _panel.frame.size;
+            const NSSize panelSize = [self candidatePanelSize];
             _tallestVerticalCandidateHeight = MSIMETallestCandidateHeight(_tallestVerticalCandidateHeight, panelSize.height, vertical, _panel.isVisible);
             [_panel setFrameOrigin:MSIMECandidateOrigin(cursor, panelSize, visible, vertical ? _tallestVerticalCandidateHeight : 0,
                 [self candidateCardTopInset], content.canvasOuterInsets.left + content.shadowOuterInsets.left,
@@ -9618,18 +9915,22 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
         [content addSubview:decoration];
     }
     [self configureCanvasForContent:content skin:skin dark:skinDark inset:inset preeditVisible:preedit.length > 0];
-    if (_panel.contentView != content) _panel.contentView = content;
+    if (_panel.contentView != content) {
+        const NSRect layoutFrame = content.frame;
+        _panel.contentView = content;
+        content.frame = layoutFrame;
+    }
     _renderedCandidateView = [_view copy];
     content.appearanceTarget = self;
     content.appearanceAction = @selector(refreshCandidateSkin);
     [self refreshCandidateSkin];
-    const NSSize panelSize = _panel.frame.size;
+    const NSSize panelSize = [self candidatePanelSize];
     // Every hide path orders the panel out, so a panel that is not on screen yet starts a fresh flip memory.
     _tallestVerticalCandidateHeight = MSIMETallestCandidateHeight(_tallestVerticalCandidateHeight, panelSize.height, vertical, _panel.isVisible);
     const NSPoint origin = MSIMECandidateOrigin(cursor, panelSize, visible, vertical ? _tallestVerticalCandidateHeight : 0,
         [self candidateCardTopInset], content.canvasOuterInsets.left + content.shadowOuterInsets.left,
         content.canvasOuterInsets.bottom + content.shadowOuterInsets.bottom);
-    [_panel setFrameOrigin:origin];
+    [self applyCandidateFrame:NSMakeRect(origin.x, origin.y, panelSize.width, panelSize.height)];
     const BOOL wasVisible = _panel.isVisible;
     [self claimCandidatePanel];
     [self showCandidatePanel];
@@ -9823,7 +10124,8 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     if (!MSIMEStrictUnsignedInteger(identifier[@"generation"], &generation) || !MSIMEStrictUnsignedIntegerValue(identifier[@"index"], &index)) return;
     // 指针点选先开一轮；上屏音和上屏特效照常来自这次派发。
     [self reportPointerToLifecycle];
-    [self apply:[_session selectGeneration:generation index:index error:nil]];
+    [self apply:[self usesAdaptiveCandidates] ? [_session selectAnyCandidateGeneration:generation index:index error:nil]
+                                              : [_session selectGeneration:generation index:index error:nil]];
 }
 
 // 鼠标点网格里的候选。按钮可能是上一次重画留下的，所以它记着的身份要和网格此刻同一位置上的候选一致。
@@ -9889,7 +10191,8 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     // Windows hides deletion for one Unicode scalar, including supplementary Han.
     if ([text isKindOfClass:NSString.class] && [text lengthOfBytesUsingEncoding:NSUTF32LittleEndianStringEncoding] / 4 > 1) {
         NSMenuItem *remove = item(@"删除", 1);
-        NSArray *candidates = MSIMEReorderedPinnedCandidates(_view[@"candidates"], MSIMECandidatePinCode(_view));
+        NSArray *candidates = [self usesAdaptiveCandidates] ? _adaptivePageCandidates
+            : MSIMEReorderedPinnedCandidates(_view[@"candidates"], MSIMECandidatePinCode(_view));
         NSUInteger slot = [candidates isKindOfClass:NSArray.class] ? [candidates indexOfObjectIdenticalTo:candidate] : NSNotFound;
         if (slot < 8) {
             remove.keyEquivalent = [NSString stringWithFormat:@"%lu", (unsigned long)slot + 1];
@@ -9912,6 +10215,11 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     if ((item.tag < 0 || item.tag > 2) && (item.tag < 11 || item.tag > 15)) return;
     // 候选右键菜单的这几项都是指针操作引起的派发，和点选候选一样先开一轮，见 msime_client.h 的顺序契约。
     [self reportPointerToLifecycle];
+    if ([self usesAdaptiveCandidates]) {
+        identifier = [self synchronizeAdaptiveCandidateIdentity:identifier];
+        if (!identifier) { NSBeep(); return; }
+        generation = [identifier[@"generation"] unsignedLongLongValue];
+    }
     NSError *error = nil;
     NSDictionary *result = nil;
     switch (item.tag) {
@@ -9945,6 +10253,7 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     if (!MSIMEUnsignedCandidateIdentityValue(_view[@"page_count"])) return;
     NSUInteger page = 0; NSUInteger count = 0;
     if (!MSIMEStrictUnsignedIntegerValue(_view[@"page"], &page) || !MSIMEStrictUnsignedIntegerValue(_view[@"page_count"], &count)) return;
+    if ([self usesAdaptiveCandidates]) { page = _adaptivePage; count = _adaptivePages.widths.size(); }
     if (count == 0 || page >= count) return;
     // 先定下要派发的命令，报告和派发共用同一个条件，免得两边各写一份、日后改出分歧。
     uint32_t command = UINT32_MAX;
@@ -9953,6 +10262,6 @@ static const char *MSIMEMotionPresetName(msime::mac::SkinAnimationPreset preset)
     if (command == UINT32_MAX) return;
     // 指针翻页先开一轮。
     [self reportPointerToLifecycle];
-    [self apply:[_session command:command error:nil]];
+    [self apply:[self candidateCommand:command]];
 }
 @end
