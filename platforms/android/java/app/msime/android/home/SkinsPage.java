@@ -333,7 +333,7 @@ public final class SkinsPage extends ReloadingDetailPage {
                 if (output == null) return "写入文件失败，请重新选择位置。";
                 output.write(TextPolicy.utf8Bytes(json + "\n"));
                 return "已导出";
-            } catch (java.io.IOException | SecurityException error) {
+        } catch (java.io.IOException | RuntimeException error) {
                 return "写入文件失败，请重新选择位置。";
             }
         }, message -> MsToast.show(requireContext(), message));
