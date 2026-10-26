@@ -2,9 +2,9 @@
 
 插件是只含数据的文件夹：一份 `plugin.toml` 清单，加上清单用到的音频或数据文件和可选的说明文字。这份指南里的插件不能带任何可执行内容，也不能申请权限；输入法按固定规则校验每个包，不符合规则的包整包拒绝，不会只装一半。
 
-例外是 macOS、Linux 和 Windows 上实验中的脚本插件（`script`）：它带一个 WebAssembly 模块、在清单里申请能力，导入后不运行，要在设置的「插件 → 脚本插件（实验）」里逐项授权才启用，也不能发布到社区。这份指南不覆盖它。
+例外是 macOS、Linux 和 Windows 上实验中的脚本插件（`script`）：它带一个 WebAssembly 模块、在清单里申请能力，导入后不运行，要在设置的「插件 → 脚本插件（实验）」里逐项授权才启用，也不能发布到社区。它的规则单独写在后面的[脚本插件](#脚本插件kind--script)一节，下面几节的「不能带可执行内容、不能申请权限」只对数据类插件成立。
 
-这份指南覆盖八种类型：音效包（`sound`）、音乐包（`music`）、指令表（`command_table`）、特效包（`effect`）、短语表（`phrase_table`）、辅助码表（`helpcode`）、单词本（`wordbook`）和符号集（`symbol_set`）。下面的限制都取自 `crates/client-services/src/plugins/` 里的代码，两者不一致时以代码为准。`crates/client-services/tests/fixtures/plugin-packs/` 里有每种新类型能通过和会被拒绝的示例包，社区后端用同一批包校验。
+数据类插件有八种：音效包（`sound`）、音乐包（`music`）、指令表（`command_table`）、特效包（`effect`）、短语表（`phrase_table`）、辅助码表（`helpcode`）、单词本（`wordbook`）和符号集（`symbol_set`）。下面的限制都取自 `crates/client-services/src/plugins/` 里的代码，两者不一致时以代码为准。`crates/client-services/tests/fixtures/plugin-packs/` 里有每种新类型能通过和会被拒绝的示例包，社区后端用同一批包校验。
 
 - 想先看懂插件系统怎么工作：[plugin-architecture.html](plugin-architecture.html) 是一页原理图，讲两种插件、生命周期事件和安全模型，底部有给开发者的模块分层和调用时序。GitHub 上只显示它的源码，下载后用浏览器打开；它由 `scripts/generate_plugin_architecture.py` 生成，改图请改脚本。
 - 想直接开始：复制 [plugin-template](plugin-template/)，这是一个能通过校验的最小按键音效包。
@@ -352,7 +352,7 @@ items = ["→", "←", "⇒"]
 - 只在桌面：macOS 的输入法进程、Windows 的 `MetasequoiaImeServer`、Linux 的 IBus 引擎进程和 Fcitx5 addon。Windows 上被注入各个应用的 TSF 模块里从不运行脚本。iOS、Android 和鸿蒙（包括鸿蒙电脑）不认这个类型，导入时报「不支持这个 schema_version」。
 - macOS、Linux 和 Windows 的发布构建都运行脚本。Windows 上以管理员身份运行的窗口里从不运行脚本。
 - 授权文件 `<数据目录>/plugins/script-grants.json` 在用户可写的目录下，不签名：同一用户下的其他程序能伪造一条授权，让脚本在输入法里运行。授权页上写明了这一点；只装你信得过的脚本包。
-- 输入法要接入生命周期事件之后才会把事件交给脚本，各平台陆续接入。
+- 四个桌面宿主（macOS 输入法进程、Windows Server、IBus 引擎、Fcitx5 addon）的每个会话都接入了生命周期事件，脚本在这四处都能收到事件；设置应用和 MCP 不接入，从不运行脚本。
 - 在设置的「插件 → 我的插件」里导入（macOS、Linux 和 Windows；Windows 是它自己的设置窗口里的同一页）。导入后插件默认停用：在「脚本插件（实验）」里打开它，在授权对话框里逐项勾选清单申请的能力才会运行，几个脚本插件的执行顺序也在那里调整。授权绑定在包的内容哈希上，清单或模块改了一个字节，授权就作废，页面显示「已更新，需要重新授权」。
 - 不能发布到社区库：「发布我的插件」不列出脚本包，社区后端也只收 `schema_version = 1` 的包。只能本地导入。
 
