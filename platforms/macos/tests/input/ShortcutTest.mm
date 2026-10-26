@@ -581,9 +581,11 @@ static void TestKeyLatencyIsLoggedWithoutTheKey() {
 @interface TestCandidatePanel : NSObject
 @property(nonatomic, getter=isVisible) BOOL visible;
 @property(nonatomic) CGFloat alphaValue;
+@property(nonatomic) NSRect frame;
 @property(nonatomic, readonly) NSView *contentView;
 @end
 @implementation TestCandidatePanel
+- (NSRect)contentRectForFrameRect:(NSRect)frame { return frame; }
 - (void)orderOut:(id)sender { (void)sender; self.visible = NO; }
 - (instancetype)animator { return self; }
 @end
@@ -598,6 +600,13 @@ static void TestKeyLatencyIsLoggedWithoutTheKey() {
 @end
 
 @implementation ModeController
+- (void)applyCandidateFrame:(NSRect)frame {
+    [super applyCandidateFrame:frame];
+    // 快捷键夹具检查目标布局；原窗口的中间帧由候选布局测试单独覆盖。
+    NSViewAnimation *animation = [self valueForKey:@"candidateFrameAnimation"];
+    [animation setCurrentProgress:1];
+    [self stopCandidateFrameAnimation];
+}
 - (void)prepareSession {
     ++self.preparationCalls;
     if ([self valueForKey:@"session"]) [super prepareSession];
@@ -8944,7 +8953,7 @@ show_selected_bar = true
             MSIMECandidateChromeView *chrome = (id)panel.contentView;
             MSIMECandidateDecorationView *decoration = (id)chrome.subviews.lastObject;
             assert([decoration isKindOfClass:MSIMECandidateDecorationView.class] && decoration.image);
-            assert(panel.frame.size.width >= 240);
+            if (vertical.boolValue) assert(panel.frame.size.width >= 240);
             // The 48pt band above the card is transparent and the square fixture, too tall at 120pt wide for the band plus the card's inset it overhangs, shrinks whole to that room: flush with the window's top, the inset in from the card's right edge.
             const CGFloat overhang = decoration.frame.size.height - 48;
             assert(chrome.cardTopInset == 48 && overhang > 0 && decoration.frame.size.width == decoration.frame.size.height);
@@ -8978,7 +8987,7 @@ show_selected_bar = true
         [controller setValue:[widthView copy] forKey:@"view"];
         [controller renderCandidates];
         const CGFloat narrowWidth = panel.frame.size.width;
-        assert(panel.requestedVisible && narrowWidth >= 240);
+        assert(panel.requestedVisible && narrowWidth > 0 && narrowWidth < 240);
         widthView[@"candidates"] = @[@{@"text": @"合成候选窗口宽度回归测试用长文本", @"highlighted": @YES}];
         [controller setValue:[widthView copy] forKey:@"view"];
         [controller renderCandidates];
