@@ -1664,8 +1664,8 @@ async fn load_preferences(
         }
         Ok(snapshot)
     })
-        .await
-        .map_err(|_| CommandError { code: "storage" })?
+    .await
+    .map_err(|_| CommandError { code: "storage" })?
 }
 
 #[cfg(target_os = "macos")]
