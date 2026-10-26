@@ -221,6 +221,7 @@ public final class MSIMEInputService extends InputMethodService {
     private TextView rowSpacingValue;
     private TextView keyboardHeightValue;
     ClipboardHistoryStore clipboardHistory;
+    ClipboardModePolicy.Mode clipboardMode = ClipboardModePolicy.Mode.MAIN;
     boolean clipboardHistoryEnabled;
     CloudClipboardPanelPolicy.Tab clipboardTab = CloudClipboardPanelPolicy.Tab.LOCAL;
     CloudClipboardPanelPolicy.Status cloudClipboardStatus = CloudClipboardPanelPolicy.Status.LOADING;
@@ -2615,6 +2616,10 @@ public final class MSIMEInputService extends InputMethodService {
      */
     private void applyClipboardPreference(JSONObject preferences,
             ClipboardHistoryRetentionPolicy.Source source) {
+        if (clipboardMode == ClipboardModePolicy.Mode.VISITOR) {
+            clipboardHistoryEnabled = true;
+            return;
+        }
         Boolean preference = preferences == null ? null
             : preferences.optBoolean("clipboard_history", false);
         clipboardHistoryEnabled = ClipboardHistoryRetentionPolicy.enabledAfter(
@@ -2949,7 +2954,8 @@ public final class MSIMEInputService extends InputMethodService {
         boolean nextVoiceEnabled = nextVoice == null || nextVoice.optBoolean("enabled", true);
         String nextVoiceLanguage = nextVoice == null ? "zh-CN"
             : InputViewValuePolicy.textOr(nextVoice, "language", "zh-CN");
-        boolean nextClipboard = preferences.optBoolean("clipboard_history", false);
+        boolean nextClipboard = clipboardMode == ClipboardModePolicy.Mode.VISITOR
+            || preferences.optBoolean("clipboard_history", false);
         boolean nextCloudCandidates = preferences.optBoolean("cloud_candidates", true);
         JSONObject nextAiAssistant = preferences.optJSONObject("ai_assistant");
         boolean nextAiCandidates = nextAiAssistant != null
@@ -5946,6 +5952,26 @@ public final class MSIMEInputService extends InputMethodService {
         cloudClipboardSessionId = "";
         cloudClipboardItems = java.util.List.of();
         cloudClipboardStatus = CloudClipboardPanelPolicy.Status.LOADING;
+    }
+
+    /** 切换访客剪贴板并立即换用隔离存储；模式只写布尔状态，不记录剪贴板内容。 */
+    void toggleClipboardMode(KeyboardIconKey button) {
+        ClipboardModePolicy.Mode next = clipboardMode == ClipboardModePolicy.Mode.VISITOR
+            ? ClipboardModePolicy.Mode.MAIN : ClipboardModePolicy.Mode.VISITOR;
+        clipboardMode = next;
+        ClipboardModeStore.save(this, next);
+        clipboardHistory = new ClipboardHistoryStore(
+            ClipboardModePolicy.directory(getFilesDir(), next));
+        closeClipboardHistory();
+        if (button != null) {
+            button.setKind(next == ClipboardModePolicy.Mode.VISITOR
+                ? KeyboardIconKey.Kind.TRASH : KeyboardIconKey.Kind.RETURN);
+            final ClipboardModePolicy.Mode changed = next;
+            main.postDelayed(() -> {
+                if (button == enterButton && clipboardMode == changed)
+                    button.setKind(KeyboardIconKey.Kind.RETURN);
+            }, 600L);
+        }
     }
 
     void closeSchemePicker() {
@@ -9029,9 +9055,10 @@ public final class MSIMEInputService extends InputMethodService {
         loadFeedbackPreferences();
         refreshLocalSettings();
         File files = getFilesDir();
+        clipboardMode = ClipboardModeStore.load(this);
         // The shared store keeps its file under this directory, which is the same one the settings
         // page hands the shared entry; both sides therefore read one history.
-        clipboardHistory = new ClipboardHistoryStore(files);
+        clipboardHistory = new ClipboardHistoryStore(ClipboardModePolicy.directory(files, clipboardMode));
         voiceResultStore = files == null ? null
             : new VoiceResultStore(files.toPath().resolve("voice-handoff"));
         communityReplyLibrary = files == null ? null : new CommunityReplyLibrary(files.toPath());
