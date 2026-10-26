@@ -2850,6 +2850,23 @@ pub fn valid_relay_token(token: &str) -> bool {
     (MIN_TOKEN_CHARS..=MAX_TOKEN_CHARS).contains(&token.len()) && crate::is_ascii_graphic(token)
 }
 
+const MAX_WEBDAV_CREDENTIAL_BYTES: usize = 256;
+
+/// WebDAV 账号是否可用：1 到 256 字节，不含控制字符，也不含冒号（HTTP Basic 鉴权用冒号分隔账号和密码）。坚果云的账号是登录邮箱。
+pub fn valid_webdav_username(username: &str) -> bool {
+    !username.is_empty()
+        && username.len() <= MAX_WEBDAV_CREDENTIAL_BYTES
+        && !username.contains(':')
+        && !username.chars().any(char::is_control)
+}
+
+/// WebDAV 应用密码是否可用：1 到 256 字节，不含控制字符。
+pub fn valid_webdav_password(password: &str) -> bool {
+    !password.is_empty()
+        && password.len() <= MAX_WEBDAV_CREDENTIAL_BYTES
+        && !password.chars().any(char::is_control)
+}
+
 #[doc(hidden)]
 pub fn parse_relay_url(url: &str) -> Option<url::Url> {
     if url.is_empty() || !crate::text::is_bounded_text(url, MAX_URL_BYTES) {
