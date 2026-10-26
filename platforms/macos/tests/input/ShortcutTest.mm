@@ -290,6 +290,10 @@ static void CheckMenu(NSMenu *menu, id controller) {
     self.requestedPageSize = size;
     return nil;
 }
+- (NSDictionary *)setDisplayPageGeneration:(uint64_t)generation indices:(NSArray<NSNumber *> *)indices error:(NSError **)error {
+    (void)generation; (void)indices; (void)error;
+    return @{@"applied": @YES};
+}
 - (NSDictionary *)typeASCII:(uint8_t)ascii shift:(BOOL)shift error:(NSError **)error {
     (void)error;
     ++self.asciiCalls;
@@ -4542,6 +4546,41 @@ static void TestExpandedCandidatePartialSelection() {
         assert(![controller valueForKey:@"expandedCandidates"]);
         assert([[controller valueForKey:@"view"][@"editing_text"] isEqual:@"syntheticnew"]);
     }
+    MSIMERemoveTestPreferenceSuite(defaults, suite);
+}
+
+// 横排候选数量自适应重画时，完整候选快照可能没有当前页的高亮标记；宿主仍应以当前 view 的高亮候选保留页码。
+static void TestAdaptiveCandidatePaginationKeepsCurrentPage() {
+    NSString *suite = [@"msime.adaptive-pagination." stringByAppendingString:NSUUID.UUID.UUIDString];
+    NSUserDefaults *defaults = [[NSUserDefaults alloc] initWithSuiteName:suite];
+    MSIMEAppearancePreferences *prefs = [[MSIMEAppearancePreferences alloc] initWithDefaults:defaults];
+    prefs.vertical = NO;
+    prefs.pageSize = 5;
+    [prefs applySharedCandidatePreferences:@{@"candidate_count_mode": @"adaptive", @"candidate_max_width": @180}];
+    assert(prefs.adaptiveCandidateCount);
+
+    ModeController *controller = [ModeController alloc];
+    ExpandedGridSession *session = [ExpandedGridSession new];
+    session.generation = 11;
+    session.total = 23;
+    session.pageSize = 5;
+    session.prefix = @"候选词候选词候选词候选词候选词候选词";
+    session.editing = @"liangzhe";
+    ShortcutClient *client = [ShortcutClient new];
+    client.caret = NSMakeRect(200, 400, 1, 18);
+    HiddenCandidatePanel *panel = [[HiddenCandidatePanel alloc] init];
+    [controller setValue:prefs forKey:@"appearance"];
+    [controller setValue:session forKey:@"session"];
+    [controller setValue:client forKey:@"activeClient"];
+    [controller setValue:panel forKey:@"panel"];
+
+    session.highlighted = 5;
+    [controller setValue:[session gridView] forKey:@"view"];
+    [controller renderCandidates];
+    assert(panel.isVisible);
+    NSDictionary *snapshot = [session allCandidatesWithError:nil];
+    assert(MSIMEAdaptiveHighlightIndex(snapshot[@"candidates"], [session gridView]) == 5);
+
     MSIMERemoveTestPreferenceSuite(defaults, suite);
 }
 
@@ -13037,6 +13076,7 @@ int main(int argc, char **argv) {
             TestExpandedCandidateGrid();
             TestExpandedCandidateGridGeneration();
             TestExpandedCandidatePartialSelection();
+            TestAdaptiveCandidatePaginationKeepsCurrentPage();
             return 0;
         }
         if (argc == 2 && std::string(argv[1]) == "--session-recovery") {
