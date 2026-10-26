@@ -3808,7 +3808,7 @@ pub struct HelpcodePreferences {
     /// Linux 的辅助码前导键；空串保留 Shift 加字母。
     #[serde(default)]
     pub trigger_key: String,
-    /// Windows `shuangpin_helpcode`/`quanpin_helpcode` 出厂关、门禁 pin 出厂开，本仓沿用开；缺这个键的旧文档读作开。
+    /// 已有辅助码对象缺这个键时仍读作开；新建偏好的全拼默认开、双拼默认关，保留用户已有设置。
     #[serde(default = "enabled_by_default")]
     pub enabled: bool,
     pub schema: HelpcodeSchema,
@@ -3955,7 +3955,7 @@ pub fn valid_model_mirror(mirror: &str) -> bool {
 
 fn default_shuangpin_helpcode() -> HelpcodePreferences {
     HelpcodePreferences {
-        enabled: true,
+        enabled: false,
         schema: HelpcodeSchema::Lantian,
         trigger_key: String::new(),
         show_in_candidate_window: true,

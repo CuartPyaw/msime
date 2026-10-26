@@ -2247,11 +2247,17 @@ fn mixed_symbols_defaults_on() {
     assert!(!mixed.symbols);
 }
 
-/// 辅助码开关（Windows v0.11.1 出厂关、门禁 pin 出厂开）本仓出厂值为开，缺键读作开；差异已记录。文档里写明的值原样生效。
+/// 全拼辅助码默认开、双拼默认关；已有对象缺开关时仍读作开，写明的值原样生效。
 #[test]
-fn helpcode_enabled_defaults_on() {
+fn helpcode_enabled_defaults_by_family() {
     assert!(HelpcodePreferences::default().enabled);
-    assert!(default_quanpin_helpcode().enabled && default_shuangpin_helpcode().enabled);
+    let preferences = Preferences::default();
+    assert!(preferences.quanpin_helpcode.enabled);
+    assert!(!preferences.shuangpin_helpcode.enabled);
+    let mut value = serde_json::to_value(&preferences).unwrap();
+    value.as_object_mut().unwrap().remove("shuangpin_helpcode");
+    let missing: Preferences = serde_json::from_value(value).unwrap();
+    assert!(!missing.shuangpin_helpcode.enabled);
     let mut value = serde_json::to_value(default_shuangpin_helpcode()).unwrap();
     value.as_object_mut().unwrap().remove("enabled");
     let helpcode: HelpcodePreferences = serde_json::from_value(value).unwrap();
